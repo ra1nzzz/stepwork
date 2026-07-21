@@ -44,7 +44,9 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "ASYNC", "ANN"]
-ignore = ["ANN401"]
+# ANN401: 允许未标注返回/参数（已有 mypy strict 把关）
+# UP045: Optional[X] 与 X | None 的风格二选一，交由 mypy 统一；避免 churn
+ignore = ["ANN401", "UP045"]
 
 [tool.mypy]
 python_version = "3.12"

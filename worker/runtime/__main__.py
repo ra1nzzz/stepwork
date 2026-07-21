@@ -155,11 +155,13 @@ async def _dispatch(frame: RpcFrame, state: WorkerState) -> RpcFrame | None:
 
     if method.startswith("job.") or method.startswith("command."):
         payload = await commands.handle_command(params, state)
+        if "result" in payload:
+            return make_result_response(frame.id, payload["result"])
         err = payload.get("error", {})
         return make_error_response(
             frame.id,
             code=int(err.get("code", JSONRPC_METHOD_NOT_FOUND)),
-            message=str(err.get("message", "Method not implemented in W1")),
+            message=str(err.get("message", "Method not implemented")),
         )
 
     return make_error_response(
@@ -179,6 +181,11 @@ async def amain() -> int:
 
     monotonic_start = time.monotonic()
     state = WorkerState(monotonic_start=monotonic_start)
+
+    # W3-W4 Batch 0：启动即初始化数据库层（Command Bus 依赖）
+    from worker.runtime.bootstrap import bootstrap_db
+
+    bootstrap_db(state)
 
     reader, writer = await _open_stdin_stdout()
 

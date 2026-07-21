@@ -1,12 +1,19 @@
-"""``job.*`` / Command Bus 占位 handler（W1）。
+"""``job.*`` / ``command.*`` RPC 入口（W3-W4 Batch 0）。
 
-W2 与 Command Bus 一并实现；W1 仅返回 ``-32601 Method not implemented``。
+早期（W1）为占位；现在委托给 :mod:`worker.runtime.commands.bus` 进行
+信封校验 + 路由。返回结构为 ``{"result": <CommandResult dict>}``
+或 ``{"error": {"code": int, "message": str}}``，由 :mod:`worker.runtime.__main__`
+的 ``_dispatch`` 转为 JSON-RPC 响应帧。
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from worker.runtime import ingest
+from worker.runtime.commands.bus import dispatch
+from worker.runtime.db.repos import Repos
+from worker.runtime.deps import Deps
 from worker.runtime.state import WorkerState
 
 
@@ -14,19 +21,22 @@ async def handle_command(
     params: dict[str, Any] | None,
     state: WorkerState,
 ) -> dict[str, Any]:
-    """``job.*`` 占位实现。
+    """处理 ``job.*`` / ``command.*`` 请求。
 
     Args:
-        params: JSON-RPC 参数。
-        state: Worker 运行期状态。
+        params: JSON-RPC 参数（应含 ``envelope`` 键）。
+        state: Worker 运行期状态（含 ``db_conn``）。
 
     Returns:
-        JSON-RPC 错误对象字典，``code=-32601``。
+        ``{"result": ...}`` 或 ``{"error": {...}}``。
     """
-    del params, state
-    return {
-        "error": {
-            "code": -32601,
-            "message": "Method not implemented in W1",
-        }
-    }
+    if state.db_conn is None:
+        return {"error": {"code": -32000, "message": "worker db not initialized"}}
+
+    raw = (params or {}).get("envelope")
+    if raw is None:
+        return {"error": {"code": -32602, "message": "missing envelope in params"}}
+
+    repos = Repos(state.db_conn)
+    deps = Deps(repos=repos, ingest=ingest, asr=None, ai=None)
+    return dispatch(raw, deps)

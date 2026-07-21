@@ -11,6 +11,7 @@ import os
 import time
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -74,6 +75,9 @@ class WorkerState(BaseModel):
     degraded_reasons: list[str] = Field(default_factory=list)
     monotonic_start: float = Field(default_factory=time.monotonic)
     shutdown_event: asyncio.Event = Field(default_factory=asyncio.Event)
+    # W3-W4 Batch 0：数据库层（由 ``bootstrap.bootstrap_db`` 回填）
+    db_conn: Any = None
+    db_path: str | None = None
 
     def uptime_seconds(self) -> int:
         """计算自启动以来的整数秒（v1.1 Patch-S6）。
