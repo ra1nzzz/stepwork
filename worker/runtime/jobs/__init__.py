@@ -8,6 +8,7 @@
 from worker.runtime.jobs.engine import (
     create_job,
     record_heartbeat,
+    record_result,
     retry_eligible,
     transition,
 )
@@ -19,6 +20,7 @@ __all__ = [
     "sweep_expired",
     "create_job",
     "record_heartbeat",
+    "record_result",
     "transition",
     "retry_eligible",
 ]

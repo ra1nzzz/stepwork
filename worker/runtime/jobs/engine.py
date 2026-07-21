@@ -53,6 +53,11 @@ def retry_eligible(repos: Repos, now: datetime | None = None) -> list[Job]:
     return [_row_to_job(r) for r in rows]
 
 
+def record_result(repos: Repos, job_id: str, artifact_ids: list[str]) -> None:
+    """记录任务产出的 artifact id 列表。"""
+    repos.jobs.set_result_artifacts(job_id, artifact_ids)
+
+
 def is_job_expired(job: Job, now: datetime | None = None) -> bool:
     """透传租约过期判定（供看门狗使用）。"""
     return is_expired(job, now)

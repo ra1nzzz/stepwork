@@ -271,6 +271,14 @@ class JobRepo:
         assert got is not None
         return got
 
+    def set_result_artifacts(self, job_id: str, ids: list[str]) -> None:
+        """写入任务产出的 artifact id 列表（落库 TEXT）。"""
+        self.conn.execute(
+            "UPDATE jobs SET result_artifact_ids=?, updated_at=? WHERE id=?",
+            (json.dumps(ids), datetime.now(UTC).isoformat(), job_id),
+        )
+        self.conn.commit()
+
 
 class ContentVersionRepo:
     """``content_versions`` 表。"""
