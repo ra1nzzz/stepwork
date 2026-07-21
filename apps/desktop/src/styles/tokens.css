@@ -1,0 +1,43 @@
+/* STEPWORK Design Tokens — 与 Prototype/styles.css :root 1:1 对齐 */
+:root {
+  --bg: oklch(13% 0.018 252);
+  --surface: oklch(18% 0.024 252);
+  --surface-2: oklch(22% 0.028 252);
+  --fg: oklch(95% 0.01 240);
+  --muted: oklch(68% 0.024 245);
+  --border: oklch(29% 0.03 250);
+  --accent: oklch(78% 0.16 190);
+  --accent-2: oklch(68% 0.16 285);
+  --success: oklch(74% 0.15 150);
+  --warning: oklch(80% 0.15 80);
+  --danger: oklch(69% 0.19 25);
+  --font-display: "Avenir Next", "SF Pro Display", "Segoe UI", system-ui, sans-serif;
+  --font-body: "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  --radius-sm: 8px;
+  --radius: 13px;
+  --radius-lg: 20px;
+  --sidebar: 232px;
+  --topbar: 72px;
+}
+
+/* P1-UX-17：oklch 不支持时的 sRGB 回退（数值经 oklch→sRGB 换算） */
+@supports not (color: oklch(0.5 0.1 250)) {
+  :root {
+    --bg: #10141c;
+    --surface: #1a1f2a;
+    --surface-2: #232936;
+    --fg: #eef1f6;
+    --muted: #a0a9b8;
+    --border: #333a49;
+    --accent: #7ce0d0;
+    --accent-2: #a59bf0;
+    --success: #7ddc9b;
+    --warning: #ecc45f;
+    --danger: #f0716a;
+  }
+}
+
+html {
+  color-scheme: dark;
+}
