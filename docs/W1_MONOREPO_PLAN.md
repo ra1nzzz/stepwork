@@ -290,10 +290,12 @@ async def handle_health_check(params: dict[str, Any] | None) -> HealthStatus: ..
 **JSON-RPC 方法清单（W1 最小集）**：
 | Method | Params | Result | 说明 |
 |---|---|---|---|
-| `runtime.ready` | — | `{ready: true, pid, started_at}` | Sidecar 启动后立即发送（notification） |
+| `runtime.ready` | — | `{ready: true, pid, started_at, protocol_version, capabilities}` | 启动后发送（notification，**存活/版本协商信号，非阻塞握手门**） |
 | `runtime.heartbeat` | — | `{alive: true, timestamp}` | 每 5 秒（notification） |
 | `runtime.health_check` | `{}` | `HealthStatus` | 请求-响应 |
 | `runtime.shutdown` | `{graceful: bool}` | `{bye: true}` | 请求-响应，触发优雅退出 |
+
+> **W2 握手模型修正（vs. 原 §3/W1.3 描述）**：原方案把 ``runtime.ready`` notification 当作阻塞式握手门（host 等待 10s ``ready_timeout``）。实际实现改为 **以 ``runtime.health_check`` 请求-响应轮询为权威握手**：Rust ``run_sidecar_monitor`` 启动 sidecar 后**不阻塞等待** ``runtime.ready``，而是由前端 ``get_worker_health`` → ``runtime.health_check`` 轮询确认 ``status=ok``；``runtime.ready`` 仍由 worker 正常发出，仅作为版本/能力协商的**非阻塞公告**。此举避免了单条 notification 丢失导致启动挂死，且与心跳看门狗（``runtime.heartbeat``）解耦。
 
 **帧格式**（长度前缀）：
 ```
@@ -558,7 +560,7 @@ apps/desktop/
 
 | 场景 | 通过标准 |
 |---|---|
-| `python -m worker.runtime` 启动 | 5 秒内 stdout 出现 `runtime.ready` notification |
+| `python -m worker.runtime` 启动 | 5 秒内发出 `runtime.ready` notification（版本/能力协商）；**权威握手**为 host 经 `get_worker_health`→`runtime.health_check` 轮询得到 `status=ok` |
 | Worker health_check | 返回 `status=ok`、`python_version=3.13.x`、`sqlite_version>=3.40` |
 | Worker 心跳 | 启动后 5 秒/次发送 `runtime.heartbeat` |
 | Worker 优雅退出 | 接收 `runtime.shutdown` 后 2 秒内退出码 0 |
@@ -715,7 +717,7 @@ apps/desktop/
 
 | # | 场景 | 通过标准 |
 |---|---|---|
-| 1 | `python -m worker.runtime` 启动 | 5s 内 stdout 出现 `runtime.ready` notification，含 `protocol_version="1"` |
+| 1 | `python -m worker.runtime` 启动 | 5s 内发出 `runtime.ready` notification（含 `protocol_version="1"`）；**权威握手**为 host 轮询 `runtime.health_check` 返回 `status=ok` |
 | 2 | Worker health_check | 返回 `status=ok`、所有 v1.1 新字段（pid/last_heartbeat_at/startup_duration_ms/worker_version/protocol_version/runtime_info） |
 | 3 | Worker 心跳 | 启动后 5s/次发送 `runtime.heartbeat` |
 | 4 | Worker 优雅退出 | 接收 `runtime.shutdown` 后 2s 内退出码 0 |
