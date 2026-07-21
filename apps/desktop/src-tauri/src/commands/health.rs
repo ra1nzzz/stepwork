@@ -1,6 +1,7 @@
 //! Tauri commands for health and lifecycle.
 
 use serde_json::{json, Value};
+use std::sync::atomic::Ordering;
 use tauri::State;
 
 use crate::error::SidecarError;
@@ -19,34 +20,30 @@ pub async fn get_worker_health(state: State<'_, AppState>) -> Result<Value, Side
     sidecar.rpc.call("runtime.health_check", json!({})).await
 }
 
-/// Restart the worker sidecar.
+/// Request a sidecar restart.
+///
+/// Signals the background monitor loop (via the shared `restart_tx`) which
+/// tears down the current worker and re-spawns it. Crash bookkeeping
+/// (restart count / last-crash timestamp) is updated by the monitor.
 #[tauri::command]
 pub async fn restart_worker(state: State<'_, AppState>) -> Result<(), SidecarError> {
-    let mut guard = state.sidecar.lock().await;
-
-    if let Some(handle) = guard.take() {
-        handle.rpc.shutdown().await;
-        handle.watchdog.abort();
-        let mut child = handle.child;
-        let _ = child.kill().await;
+    let guard = state.restart_tx.lock().await;
+    match guard.as_ref() {
+        Some(tx) => {
+            let _ = tx.send(());
+            Ok(())
+        }
+        None => Err(SidecarError::new(
+            crate::error::SidecarErrorKind::WorkerCrashed,
+            "sidecar monitor is not initialized",
+        )),
     }
-
-    state
-        .restart_count
-        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-
-    // The actual re-spawn is performed by the setup/background monitor;
-    // this command only tears down and signals.
-    *state.last_crash_at.lock().await = Some(chrono::Utc::now());
-    Ok(())
 }
 
 /// Get application metadata.
 #[tauri::command]
 pub async fn get_app_info(state: State<'_, AppState>) -> Result<Value, SidecarError> {
-    let restart_count = state
-        .restart_count
-        .load(std::sync::atomic::Ordering::SeqCst);
+    let restart_count = state.restart_count.load(Ordering::SeqCst);
     let last_crash_at = *state.last_crash_at.lock().await;
 
     Ok(json!({

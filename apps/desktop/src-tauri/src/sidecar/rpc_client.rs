@@ -2,11 +2,10 @@
 //!
 //! Protocol: [4-byte big-endian u32 length][JSON UTF-8 payload]
 
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
-use serde_json::{json, Value};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::process::{ChildStdin, ChildStdout};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 use tokio::time::{timeout, Duration};
@@ -22,26 +21,47 @@ pub const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 
 type PendingMap = Arc<Mutex<HashMap<String, oneshot::Sender<Result<Value, SidecarError>>>>>;
 
+/// Handler invoked for every JSON-RPC notification (frame without an `id`).
+type NotifyHandler = Arc<dyn Fn(String, Value) + Send + Sync>;
+
+type DynRead = Box<dyn AsyncRead + Unpin + Send>;
+type DynWrite = Box<dyn AsyncWrite + Unpin + Send>;
+
 /// JSON-RPC 2.0 client multiplexed over child stdio.
 pub struct RpcClient {
-    writer: Arc<Mutex<ChildStdin>>,
+    writer: Arc<Mutex<DynWrite>>,
     pending: PendingMap,
     read_task: Mutex<Option<JoinHandle<()>>>,
+    notify_handler: Arc<Mutex<Option<NotifyHandler>>>,
 }
 
 impl RpcClient {
     /// Create a new RPC client and spawn the read loop.
-    pub fn new(stdin: ChildStdin, stdout: ChildStdout) -> Arc<Self> {
+    pub fn new(
+        stdin: impl AsyncWrite + Unpin + Send + 'static,
+        stdout: impl AsyncRead + Unpin + Send + 'static,
+    ) -> Arc<Self> {
         let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
-        let writer = Arc::new(Mutex::new(stdin));
+        let writer: Arc<Mutex<DynWrite>> = Arc::new(Mutex::new(Box::new(stdin)));
+        let notify_handler: Arc<Mutex<Option<NotifyHandler>>> = Arc::new(Mutex::new(None));
 
-        let read_task = tokio::spawn(read_loop(stdout, Arc::clone(&pending)));
+        let read_task = tokio::spawn(read_loop(
+            Box::new(stdout),
+            Arc::clone(&pending),
+            Arc::clone(&notify_handler),
+        ));
 
         Arc::new(Self {
             writer,
             pending,
             read_task: Mutex::new(Some(read_task)),
+            notify_handler,
         })
+    }
+
+    /// Register a handler invoked for every notification frame.
+    pub async fn set_notify_handler(&self, handler: NotifyHandler) {
+        *self.notify_handler.lock().await = Some(handler);
     }
 
     /// Send a JSON-RPC request and await the response.
@@ -112,10 +132,16 @@ impl RpcClient {
         let len = (payload.len() as u32).to_be_bytes();
         let mut writer = self.writer.lock().await;
         writer.write_all(&len).await.map_err(|e| {
-            SidecarError::new(SidecarErrorKind::RpcProtocolError, format!("write len: {e}"))
+            SidecarError::new(
+                SidecarErrorKind::RpcProtocolError,
+                format!("write len: {e}"),
+            )
         })?;
         writer.write_all(&payload).await.map_err(|e| {
-            SidecarError::new(SidecarErrorKind::RpcProtocolError, format!("write payload: {e}"))
+            SidecarError::new(
+                SidecarErrorKind::RpcProtocolError,
+                format!("write payload: {e}"),
+            )
         })?;
         writer.flush().await.map_err(|e| {
             SidecarError::new(SidecarErrorKind::RpcProtocolError, format!("flush: {e}"))
@@ -123,7 +149,7 @@ impl RpcClient {
         Ok(())
     }
 
-    /// Shutdown the read loop.
+    /// Shut down the read loop.
     pub async fn shutdown(&self) {
         if let Some(task) = self.read_task.lock().await.take() {
             task.abort();
@@ -141,8 +167,13 @@ impl Drop for RpcClient {
     }
 }
 
-/// Background read loop: reads frames and dispatches to pending callers.
-async fn read_loop(mut stdout: ChildStdout, pending: PendingMap) {
+/// Background read loop: reads frames and dispatches to pending callers
+/// or the notification handler.
+async fn read_loop(
+    mut stdout: DynRead,
+    pending: PendingMap,
+    notify_handler: Arc<Mutex<Option<NotifyHandler>>>,
+) {
     loop {
         match read_frame(&mut stdout).await {
             Ok(frame) => {
@@ -162,8 +193,16 @@ async fn read_loop(mut stdout: ChildStdout, pending: PendingMap) {
                         };
                         let _ = tx.send(result);
                     }
+                } else if let Some(method) = frame.get("method").and_then(|v| v.as_str()) {
+                    // Notification (no id): forward to the registered handler.
+                    let handler = notify_handler.lock().await;
+                    if let Some(h) = handler.as_ref() {
+                        h(
+                            method.to_string(),
+                            frame.get("params").cloned().unwrap_or(Value::Null),
+                        );
+                    }
                 }
-                // Notifications (no id) are ignored here; heartbeat handled by watchdog.
             }
             Err(e) => {
                 // Fatal: notify all pending callers and exit.
@@ -178,7 +217,7 @@ async fn read_loop(mut stdout: ChildStdout, pending: PendingMap) {
 }
 
 /// Read a single length-prefixed frame from stdout.
-async fn read_frame(stdout: &mut ChildStdout) -> Result<Value, SidecarError> {
+async fn read_frame(stdout: &mut DynRead) -> Result<Value, SidecarError> {
     let mut len_buf = [0u8; 4];
     stdout.read_exact(&mut len_buf).await.map_err(|e| {
         SidecarError::new(SidecarErrorKind::WorkerCrashed, format!("read len: {e}"))
@@ -204,12 +243,14 @@ async fn read_frame(stdout: &mut ChildStdout) -> Result<Value, SidecarError> {
 
     let mut payload = vec![0u8; len];
     stdout.read_exact(&mut payload).await.map_err(|e| {
-        SidecarError::new(SidecarErrorKind::WorkerCrashed, format!("read payload: {e}"))
+        SidecarError::new(
+            SidecarErrorKind::WorkerCrashed,
+            format!("read payload: {e}"),
+        )
     })?;
 
-    serde_json::from_slice(&payload).map_err(|e| {
-        SidecarError::new(SidecarErrorKind::ParseError, format!("json parse: {e}"))
-    })
+    serde_json::from_slice(&payload)
+        .map_err(|e| SidecarError::new(SidecarErrorKind::ParseError, format!("json parse: {e}")))
 }
 
 #[cfg(test)]
@@ -257,5 +298,40 @@ mod tests {
         let ids: Vec<String> = (0..5).map(|_| Uuid::new_v4().to_string()).collect();
         let unique: std::collections::HashSet<_> = ids.iter().collect();
         assert_eq!(unique.len(), 5);
+    }
+
+    #[tokio::test]
+    async fn routes_notifications_to_handler() {
+        // Two independent duplexes synthesize a bidirectional link:
+        // the client reads from `r_rx` and writes to `w_tx`; the test
+        // keeps `r_tx` (to inject frames the client reads) and `w_rx`.
+        let (r_rx, mut r_tx) = duplex(4096);
+        let (_w_rx, w_tx) = duplex(4096);
+        let rpc = RpcClient::new(w_tx, r_rx);
+        let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+        let seen_clone = Arc::clone(&seen);
+        rpc.set_notify_handler(Arc::new(move |method: String, _params: Value| {
+            let s = Arc::clone(&seen_clone);
+            tokio::spawn(async move {
+                s.lock().await.push(method);
+            });
+        }))
+        .await;
+
+        // Inject a `runtime.heartbeat` notification (no id) the client
+        // will read from its `r_rx`; write it to the paired `r_tx`.
+        let notification = json!({"jsonrpc":"2.0","method":"runtime.heartbeat","params":{}});
+        let bytes = serde_json::to_vec(&notification).expect("serialize");
+        let len = (bytes.len() as u32).to_be_bytes();
+        r_tx.write_all(&len).await.expect("write len");
+        r_tx.write_all(&bytes).await.expect("write payload");
+        r_tx.flush().await.expect("flush");
+
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        let recorded = seen.lock().await;
+        assert_eq!(
+            recorded.first().map(|s| s.as_str()),
+            Some("runtime.heartbeat")
+        );
     }
 }
