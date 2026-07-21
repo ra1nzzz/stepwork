@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="STEPWORK 素材导入、转写与内容分析"><title>素材分析 · STEPWORK</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" data-od-id="primary-sidebar">
+      <a class="brand" href="index.html" data-od-id="brand-home"><span class="brand-mark"></span>STEPWORK</a><p class="nav-label">内容工作区</p>
+      <nav class="nav" aria-label="主导航" data-od-id="primary-navigation"><a class="nav-item" href="index.html"><span class="nav-icon">01</span>首页</a><a class="nav-item" href="projects.html"><span class="nav-icon">02</span>项目</a><a class="nav-item active" href="inspector.html"><span class="nav-icon">03</span>创作</a><a class="nav-item" href="tasks.html"><span class="nav-icon">04</span>任务</a><a class="nav-item" href="settings.html"><span class="nav-icon">05</span>设置</a></nav>
+      <div class="sidebar-foot"><div class="engine-state"><div class="state-row"><span class="state-name">分析引擎</span><span class="state-dot"></span></div><div class="state-meta">FFmpeg · StepAudio · step-3.7</div></div></div>
+    </aside>
+    <div class="workspace">
+      <header class="topbar" data-od-id="analysis-topbar"><div class="crumbs"><span>AI 眼镜通勤实测</span><span>/</span><strong>素材分析</strong></div><div class="top-actions"><button class="btn ghost" type="button" id="duplicateCheck">检查重复素材</button><button class="btn primary" type="button" id="importTop">添加素材</button></div></header>
+      <main class="content" data-od-id="analysis-content">
+        <nav class="subnav" aria-label="创作流程"><a class="active" href="inspector.html">01 素材分析</a><a href="radar.html">02 原创角度</a><a href="studio.html">03 脚本创作</a><a href="render.html">04 视频草稿</a></nav>
+        <section class="page-head" data-od-id="analysis-heading"><div><p class="eyebrow">SOURCE TO EVIDENCE</p><h1>让每个观点都能回到原始素材</h1><p class="page-subtitle">支持视频、音频、文本与逐字稿；分析结果保留时间戳、模型、费用和来源权利声明。</p></div><span class="status success" id="analysisStatus">分析完成</span></section>
+
+        <section class="layout-main" data-od-id="import-layout">
+          <div class="grid">
+            <article class="panel" data-od-id="source-import-panel">
+              <div class="panel-head"><div><h2 class="panel-title">添加来源素材</h2><div class="panel-meta">单个文件最大 2GB，可组合多个来源</div></div><span class="mono panel-meta">2 SOURCES</span></div>
+              <div class="panel-body">
+                <div class="source-grid" role="radiogroup" aria-label="素材类型">
+                  <label class="source-option"><span><input type="radio" name="sourceType" value="视频" checked> 视频</span><small>MP4、MOV、公开链接</small></label>
+                  <label class="source-option"><span><input type="radio" name="sourceType" value="音频"> 音频</span><small>MP3、WAV、M4A</small></label>
+                  <label class="source-option"><span><input type="radio" name="sourceType" value="文本"> 文本</span><small>TXT、MD、DOCX</small></label>
+                  <label class="source-option"><span><input type="radio" name="sourceType" value="逐字稿"> 逐字稿</span><small>SRT、VTT、带时间戳文本</small></label>
+                </div>
+                <label class="dropzone section-gap" id="dropzone" for="fileInput" data-od-id="source-dropzone"><span><span class="upload-glyph">IN</span><span class="drop-title" id="dropTitle">拖入视频，或点击选择文件</span><span class="drop-copy">上传数据仅用于当前项目，可在项目设置中删除</span></span></label>
+                <input class="hidden-input" id="fileInput" type="file" accept="video/*">
+                <div class="toolbar section-gap"><input class="field" id="urlInput" type="url" placeholder="粘贴公开内容链接" style="flex:1"><button class="btn" type="button" id="urlImport">解析链接</button></div>
+              </div>
+            </article>
+
+            <article class="panel" data-od-id="analysis-mode-panel">
+              <div class="panel-head"><div><h2 class="panel-title">分析方式</h2><div class="panel-meta">开始前可确认预计耗时和费用</div></div></div>
+              <div class="panel-body mode-choice">
+                <label><input type="radio" name="mode" value="快速" checked><strong>快速分析</strong><small>约 2 分钟 · 预计 ¥0.42</small></label>
+                <label><input type="radio" name="mode" value="精确"><strong>精确分析</strong><small>约 7 分钟 · 预计 ¥1.86</small></label>
+              </div>
+            </article>
+          </div>
+
+          <aside class="grid">
+            <article class="panel" data-od-id="analysis-task-panel">
+              <div class="panel-head"><div><h2 class="panel-title">分析任务</h2><div class="panel-meta" id="progressSummary">全部节点已完成</div></div><span class="mono panel-meta" id="progressPercent">100%</span></div>
+              <div class="panel-body task-list" id="analysisTasks">
+                <div class="task-item" data-step="预处理素材"><div class="task-top"><span class="task-name">预处理素材</span><span class="status success">完成</span></div><div class="progress" style="--progress:100%"><span></span></div></div>
+                <div class="task-item" data-step="语音转写"><div class="task-top"><span class="task-name">语音转写</span><span class="status success">完成</span></div><div class="progress" style="--progress:100%"><span></span></div></div>
+                <div class="task-item" data-step="结构分析"><div class="task-top"><span class="task-name">结构分析</span><span class="status success">完成</span></div><div class="progress" style="--progress:100%"><span></span></div></div>
+                <div class="task-item" data-step="观点与风险"><div class="task-top"><span class="task-name">观点与风险</span><span class="status success">完成</span></div><div class="progress" style="--progress:100%"><span></span></div></div>
+              </div>
+              <div class="panel-body inline-actions"><button class="btn small ghost" type="button" id="cancelTask" disabled>取消任务</button><button class="btn small" type="button" id="retryTask" hidden>从失败节点重试</button><a class="btn small ghost" href="tasks.html">任务日志</a></div>
+            </article>
+            <article class="panel" data-od-id="source-provenance-panel">
+              <div class="panel-head"><div><h2 class="panel-title">来源与处理记录</h2><div class="panel-meta">Artifact #SRC-240720-18</div></div></div>
+              <div class="panel-body"><dl class="provenance"><div class="provenance-row"><dt>来源作者</dt><dd>城市边角料实验室</dd></div><div class="provenance-row"><dt>导入时间</dt><dd>2026-07-20 10:31</dd></div><div class="provenance-row"><dt>权利声明</dt><dd>仅用于研究与转换创作</dd></div><div class="provenance-row"><dt>AI Provider</dt><dd>STEPFUN · StepAudio + step-3.7</dd></div><div class="provenance-row"><dt>本次费用</dt><dd class="mono">¥0.38</dd></div></dl></div>
+            </article>
+          </aside>
+        </section>
+
+        <section class="layout-main section-gap" id="analysis-report" data-od-id="analysis-results">
+          <article class="panel" data-od-id="transcript-panel">
+            <div class="panel-head"><div><h2 class="panel-title">可编辑逐字稿</h2><div class="panel-meta">点击时间戳定位原始素材 · 修改自动保存</div></div><button class="btn small ghost" type="button" onclick="showToast('逐字稿已导出为 SRT')">导出 SRT</button></div>
+            <div class="panel-body transcript" id="transcript" contenteditable="true" role="textbox" aria-label="可编辑逐字稿">
+              <div class="transcript-line"><time>00:00</time><p>我戴着这副 AI 眼镜通勤了一周，今天只回答一个问题：它到底让我少看了多少次手机？</p></div>
+              <div class="transcript-line"><time>00:18</time><p>导航和会议纪要确实减少了短暂操作，但真正明显的变化来自那些原本只有十秒钟的查看。</p></div>
+              <div class="transcript-line"><time>00:42</time><p>第三天我开始注意到另一个成本：在电梯里对着空气说话，会让每个人都下意识看你。</p></div>
+              <div class="transcript-line"><time>01:03</time><p>所以它现在更像是手机的一个过滤层，而不是替代品。</p></div>
+            </div>
+          </article>
+          <aside class="panel" data-od-id="structured-report-panel">
+            <div class="panel-head"><div><h2 class="panel-title">结构化分析</h2><div class="panel-meta">ANL-240720-07 · 置信度 0.86</div></div></div>
+            <div class="report-tabs" role="tablist"><button class="tab active" type="button" data-report="summary">摘要</button><button class="tab" type="button" data-report="hook">钩子</button><button class="tab" type="button" data-report="risk">风险</button></div>
+            <div class="report-section" id="reportContent"><h3>核心判断</h3><p>素材最有价值的不是功能清单，而是“减少短操作”和“增加社交成本”之间的交换关系。</p><ul class="report-list"><li>2.4 秒内提出可量化问题</li><li>00:42 出现真实阻力，可信度上升</li><li>结论仍缺少可核验的完整计数方法</li></ul></div>
+            <div class="panel-body" style="padding-top:0"><a class="btn primary" style="width:100%" href="radar.html">生成原创角度</a></div>
+          </aside>
+        </section>
+      </main>
+    </div>
+  </div>
+  <div class="toast" role="status" aria-live="polite" data-toast></div><script src="app.js"></script>
+  <script>
+    (() => {
+      const input = document.getElementById('fileInput'); const dropzone = document.getElementById('dropzone'); const steps = [...document.querySelectorAll('#analysisTasks .task-item')]; let timer;
+      const types = { 视频: 'video/*', 音频: 'audio/*', 文本: '.txt,.md,.docx', 逐字稿: '.srt,.vtt,.txt' };
+      document.querySelectorAll('[name="sourceType"]').forEach(radio => radio.addEventListener('change', () => { input.accept = types[radio.value]; document.getElementById('dropTitle').textContent = `拖入${radio.value}，或点击选择文件`; }));
+      function runAnalysis(name) {
+        document.getElementById('dropTitle').textContent = `已载入：${name}`; document.getElementById('analysisStatus').className = 'status ai'; document.getElementById('analysisStatus').textContent = '分析中'; document.getElementById('cancelTask').disabled = false; document.getElementById('retryTask').hidden = true; let current = 0;
+        steps.forEach(step => { step.querySelector('.status').className = 'status'; step.querySelector('.status').textContent = '等待'; step.querySelector('.progress').style.setProperty('--progress', '0%'); });
+        const tick = () => { if (current >= steps.length) { document.getElementById('analysisStatus').className = 'status success'; document.getElementById('analysisStatus').textContent = '分析完成'; document.getElementById('progressSummary').textContent = '全部节点已完成'; document.getElementById('cancelTask').disabled = true; showToast('分析完成，已生成逐字稿与结构报告'); return; }
+          const step = steps[current]; step.querySelector('.status').className = 'status ai'; step.querySelector('.status').textContent = '运行中'; step.querySelector('.progress').style.setProperty('--progress', '62%'); document.getElementById('progressSummary').textContent = `正在执行：${step.dataset.step}`; document.getElementById('progressPercent').textContent = Math.round((current + .62) / steps.length * 100) + '%'; timer = setTimeout(() => { step.querySelector('.status').className = 'status success'; step.querySelector('.status').textContent = '完成'; step.querySelector('.progress').style.setProperty('--progress', '100%'); current += 1; tick(); }, 600); };
+        tick();
+      }
+      input.addEventListener('change', () => input.files[0] && runAnalysis(input.files[0].name)); document.getElementById('importTop').addEventListener('click', () => input.click());
+      document.getElementById('urlImport').addEventListener('click', () => { const value = document.getElementById('urlInput').value.trim(); if (!value) return showToast('请先粘贴公开内容链接'); try { new URL(value); runAnalysis('外部链接素材'); } catch { showToast('链接格式不正确，请检查后重试'); } });
+      document.getElementById('cancelTask').addEventListener('click', () => { clearTimeout(timer); document.getElementById('analysisStatus').className = 'status danger'; document.getElementById('analysisStatus').textContent = '已取消'; document.getElementById('progressSummary').textContent = '任务已取消，可从当前节点恢复'; document.getElementById('retryTask').hidden = false; document.getElementById('cancelTask').disabled = true; });
+      document.getElementById('retryTask').addEventListener('click', () => runAnalysis('已恢复的素材任务')); document.getElementById('duplicateCheck').addEventListener('click', () => showToast('未发现重复素材；与素材库 126 条记录比对完成'));
+      ['dragenter','dragover'].forEach(type => dropzone.addEventListener(type, e => { e.preventDefault(); dropzone.classList.add('dragover'); })); ['dragleave','drop'].forEach(type => dropzone.addEventListener(type, e => { e.preventDefault(); dropzone.classList.remove('dragover'); })); dropzone.addEventListener('drop', e => e.dataTransfer.files[0] && runAnalysis(e.dataTransfer.files[0].name));
+      const reports = { summary: '<h3>核心判断</h3><p>素材最有价值的不是功能清单，而是“减少短操作”和“增加社交成本”之间的交换关系。</p><ul class="report-list"><li>2.4 秒内提出可量化问题</li><li>00:42 出现真实阻力，可信度上升</li><li>结论仍缺少可核验的完整计数方法</li></ul>', hook: '<h3>钩子结构</h3><p>“一周 + 少看多少次手机”同时给出体验周期与可验证问题，适合保留。</p><ul class="report-list"><li>承诺明确结果</li><li>第一人称降低说教感</li><li>建议在 6 秒内展示计数方法</li></ul>', risk: '<h3>事实与原创风险</h3><p>“96 次”来自个人统计，需标注样本范围；避免把单次体验外推为普遍结论。</p><ul class="report-list"><li>补充计数口径</li><li>引用产品功能需核验版本</li><li>保留来源作者与原始时间戳</li></ul>' };
+      document.querySelector('.report-tabs').addEventListener('click', e => { const button = e.target.closest('[data-report]'); if (!button) return; document.querySelectorAll('[data-report]').forEach(x => x.classList.remove('active')); button.classList.add('active'); document.getElementById('reportContent').innerHTML = reports[button.dataset.report]; });
+    })();
+  </script>
+</body></html>

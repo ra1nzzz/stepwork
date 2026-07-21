@@ -1,0 +1,26 @@
+{
+  "kind": "critique-panel",
+  "score": 4,
+  "axes": {
+    "clarity": {
+      "score": 4,
+      "notes": "settings.html 的分类切换、保存中与保存完成状态都在当前操作附近呈现；BrandProfile 切换不再触发整页刷新。"
+    },
+    "hierarchy": {
+      "score": 4,
+      "notes": "标题、分类导航、配置内容与保存反馈形成稳定的四级层次；动效只强化内容区和主保存动作。"
+    },
+    "typography": {
+      "score": 4,
+      "notes": "沿用既有显示、正文与等宽状态字体分工，动效未引入跳字、遮挡或延迟阅读的问题。"
+    },
+    "motion": {
+      "score": 5,
+      "notes": "仅保留 150ms 分类过渡与保存状态交叉淡化，均服务状态确认；无循环、无滚动装饰，并完整尊重 prefers-reduced-motion。"
+    },
+    "brand": {
+      "score": 4,
+      "notes": "近黑蓝底、冷青主行动色和克制状态色保持一致；新增动效不引入额外色彩或视觉装饰。"
+    }
+  }
+}

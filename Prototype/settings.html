@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>设置 · STEPWORK</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="settings-page">
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="index.html"><span class="brand-mark"></span>STEPWORK</a>
+      <p class="nav-label">内容工作区</p>
+      <nav class="nav" aria-label="主导航">
+        <a class="nav-item" href="index.html"><span class="nav-icon">01</span>首页</a>
+        <a class="nav-item" href="projects.html"><span class="nav-icon">02</span>项目</a>
+        <a class="nav-item" href="inspector.html"><span class="nav-icon">03</span>创作</a>
+        <a class="nav-item" href="tasks.html"><span class="nav-icon">04</span>任务</a>
+        <a class="nav-item active" href="settings.html"><span class="nav-icon">05</span>设置</a>
+      </nav>
+    </aside>
+    <div class="workspace">
+      <header class="topbar">
+        <div class="crumbs"><strong>设置</strong><span>/</span><span id="settingsCrumb">BrandProfile</span></div>
+        <div class="top-actions">
+          <button class="btn primary" type="button" id="saveSettings"><span id="saveLabel">保存更改</span></button>
+        </div>
+      </header>
+      <main class="content" data-od-id="settings-main">
+        <section class="page-head" data-od-id="settings-header">
+          <div>
+            <p class="eyebrow">WORKSPACE SETTINGS</p>
+            <h1>品牌、模型与数据边界</h1>
+            <p class="page-subtitle">BrandProfile 会约束角度和脚本生成；Provider 与数据保留策略在任务开始前始终可见。</p>
+          </div>
+          <span class="status success" id="saveStatus" role="status" aria-live="polite">已保存</span>
+        </section>
+        <section class="settings-grid" data-od-id="settings-workspace">
+          <aside class="panel settings-menu" aria-label="设置分类" role="tablist" aria-orientation="vertical">
+            <button class="active" id="tab-brand" type="button" role="tab" aria-selected="true" aria-controls="settingsContent" data-settings="brand">BrandProfile</button>
+            <button id="tab-providers" type="button" role="tab" aria-selected="false" aria-controls="settingsContent" data-settings="providers">AI Provider</button>
+            <button id="tab-data" type="button" role="tab" aria-selected="false" aria-controls="settingsContent" data-settings="data">数据与存储</button>
+            <button id="tab-export" type="button" role="tab" aria-selected="false" aria-controls="settingsContent" data-settings="export">导入与导出</button>
+          </aside>
+          <article class="panel" aria-labelledby="settingsTitle">
+            <div class="panel-head">
+              <div>
+                <h2 class="panel-title" id="settingsTitle">BrandProfile</h2>
+                <div class="panel-meta" id="settingsMeta">用于约束原创角度、脚本语气与事实表达</div>
+              </div>
+            </div>
+            <div class="panel-body" id="settingsContent" role="tabpanel" aria-labelledby="tab-brand">
+              <div class="form-row">
+                <label for="profileName">配置名称</label>
+                <div><input class="field" id="profileName" value="科技实测 · 克制判断"><p class="form-help">当前工作区默认配置</p></div>
+              </div>
+              <div class="form-row">
+                <label for="audience">核心受众</label>
+                <div><input class="field" id="audience" value="关注 AI 产品与效率工具的内容用户" style="width:100%"></div>
+              </div>
+              <div class="form-row">
+                <label for="tone">表达原则</label>
+                <div><textarea class="textarea" id="tone">第一人称验证；结论先于功能；避免绝对化判断；明确个人样本范围；不使用未核验的性能数字。</textarea></div>
+              </div>
+              <div class="form-row">
+                <span>必须执行</span>
+                <div class="grid">
+                  <label><input type="checkbox" checked> 标注事实来源与时间戳</label>
+                  <label><input type="checkbox" checked> 检查历史内容相似度</label>
+                  <label><input type="checkbox" checked> 高风险判断需人工确认</label>
+                </div>
+              </div>
+              <div class="form-row">
+                <span>默认输出</span>
+                <div class="filters"><span class="chip active">90 秒以内</span><span class="chip active">9:16 竖屏</span><span class="chip">口播 + B-roll</span></div>
+              </div>
+            </div>
+          </article>
+        </section>
+      </main>
+    </div>
+  </div>
+  <div class="toast" role="status" aria-live="polite" data-toast></div>
+  <script src="app.js"></script>
+  <script>
+    (() => {
+      const title = document.getElementById('settingsTitle');
+      const meta = document.getElementById('settingsMeta');
+      const crumb = document.getElementById('settingsCrumb');
+      const content = document.getElementById('settingsContent');
+      const saveButton = document.getElementById('saveSettings');
+      const saveLabel = document.getElementById('saveLabel');
+      const saveStatus = document.getElementById('saveStatus');
+      const tabs = [...document.querySelectorAll('[data-settings]')];
+      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const transitionMs = reduceMotion ? 0 : 150;
+      const brandContent = content.innerHTML;
+      const panels = {
+        brand: {
+          title: 'BrandProfile',
+          meta: '用于约束原创角度、脚本语气与事实表达',
+          content: brandContent
+        },
+        providers: {
+          title: 'AI Provider',
+          meta: '查看任务使用的模型、费用与数据范围',
+          content: '<div class="empty"><h2>AI Provider</h2><p>默认文本模型：STEPFUN step-3.7；语音：StepAudio / Edge TTS。每次任务开始前展示模型、预计费用与上传范围。</p><button class="btn" type="button" data-check-config>检查当前配置</button></div>'
+        },
+        data: {
+          title: '数据与存储',
+          meta: '管理素材、Artifact 与诊断日志的保留策略',
+          content: '<div class="empty"><h2>数据与存储</h2><p>素材与 Artifact 默认存储在本地项目空间。已提供项目级删除、30 天任务日志保留和诊断包脱敏策略。</p><button class="btn" type="button" data-check-config>检查当前配置</button></div>'
+        },
+        export: {
+          title: '导入与导出',
+          meta: '校验项目包及其生成记录的完整性',
+          content: '<div class="empty"><h2>导入与导出</h2><p>项目包包含素材清单、ContentVersion、Provenance 与渲染记录。导出前会检查缺失依赖。</p><button class="btn" type="button" data-check-config>检查当前配置</button></div>'
+        }
+      };
+
+      function renderPanel(tab) {
+        const panel = panels[tab.dataset.settings];
+        tabs.forEach((item) => {
+          const selected = item === tab;
+          item.classList.toggle('active', selected);
+          item.setAttribute('aria-selected', String(selected));
+        });
+        title.textContent = panel.title;
+        meta.textContent = panel.meta;
+        crumb.textContent = panel.title;
+        content.innerHTML = panel.content;
+        content.setAttribute('aria-labelledby', tab.id);
+        requestAnimationFrame(() => content.classList.remove('is-leaving'));
+      }
+
+      tabs.forEach((tab, index) => {
+        tab.addEventListener('click', () => {
+          if (tab.getAttribute('aria-selected') === 'true') return;
+          content.classList.add('is-leaving');
+          window.setTimeout(() => renderPanel(tab), transitionMs);
+        });
+        tab.addEventListener('keydown', (event) => {
+          if (!['ArrowUp', 'ArrowDown'].includes(event.key)) return;
+          event.preventDefault();
+          const offset = event.key === 'ArrowDown' ? 1 : -1;
+          tabs[(index + offset + tabs.length) % tabs.length].focus();
+        });
+      });
+
+      content.addEventListener('click', (event) => {
+        if (event.target.closest('[data-check-config]')) showToast('配置检查完成');
+      });
+
+      saveButton.addEventListener('click', () => {
+        saveButton.disabled = true;
+        saveButton.setAttribute('aria-busy', 'true');
+        saveLabel.textContent = '保存中…';
+        saveStatus.classList.add('is-changing');
+        window.setTimeout(() => {
+          saveStatus.textContent = '正在保存…';
+          saveStatus.classList.remove('is-changing');
+        }, transitionMs);
+        window.setTimeout(() => {
+          saveStatus.classList.add('is-changing');
+          window.setTimeout(() => {
+            saveStatus.textContent = '已保存';
+            saveStatus.classList.remove('is-changing');
+            saveLabel.textContent = '保存更改';
+            saveButton.disabled = false;
+            saveButton.removeAttribute('aria-busy');
+            showToast('工作区设置已保存');
+          }, transitionMs);
+        }, 450);
+      });
+    })();
+  </script>
+</body>
+</html>

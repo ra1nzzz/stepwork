@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="STEPWORK 内容创作项目工作台">
+  <title>工作台 · STEPWORK</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" data-od-id="primary-sidebar">
+      <a class="brand" href="index.html" data-od-id="brand-home"><span class="brand-mark"></span>STEPWORK</a>
+      <p class="nav-label">内容工作区</p>
+      <nav class="nav" aria-label="主导航" data-od-id="primary-navigation">
+        <a class="nav-item active" href="index.html" data-od-id="nav-home"><span class="nav-icon">01</span>首页</a>
+        <a class="nav-item" href="projects.html" data-od-id="nav-projects"><span class="nav-icon">02</span>项目</a>
+        <a class="nav-item" href="inspector.html" data-od-id="nav-create"><span class="nav-icon">03</span>创作</a>
+        <a class="nav-item" href="tasks.html" data-od-id="nav-tasks"><span class="nav-icon">04</span>任务</a>
+        <a class="nav-item" href="settings.html" data-od-id="nav-settings"><span class="nav-icon">05</span>设置</a>
+      </nav>
+      <div class="sidebar-foot"><div class="engine-state" data-od-id="engine-status"><div class="state-row"><span class="state-name">核心引擎</span><span class="state-dot" aria-label="运行正常"></span></div><div class="state-meta">LangGraph · 2 个任务运行中</div></div></div>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar" data-od-id="workbench-topbar">
+        <div class="crumbs"><span>STEPWORK</span><span>/</span><strong>首页</strong></div>
+        <div class="top-actions"><a class="btn ghost" href="tasks.html" data-od-id="open-task-center">任务中心 · 1 个异常</a><a class="btn primary" href="projects.html" data-od-id="new-project-button">新建项目</a></div>
+      </header>
+
+      <main class="content" data-od-id="workbench-content">
+        <section class="page-head" data-od-id="workbench-heading">
+          <div><p class="eyebrow">PROJECT COMMAND · V0.1</p><h1 data-od-id="workbench-title">继续完成你的内容草稿</h1><p class="page-subtitle">从素材导入到视频导出，每一步都有来源、版本与任务记录。当前 1 个项目等待确认原创角度。</p></div>
+          <button class="btn" type="button" onclick="showToast('项目与任务状态已刷新')" data-od-id="refresh-workbench">刷新状态</button>
+        </section>
+
+        <section class="flow-strip flow-five" aria-label="MVP 创作流程" data-od-id="core-flow">
+          <a class="flow-step active" href="inspector.html" data-od-id="flow-import"><div class="flow-no">01 · IMPORT</div><div class="flow-name">导入素材</div></a>
+          <a class="flow-step" href="inspector.html#analysis-report" data-od-id="flow-analyze"><div class="flow-no">02 · ANALYZE</div><div class="flow-name">转写分析</div></a>
+          <a class="flow-step" href="radar.html" data-od-id="flow-angle"><div class="flow-no">03 · ANGLE</div><div class="flow-name">原创角度</div></a>
+          <a class="flow-step" href="studio.html" data-od-id="flow-script"><div class="flow-no">04 · SCRIPT</div><div class="flow-name">脚本创作</div></a>
+          <a class="flow-step" href="render.html" data-od-id="flow-render"><div class="flow-no">05 · RENDER</div><div class="flow-name">视频草稿</div></a>
+        </section>
+
+        <section class="grid grid-4" data-od-id="workbench-metrics">
+          <article class="metric" data-od-id="metric-active-projects"><div class="metric-label">进行中项目</div><div class="metric-value num">04</div><div class="metric-delta">2 个今日有更新</div></article>
+          <article class="metric" data-od-id="metric-active-tasks"><div class="metric-label">运行任务</div><div class="metric-value num">02</div><div class="metric-delta">转写 · 视频渲染</div></article>
+          <article class="metric" data-od-id="metric-review"><div class="metric-label">等待确认</div><div class="metric-value num">03</div><div class="metric-delta">角度 1 · 脚本 2</div></article>
+          <article class="metric metric-danger" data-od-id="metric-failed"><div class="metric-label">需要处理</div><div class="metric-value num">01</div><div class="metric-delta">音频转写可重试</div></article>
+        </section>
+
+        <section class="layout-main section-gap" data-od-id="workbench-main-grid">
+          <article class="panel" data-od-id="recent-projects-panel">
+            <div class="panel-head"><div><h2 class="panel-title">最近项目</h2><div class="panel-meta">按最近编辑时间排序</div></div><a class="btn small ghost" href="projects.html" data-od-id="view-all-projects">查看全部</a></div>
+            <div class="data-list project-overview">
+              <a class="data-row simple-row" href="studio.html" data-od-id="project-ai-glasses"><div><div class="row-title">AI 眼镜通勤实测</div><div class="row-sub">2 个来源 · 脚本 V3 · 8 个分镜</div></div><span class="status warning">待审脚本</span><span class="mono row-date">刚刚</span></a>
+              <a class="data-row simple-row" href="radar.html" data-od-id="project-county-cafe"><div><div class="row-title">县城咖啡店的 AI 生意</div><div class="row-sub">3 个来源 · 已生成 4 个原创角度</div></div><span class="status ai">待选角度</span><span class="mono row-date">18 分钟前</span></a>
+              <a class="data-row simple-row" href="render.html" data-od-id="project-screenless"><div><div class="row-title">无屏幕周末观察</div><div class="row-sub">脚本 V2 · 视频草稿渲染中</div></div><span class="status success">渲染 68%</span><span class="mono row-date">1 小时前</span></a>
+            </div>
+          </article>
+
+          <aside class="grid" data-od-id="workbench-side-column">
+            <article class="panel" data-od-id="blocked-task-panel">
+              <div class="panel-head"><div><h2 class="panel-title">需要处理</h2><div class="panel-meta">失败任务不会自动消失</div></div><span class="status danger">1</span></div>
+              <div class="panel-body"><div class="task-item task-error"><div class="task-top"><div><div class="task-name">访谈音频转写失败</div><div class="row-sub">音轨损坏 · 已保留上传文件</div></div></div><div class="task-actions"><button class="btn small" type="button" onclick="showToast('已重新提交转写任务')">重试</button><a class="btn small ghost" href="tasks.html">查看日志</a></div></div></div>
+            </article>
+            <article class="panel" data-od-id="recent-artifacts-panel">
+              <div class="panel-head"><div><h2 class="panel-title">最近产物</h2><div class="panel-meta">可追溯到任务与来源</div></div></div>
+              <div class="compact-list"><a href="studio.html"><strong>脚本 V3</strong><span>step-3.7 · 10:39</span></a><a href="render.html"><strong>竖屏草稿 #02</strong><span>1080×1920 · 09:52</span></a></div>
+            </article>
+          </aside>
+        </section>
+      </main>
+    </div>
+  </div>
+  <div class="toast" role="status" aria-live="polite" data-toast></div>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="STEPWORK AI 创作与分镜编辑">
+  <title>AI 创作 · STEPWORK</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="studio-page">
+  <div class="app-shell">
+    <aside class="sidebar" data-od-id="primary-sidebar">
+      <a class="brand" href="index.html" data-od-id="brand-home"><span class="brand-mark"></span>STEPWORK</a>
+      <p class="nav-label">内容工作区</p>
+      <nav class="nav" aria-label="主导航" data-od-id="primary-navigation">
+        <a class="nav-item" href="index.html" data-od-id="nav-home"><span class="nav-icon">01</span>首页</a>
+        <a class="nav-item" href="projects.html" data-od-id="nav-projects"><span class="nav-icon">02</span>项目</a>
+        <a class="nav-item active" href="inspector.html" data-od-id="nav-create"><span class="nav-icon">03</span>创作</a>
+        <a class="nav-item" href="tasks.html" data-od-id="nav-tasks"><span class="nav-icon">04</span>任务</a>
+        <a class="nav-item" href="settings.html" data-od-id="nav-settings"><span class="nav-icon">05</span>设置</a>
+      </nav>
+      <div class="sidebar-foot"><div class="engine-state" data-od-id="engine-status"><div class="state-row"><span class="state-name">自动保存</span><span class="state-dot"></span></div><div class="state-meta" id="saveState">刚刚保存 · V3</div></div></div>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar" data-od-id="studio-topbar">
+        <div class="crumbs"><span>STEPWORK</span><span>/</span><strong>AI 创作</strong><span>/</span><span id="projectCrumb">AI 眼镜通勤实测</span></div>
+        <div class="top-actions"><button class="btn ghost" type="button" id="compareBtn" data-od-id="compare-versions-button">对比版本</button><button class="btn" type="button" id="generateScript" data-od-id="generate-script-button">AI 生成新版本</button><a class="btn primary" href="render.html" data-od-id="continue-render-button">生成视频草稿</a></div>
+      </header>
+
+      <main class="content" data-od-id="studio-content">
+        <nav class="subnav" aria-label="创作流程"><a href="inspector.html">01 素材分析</a><a href="radar.html">02 原创角度</a><a class="active" href="studio.html">03 脚本创作</a><a href="render.html">04 视频草稿</a></nav>
+        <section class="page-head" data-od-id="studio-heading">
+          <div><p class="eyebrow">CONTENT VERSION · CV-240720-03</p><h1 data-od-id="studio-title">脚本的每次改写，都保留来源与理由</h1><p class="page-subtitle">当前角度：AI 眼镜不是替代手机，而是过滤十秒操作。段落级 AI 操作会生成可撤销的新版本。</p></div>
+          <span class="status warning">草稿 · 未发布</span>
+        </section>
+
+        <section class="layout-studio" data-od-id="studio-workspace-grid">
+          <aside class="panel" data-od-id="project-list-panel">
+             <div class="panel-head"><div><h2 class="panel-title">创作项目</h2><div class="panel-meta" id="draftCount" data-count="7">7 个待审草稿</div></div><button class="btn small ghost" type="button" id="newProject" data-od-id="new-project-button">新建</button></div>
+             <div class="project-list" aria-label="创作项目">
+               <button class="project-item active" type="button" aria-pressed="true" data-title="AI 眼镜通勤实测" data-od-id="project-ai-glasses"><span class="project-title">AI 眼镜通勤实测</span><span class="project-meta">V3 · 8 个分镜 · 刚刚编辑</span></button>
+               <button class="project-item" type="button" aria-pressed="false" data-title="县城咖啡店的 AI 生意" data-od-id="project-county-cafe"><span class="project-title">县城咖啡店的 AI 生意</span><span class="project-meta">V2 · 等待审阅</span></button>
+               <button class="project-item" type="button" aria-pressed="false" data-title="无屏幕周末观察" data-od-id="project-screenless"><span class="project-title">无屏幕周末观察</span><span class="project-meta">V1 · 初稿</span></button>
+               <button class="project-item" type="button" aria-pressed="false" data-title="低空经济城市体验" data-state="empty" data-od-id="project-low-altitude"><span class="project-title">低空经济城市体验</span><span class="project-meta">素材收集中</span></button>
+             </div>
+          </aside>
+
+          <article class="panel editor" data-od-id="script-editor-panel">
+            <div class="editor-toolbar">
+               <div class="version-tabs" id="versionTabs" role="tablist" aria-label="脚本版本" data-od-id="script-version-tabs"><button class="version-tab" type="button" role="tab" aria-selected="false" data-version="V1">V1</button><button class="version-tab" type="button" role="tab" aria-selected="false" data-version="V2">V2</button><button class="version-tab active" type="button" role="tab" aria-selected="true" data-version="V3">V3 当前</button></div>
+               <div class="filters"><span class="generation-state" id="generationState" role="status" aria-live="polite">已就绪</span><span class="panel-meta mono">612 字 · 约 78 秒</span><button class="btn small ghost" type="button" id="copyScript" data-od-id="copy-script-button">复制脚本</button></div>
+             </div>
+              <div class="panel-body provenance-bar" data-od-id="script-provenance"><dl class="provenance"><div class="provenance-row"><dt>原创角度</dt><dd id="angleSource">过滤十秒操作</dd></div><div class="provenance-row"><dt>BrandProfile</dt><dd>科技实测 · 克制判断</dd></div><div class="provenance-row"><dt>生成记录</dt><dd>STEPFUN step-3.7 · 2026-07-20 10:39 · ¥0.12</dd></div><div class="provenance-row"><dt>来源素材</dt><dd><button class="source-cite" type="button" data-time="00:18">视频 00:18</button> · <button class="source-cite" type="button" data-time="00:42">视频 00:42</button></dd></div></dl></div>
+              <div class="script-editor" id="scriptEditor" contenteditable="true" role="textbox" aria-label="当前脚本正文" aria-multiline="true" data-od-id="script-editor">
+              <div class="script-kicker">开场 · 0—6 秒</div>
+              <h2 id="scriptHeadline">戴着 AI 眼镜上班一周，我少看了多少次手机？</h2>
+               <div class="segment-block"><p>第一天出门，我给自己定了一个规则：除了付款，尽量不掏手机。</p><div class="segment-tools" contenteditable="false"><button class="btn small ghost segment-ai" type="button" data-action="重写">重写</button><button class="btn small ghost segment-ai" type="button" data-action="扩写">扩写</button><button class="btn small ghost segment-ai" type="button" data-action="压缩">压缩</button><button class="btn small ghost undo-segment" type="button">撤销</button></div></div>
+               <div class="segment-block"><p>导航直接浮在视线前方，会议纪要会自动整理。听起来像未来，但真正让我意外的不是效率，而是我终于发现自己一天会<span class="diff-add">无意识点亮手机 96 次</span>。</p><div class="segment-tools" contenteditable="false"><button class="btn small ghost segment-ai" type="button" data-action="重写">重写</button><button class="btn small ghost segment-ai" type="button" data-action="扩写">扩写</button><button class="btn small ghost segment-ai" type="button" data-action="压缩">压缩</button><button class="btn small ghost undo-segment" type="button">撤销</button></div></div>
+               <div class="segment-block"><p>第三天，问题出现了。在电梯里对着空气说话，身边的人会下意识看你；连续佩戴两小时，注意力也开始被通知切碎。</p><div class="segment-tools" contenteditable="false"><button class="btn small ghost segment-ai" type="button" data-action="重写">重写</button><button class="btn small ghost segment-ai" type="button" data-action="扩写">扩写</button><button class="btn small ghost segment-ai" type="button" data-action="压缩">压缩</button><button class="btn small ghost undo-segment" type="button">撤销</button></div></div>
+               <div class="segment-block"><p>所以 AI 眼镜替代的不是手机，而是那些不值得掏出手机的 10 秒钟。它真正要跨过的门槛，也许不是算力，而是人与人之间的社交边界。</p><div class="segment-tools" contenteditable="false"><button class="btn small ghost segment-ai" type="button" data-action="重写">重写</button><button class="btn small ghost segment-ai" type="button" data-action="扩写">扩写</button><button class="btn small ghost segment-ai" type="button" data-action="压缩">压缩</button><button class="btn small ghost undo-segment" type="button">撤销</button></div></div>
+               <div class="segment-block"><p>如果你每天通勤超过一小时，你愿意用一次轻微的尴尬，换回多少次抬头看路？</p><div class="segment-tools" contenteditable="false"><button class="btn small ghost segment-ai" type="button" data-action="重写">重写</button><button class="btn small ghost segment-ai" type="button" data-action="扩写">扩写</button><button class="btn small ghost segment-ai" type="button" data-action="压缩">压缩</button><button class="btn small ghost undo-segment" type="button">撤销</button></div></div>
+             </div>
+             <div class="editor-empty" id="editorEmpty" hidden><span class="empty-code mono">NO SCRIPT</span><h2>素材还在收集中</h2><p>导入访谈、视频或要点后，即可生成第一版脚本与分镜。</p><button class="btn primary" type="button" id="createFirstDraft">生成第一版脚本</button></div>
+             <div class="editor-toolbar"><span class="panel-meta">正文修改后自动保存</span><button class="btn small" type="button" id="makeStoryboard" data-od-id="generate-storyboard-button">根据脚本更新分镜</button></div>
+          </article>
+
+          <aside class="panel" data-od-id="storyboard-panel">
+             <div class="panel-head"><div><h2 class="panel-title">分镜序列</h2><div class="panel-meta">拖拽排序 · 聚焦卡片后按 Alt + ↑ / ↓</div></div><span class="mono panel-meta" id="shotCount">08 SHOTS</span></div>
+             <div class="storyboard" id="storyboard">
+               <article class="shot" draggable="true" tabindex="0" aria-label="分镜 1：地铁入口跟拍" data-od-id="shot-01"><div class="shot-thumb">01</div><div><div class="shot-title" contenteditable="true" role="textbox" aria-label="分镜 1 标题">地铁入口跟拍</div><div class="shot-copy" contenteditable="true" role="textbox" aria-label="分镜 1 描述">手持视角，主角戴上眼镜进入站厅</div></div></article>
+               <article class="shot" draggable="true" tabindex="0" aria-label="分镜 2：导航信息叠加" data-od-id="shot-02"><div class="shot-thumb">02</div><div><div class="shot-title" contenteditable="true" role="textbox" aria-label="分镜 2 标题">导航信息叠加</div><div class="shot-copy" contenteditable="true" role="textbox" aria-label="分镜 2 描述">视线前方出现路线与到站时间</div></div></article>
+               <article class="shot" draggable="true" tabindex="0" aria-label="分镜 3：手机点亮计数" data-od-id="shot-03"><div class="shot-thumb">03</div><div><div class="shot-title" contenteditable="true" role="textbox" aria-label="分镜 3 标题">手机点亮计数</div><div class="shot-copy" contenteditable="true" role="textbox" aria-label="分镜 3 描述">快速蒙太奇，数字累计到 96</div></div></article>
+               <article class="shot" draggable="true" tabindex="0" aria-label="分镜 4：电梯社交尴尬" data-od-id="shot-04"><div class="shot-thumb">04</div><div><div class="shot-title" contenteditable="true" role="textbox" aria-label="分镜 4 标题">电梯社交尴尬</div><div class="shot-copy" contenteditable="true" role="textbox" aria-label="分镜 4 描述">固定机位，旁人侧目形成反差</div></div></article>
+               <article class="shot" draggable="true" tabindex="0" aria-label="分镜 5：会议自动纪要" data-od-id="shot-05"><div class="shot-thumb">05</div><div><div class="shot-title" contenteditable="true" role="textbox" aria-label="分镜 5 标题">会议自动纪要</div><div class="shot-copy" contenteditable="true" role="textbox" aria-label="分镜 5 描述">屏幕录制与真人镜头交叉剪辑</div></div></article>
+               <article class="shot" draggable="true" tabindex="0" aria-label="分镜 6：注意力被切碎" data-od-id="shot-06"><div class="shot-thumb">06</div><div><div class="shot-title" contenteditable="true" role="textbox" aria-label="分镜 6 标题">注意力被切碎</div><div class="shot-copy" contenteditable="true" role="textbox" aria-label="分镜 6 描述">通知快速闪现，环境声逐渐压低</div></div></article>
+               <article class="shot" draggable="true" tabindex="0" aria-label="分镜 7：回到真实街景" data-od-id="shot-07"><div class="shot-thumb">07</div><div><div class="shot-title" contenteditable="true" role="textbox" aria-label="分镜 7 标题">回到真实街景</div><div class="shot-copy" contenteditable="true" role="textbox" aria-label="分镜 7 描述">抬头看路，画面节奏放慢</div></div></article>
+               <article class="shot" draggable="true" tabindex="0" aria-label="分镜 8：问题收尾" data-od-id="shot-08"><div class="shot-thumb">08</div><div><div class="shot-title" contenteditable="true" role="textbox" aria-label="分镜 8 标题">问题收尾</div><div class="shot-copy" contenteditable="true" role="textbox" aria-label="分镜 8 描述">正面近景，字幕留下开放问题</div></div></article>
+            </div>
+          </aside>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="compareModal" role="dialog" aria-modal="true" aria-labelledby="compareTitle" aria-hidden="true"><div class="modal" tabindex="-1" data-od-id="version-compare-modal"><div class="modal-head"><div><h2 class="panel-title" id="compareTitle">版本对比 · V2 → V3</h2><div class="panel-meta">AI 标注了 3 处叙事强化</div></div><button class="btn small ghost" type="button" data-modal-close>关闭</button></div><div class="modal-body"><div class="topic-card"><div class="topic-score">开场更具体</div><p style="margin-top:8px">“体验一周后的感受”改为“少看了多少次手机”，建立可验证的问题。</p></div><div class="topic-card" style="margin-top:10px"><div class="topic-score">加入真实阻力</div><p style="margin-top:8px">补充电梯社交尴尬和注意力切碎，避免单向产品赞美。</p></div><div class="topic-card" style="margin-top:10px"><div class="topic-score">开放式收尾</div><p style="margin-top:8px">用通勤时长与尴尬交换建立评论区讨论入口。</p></div></div><div class="modal-foot"><span class="panel-meta">当前保留 V3</span><button class="btn primary" type="button" data-modal-close onclick="showToast('已确认使用 V3 版本')">确认 V3</button></div></div></div>
+  <div class="toast" role="status" aria-live="polite" data-toast></div>
+  <script src="app.js"></script>
+  <script>
+    (() => {
+      const editor = document.getElementById('scriptEditor');
+      const headline = document.getElementById('scriptHeadline');
+      const savedTopic = localStorage.getItem('stepwork-topic');
+      if (savedTopic) { headline.textContent = savedTopic; document.getElementById('projectCrumb').textContent = savedTopic.replace('戴着 ', '').slice(0, 14); }
+
+       const generationState = document.getElementById('generationState');
+       const emptyState = document.getElementById('editorEmpty');
+       const setGenerationState = (text, state = '') => { generationState.textContent = text; generationState.dataset.state = state; };
+       let saveTimer;
+       editor.addEventListener('input', () => {
+         document.getElementById('saveState').textContent = '正在保存…';
+         clearTimeout(saveTimer);
+         saveTimer = setTimeout(() => { document.getElementById('saveState').textContent = '刚刚保存 · V3'; }, 700);
+       });
+       document.getElementById('copyScript').addEventListener('click', async event => {
+         const button = event.currentTarget;
+         try { await navigator.clipboard.writeText(editor.innerText); button.textContent = '已复制'; showToast('脚本已复制到剪贴板'); setTimeout(() => { button.textContent = '复制脚本'; }, 1200); }
+         catch { setGenerationState('复制失败，请检查剪贴板权限', 'error'); showToast('当前环境无法访问剪贴板'); }
+       });
+       const compareModal = document.getElementById('compareModal');
+       const openCompare = () => { compareModal.classList.add('open'); compareModal.setAttribute('aria-hidden', 'false'); compareModal.querySelector('.modal').focus(); };
+       const closeCompare = () => { compareModal.classList.remove('open'); compareModal.setAttribute('aria-hidden', 'true'); document.getElementById('compareBtn').focus(); };
+       document.getElementById('compareBtn').addEventListener('click', openCompare);
+       compareModal.querySelectorAll('[data-modal-close]').forEach(button => button.addEventListener('click', closeCompare));
+       compareModal.addEventListener('click', event => { if (event.target === compareModal) closeCompare(); });
+       document.addEventListener('keydown', event => {
+         if (!compareModal.classList.contains('open')) return;
+         if (event.key === 'Escape') { event.preventDefault(); closeCompare(); return; }
+         if (event.key !== 'Tab') return;
+         const focusable = [...compareModal.querySelectorAll('button, [href], [tabindex]:not([tabindex="-1"])')];
+         const first = focusable[0]; const last = focusable[focusable.length - 1];
+         if (event.shiftKey && (document.activeElement === first || document.activeElement === compareModal.querySelector('.modal'))) { event.preventDefault(); last.focus(); }
+         else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+       }, true);
+        const versionCopy = {
+          V1: ['戴着 AI 眼镜上班一周，体验究竟怎么样？','这一周里，导航、记录和提醒都出现在视线里。方便是真的，但它离替代手机还很远。'],
+          V2: ['AI 眼镜真正的门槛，不只是价格','第三天我发现，技术问题之外还有公共空间里的社交成本：当你对着空气说话，所有人都会注意你。'],
+          V3: [headline.textContent, editor.querySelector('.segment-block p').textContent]
+        };
+        document.getElementById('versionTabs').addEventListener('click', event => {
+         const tab = event.target.closest('[data-version]'); if (!tab) return;
+         document.querySelectorAll('.version-tab').forEach(item => { item.classList.remove('active'); item.setAttribute('aria-selected', 'false'); });
+          tab.classList.add('active'); tab.setAttribute('aria-selected', 'true'); const copy = versionCopy[tab.dataset.version]; headline.textContent = copy[0]; editor.querySelector('.segment-block p').textContent = copy[1]; editor.setAttribute('contenteditable', tab.dataset.version === 'V3' ? 'true' : 'false'); setGenerationState(`已加载 ${tab.dataset.version} 内容`, 'success');
+       });
+       const generateDraft = button => {
+         const isFirstDraft = !emptyState.hidden;
+         button.disabled = true; button.setAttribute('aria-busy', 'true'); button.textContent = isFirstDraft ? '正在生成初稿…' : '正在生成 V4…'; setGenerationState('正在规划结构与事实核验点', 'loading');
+         setTimeout(() => {
+           const version = isFirstDraft ? 'V1' : 'V4'; button.disabled = false; button.removeAttribute('aria-busy'); button.textContent = button.id === 'createFirstDraft' ? '生成第一版脚本' : 'AI 生成脚本'; emptyState.hidden = true; editor.hidden = false;
+           document.getElementById('saveState').textContent = `刚刚保存 · ${version}`; setGenerationState(`${version} 已生成`, 'success'); showToast(isFirstDraft ? '初稿与 8 个分镜建议已生成' : 'V4 已生成，新增 2 处事实核验提示');
+         }, 1100);
+       };
+       document.getElementById('generateScript').addEventListener('click', event => generateDraft(event.currentTarget));
+       document.getElementById('createFirstDraft').addEventListener('click', event => generateDraft(event.currentTarget));
+        document.getElementById('makeStoryboard').addEventListener('click', () => {
+         if (!editor.innerText.trim()) { setGenerationState('脚本为空，无法生成分镜', 'error'); editor.focus(); return; }
+         setGenerationState('分镜建议已同步', 'success'); showToast('已根据当前脚本更新 8 个分镜建议');
+       });
+        document.querySelectorAll('.segment-ai').forEach(button => button.addEventListener('click', event => { event.preventDefault(); const block = button.closest('.segment-block'); block.dataset.previous = block.querySelector('p').innerHTML; button.disabled = true; setGenerationState(`正在${button.dataset.action}当前段落…`, 'loading'); setTimeout(() => { const p = block.querySelector('p'); if (button.dataset.action === '扩写') p.insertAdjacentText('beforeend', ' 这一步的价值不在炫技，而在于减少一次不必要的注意力切换。'); if (button.dataset.action === '压缩') p.textContent = p.textContent.split('。')[0] + '。'; if (button.dataset.action === '重写') p.textContent = '真正改变通勤体验的，不是多一块屏幕，而是少一次掏出手机的打断。'; button.disabled = false; setGenerationState(`段落已${button.dataset.action}，可撤销`, 'success'); }, 500); }));
+        document.querySelectorAll('.undo-segment').forEach(button => button.addEventListener('click', event => { event.preventDefault(); const block = button.closest('.segment-block'); if (!block.dataset.previous) return showToast('当前段落没有可撤销的 AI 修改'); block.querySelector('p').innerHTML = block.dataset.previous; delete block.dataset.previous; setGenerationState('已撤销段落修改', 'success'); }));
+        document.querySelectorAll('.source-cite').forEach(button => button.addEventListener('click', () => { localStorage.setItem('stepwork-transcript-time', button.dataset.time); location.href = 'inspector.html#analysis-report'; }));
+        const storedAngle = localStorage.getItem('stepwork-angle'); if (storedAngle) document.getElementById('angleSource').textContent = storedAngle;
+        const openProject = item => {
+         document.querySelectorAll('.project-item').forEach(project => { project.classList.remove('active'); project.setAttribute('aria-pressed', 'false'); });
+         item.classList.add('active'); item.setAttribute('aria-pressed', 'true'); document.getElementById('projectCrumb').textContent = item.dataset.title;
+         const isEmpty = item.dataset.state === 'empty'; emptyState.hidden = !isEmpty; editor.hidden = isEmpty; setGenerationState(isEmpty ? '等待导入素材' : '已就绪'); showToast(`已打开：${item.dataset.title}`);
+       };
+       document.querySelectorAll('.project-item').forEach(item => item.addEventListener('click', () => openProject(item)));
+       let newProjectCount = 0;
+       document.getElementById('newProject').addEventListener('click', () => {
+         const item = document.createElement('button'); item.className = 'project-item'; item.type = 'button'; item.dataset.title = '未命名创作'; item.dataset.state = 'empty'; item.setAttribute('aria-pressed', 'false');
+         newProjectCount += 1; item.dataset.odId = `project-new-draft-${newProjectCount}`; item.innerHTML = '<span class="project-title">未命名创作</span><span class="project-meta">尚未添加素材</span>';
+         item.addEventListener('click', () => openProject(item)); document.querySelector('.project-list').prepend(item); const count = document.getElementById('draftCount'); count.dataset.count = String(Number(count.dataset.count) + 1); count.textContent = `${count.dataset.count} 个待审草稿`; openProject(item); item.focus(); showToast('已新建空白创作项目');
+       });
+
+       const board = document.getElementById('storyboard'); let dragged;
+       board.addEventListener('input', () => { document.getElementById('saveState').textContent = '分镜有未保存修改'; clearTimeout(saveTimer); saveTimer = setTimeout(() => { document.getElementById('saveState').textContent = '刚刚保存 · V3'; }, 700); });
+      board.addEventListener('dragstart', event => { dragged = event.target.closest('.shot'); if (dragged) dragged.classList.add('dragging'); });
+       const updateShotOrder = () => document.querySelectorAll('.shot').forEach((shot, index) => {
+         const number = String(index + 1).padStart(2, '0'); const title = shot.querySelector('.shot-title').textContent.trim();
+         shot.querySelector('.shot-thumb').textContent = number; shot.setAttribute('aria-label', `分镜 ${index + 1}：${title}`); shot.querySelector('.shot-title').setAttribute('aria-label', `分镜 ${index + 1} 标题`); shot.querySelector('.shot-copy').setAttribute('aria-label', `分镜 ${index + 1} 描述`);
+       });
+       board.addEventListener('dragend', () => { if (dragged) dragged.classList.remove('dragging'); dragged = null; updateShotOrder(); showToast('分镜顺序已更新'); });
+       board.addEventListener('dragover', event => { event.preventDefault(); const target = event.target.closest('.shot'); if (!dragged || !target || target === dragged) return; const box = target.getBoundingClientRect(); board.insertBefore(dragged, event.clientY < box.top + box.height / 2 ? target : target.nextSibling); });
+       board.addEventListener('keydown', event => {
+         const shot = event.target.closest('.shot'); if (!shot || event.target !== shot || !event.altKey || !['ArrowUp', 'ArrowDown'].includes(event.key)) return;
+         event.preventDefault(); const sibling = event.key === 'ArrowUp' ? shot.previousElementSibling : shot.nextElementSibling; if (!sibling) return;
+         if (event.key === 'ArrowUp') board.insertBefore(shot, sibling); else board.insertBefore(sibling, shot); updateShotOrder(); shot.focus(); showToast('分镜顺序已更新');
+       });
+    })();
+  </script>
+</body>
+</html>
