@@ -57,7 +57,7 @@ async def stream_pair() -> AsyncIterator[StreamPair]:
         accepted.set()
 
     server = await asyncio.start_server(_on_client, host="127.0.0.1", port=0)
-    port = server.sockets[0].getsockname()[1]  # type: ignore[index]
+    port = server.sockets[0].getsockname()[1]
 
     client_reader, client_writer = await asyncio.open_connection("127.0.0.1", port)
     await asyncio.wait_for(accepted.wait(), timeout=2.0)

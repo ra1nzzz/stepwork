@@ -33,7 +33,10 @@ async def test_ready_contains_protocol_and_capabilities(
 
 async def test_heartbeat_updates_last_heartbeat_at(worker_state: WorkerState) -> None:
     """调用 ``handle_heartbeat`` 后 ``state.last_heartbeat_at`` 被刷新。"""
-    assert worker_state.last_heartbeat_at is None
+    # 捕获初值到局部变量，避免 ``is None`` 把属性收窄为字面 None，
+    # 否则 mypy 因看不到 ``touch_heartbeat`` 的副作用而误判后续断言不可达。
+    before = worker_state.last_heartbeat_at
+    assert before is None
 
     payload = await lifecycle.handle_heartbeat(worker_state)
 

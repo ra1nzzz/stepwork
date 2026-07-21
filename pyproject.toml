@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "stepwork-worker"
 version = "0.1.0"
 description = "STEPWORK Python Worker Sidecar (W1.3)"
-readme = "README.md"
+readme = "worker/README.md"
 requires-python = ">=3.12"
 license = { text = "AGPL-3.0-or-later" }
 dependencies = [
@@ -27,11 +27,16 @@ dev = [
 [project.scripts]
 stepwork-worker = "worker.runtime.__main__:main"
 
+# W2 carry-over #3: package the `worker` top-level package (which has a
+# real worker/__init__.py) instead of only `runtime`. Resolving the
+# manifest from the repo root makes `pip install -e .` yield an
+# importable `worker.runtime` (previously the wheel mapped `runtime`
+# to a top-level package and dropped `worker`).
 [tool.hatch.build.targets.wheel]
-packages = ["runtime"]
+packages = ["worker"]
 
 [tool.hatch.build.targets.wheel.sources]
-"runtime" = "worker/runtime"
+worker = "worker"
 
 [tool.ruff]
 line-length = 100
@@ -58,17 +63,17 @@ warn_unreachable = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-testpaths = ["tests"]
+testpaths = ["worker/tests"]
 addopts = "-v --tb=short"
 
 [tool.coverage.run]
-source = ["runtime"]
+source = ["worker"]
 branch = true
 
 [tool.coverage.report]
-exclude_lines = [
+exclude-lines = [
   "pragma: no cover",
   "if __name__ == .__main__.:",
   "raise NotImplementedError",
 ]
-show_missing = true
+show-missing = true

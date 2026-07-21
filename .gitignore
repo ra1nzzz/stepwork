@@ -24,6 +24,7 @@ dist/
 dist-ssr/
 *.local
 .npm
+*.tsbuildinfo
 .pnpm-debug.log*
 yarn-debug.log*
 yarn-error.log*
