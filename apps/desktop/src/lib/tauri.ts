@@ -47,6 +47,8 @@ function mockAppInfo(): AppInfo {
     version: "0.1.0-mock",
     platform: "browser",
     stepwork_home: "~/STEPWORK (mock)",
+    restart_count: 0,
+    last_crash_at: null,
   };
 }
 

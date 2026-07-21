@@ -49,9 +49,16 @@ export interface SidecarError {
 
 /**
  * 应用信息（Tauri get_app_info 返回）
+ *
+ * v1.1 / W2: 新增 restart_count 与 last_crash_at，供运维 footer 展示
+ * sidecar 自愈重启次数与最近一次崩溃时间（对齐 Rust AppState 字段）。
  */
 export interface AppInfo {
   version: string;
   platform: string;
   stepwork_home: string;
+  /** sidecar 自愈重启累计次数（来自 Rust AppState.restart_count） */
+  restart_count: number;
+  /** 最近一次崩溃 UTC 时间 ISO 字符串；从未崩溃时为 null */
+  last_crash_at: string | null;
 }

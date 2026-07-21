@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Sidebar } from "./Sidebar";
+import { Footer } from "./Footer";
 
 interface AppShellProps {
   children: ReactNode;
@@ -7,7 +8,7 @@ interface AppShellProps {
 
 /**
  * 应用骨架：左侧固定 Sidebar（var(--sidebar) 宽），右侧主区
- * 与 Prototype .app-shell 结构 1:1 对齐
+ * 与 Prototype .app-shell 结构 1:1 对齐；底部追加运维 Footer。
  */
 export function AppShell({ children }: AppShellProps) {
   return (
@@ -15,6 +16,7 @@ export function AppShell({ children }: AppShellProps) {
       <Sidebar />
       <main className="app-main">
         <div className="app-main-inner">{children}</div>
+        <Footer />
       </main>
     </div>
   );
