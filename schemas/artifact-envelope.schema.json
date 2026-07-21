@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stepwork.dev/schemas/artifact-envelope.schema.json",
+  "title": "ArtifactEnvelope",
+  "description": "STEPWORK Artifact Envelope v1 (SYSTEM_SPEC §11.1). Every discrete artifact (transcript, analysis report, topic proposal, content version, rendered video, etc.) MUST be wrapped in this envelope.",
+  "type": "object",
+  "required": [
+    "artifactId",
+    "artifactType",
+    "schemaVersion",
+    "projectId",
+    "producer",
+    "sourceRefs",
+    "trustLevel",
+    "contentHash",
+    "createdAt"
+  ],
+  "properties": {
+    "artifactId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique identifier for this artifact"
+    },
+    "artifactType": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Artifact type identifier (e.g. transcript, content-analysis, topic-proposal, content-version, rendered-video). Namespaced kebab-case."
+    },
+    "schemaVersion": {
+      "type": "string",
+      "const": "1",
+      "description": "Envelope schema version. Fixed to \"1\" for v1."
+    },
+    "projectId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Owning project"
+    },
+    "producer": {
+      "type": "object",
+      "required": ["type", "id"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["user", "model", "agent", "plugin", "system"],
+          "description": "Producer category"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable identifier of the producer (user id, model id, agent id, plugin id, or system component name)"
+        },
+        "protocol": {
+          "type": "string",
+          "description": "Optional protocol through which the artifact was produced (e.g. mcp, a2a, acp)"
+        }
+      },
+      "additionalProperties": false
+    },
+    "content": {
+      "description": "Inline artifact content (JSON-serializable). Mutually exclusive with contentUri.",
+      "oneOf": [
+        { "type": "object" },
+        { "type": "array" },
+        { "type": "string" },
+        { "type": "number" },
+        { "type": "boolean" },
+        { "type": "null" }
+      ]
+    },
+    "contentUri": {
+      "type": ["string", "null"],
+      "description": "URI to externally-stored content (e.g. file:// for local binary, or content-addressed URI). Mutually exclusive with content."
+    },
+    "sourceRefs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "List of artifactIds / sourceAssetIds / external URIs this artifact derives from",
+      "default": []
+    },
+    "trustLevel": {
+      "type": "string",
+      "enum": [
+        "trusted-local",
+        "trusted-remote",
+        "verified-external",
+        "external-unverified",
+        "generated-unverified",
+        "human-reviewed"
+      ],
+      "description": "Trust classification per SYSTEM_SPEC §11.2"
+    },
+    "contentHash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "SHA-256 hex digest of the canonical content (64 lowercase hex chars)"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 timestamp when the artifact was produced"
+    }
+  },
+  "additionalProperties": false
+}

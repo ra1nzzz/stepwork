@@ -1,0 +1,85 @@
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# WorkBuddy
+.workbuddy/
+
+# Rust
+target/
+Cargo.lock.bak
+**/*.rs.bk
+*.pdb
+
+# Node / Frontend
+node_modules/
+dist/
+dist-ssr/
+*.local
+.npm
+.pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# STEPWORK runtime data (DO NOT commit user data)
+stepwork-home/
+workspaces/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+logs/
+cache/
+temp/
+backups/
+
+# Tauri / Sidecar binaries
+apps/desktop/src-tauri/target/
+worker/dist/
+worker/build/
+
+# Installer artifacts
+*.msi
+*.exe
+*.dmg
+*.AppImage
+
+# Secrets
+.env
+.env.local
+*.pem
+*.key
+
+# Media (large binaries should use Git LFS or external storage)
+*.mp4
+*.mov
+*.avi
+*.wav
+*.flac
+
+# IDE test
+coverage/
+.coverage
+.coverage.*
+.nyc_output/

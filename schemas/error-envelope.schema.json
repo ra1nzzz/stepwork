@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stepwork.dev/schemas/error-envelope.schema.json",
+  "title": "ErrorEnvelope",
+  "description": "STEPWORK unified error envelope (SYSTEM_SPEC §16). All errors returned to callers MUST be wrapped in this envelope.",
+  "type": "object",
+  "required": ["code", "message", "retryable"],
+  "properties": {
+    "code": {
+      "type": "string",
+      "pattern": "^(VALIDATION|AUTH|PERMISSION|STORAGE|PROVIDER|AGENT|PLUGIN|RENDER|PUBLISH|INTERNAL)_[A-Z0-9_]+$",
+      "description": "Stable error code in UPPER_SNAKE_CASE with category prefix (e.g. AGENT_PERMISSION_DENIED). See SYSTEM_SPEC §16 for the category list."
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable error description (may be localized)"
+    },
+    "retryable": {
+      "type": "boolean",
+      "description": "Whether the caller may retry this operation without changing inputs"
+    },
+    "details": {
+      "type": "object",
+      "description": "Optional structured details (field-level errors, provider responses, stack fingerprints). MUST NOT contain secrets.",
+      "default": {}
+    },
+    "correlationId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Correlation identifier linking this error to logs / audit events"
+    },
+    "userAction": {
+      "type": "string",
+      "description": "Optional actionable guidance for the user to resolve the error (e.g. \"Grant project:read scope in Agent Connections\")"
+    }
+  },
+  "additionalProperties": false
+}

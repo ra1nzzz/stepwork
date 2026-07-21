@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stepwork.dev/schemas/command-envelope.schema.json",
+  "title": "CommandEnvelope",
+  "description": "STEPWORK Command Envelope v1 (SYSTEM_SPEC §7.1). All requests entering the Application Services layer MUST be wrapped in this envelope.",
+  "type": "object",
+  "required": [
+    "commandId",
+    "commandType",
+    "schemaVersion",
+    "actor",
+    "source",
+    "workspaceId",
+    "payload",
+    "requestedAt"
+  ],
+  "properties": {
+    "commandId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique identifier for this command invocation"
+    },
+    "commandType": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Command type identifier (e.g. AnalyzeSource, GenerateScript). See SYSTEM_SPEC §7.2 for the canonical list."
+    },
+    "schemaVersion": {
+      "type": "string",
+      "const": "1",
+      "description": "Envelope schema version. Fixed to \"1\" for v1."
+    },
+    "actor": {
+      "type": "object",
+      "required": ["type", "id"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["user", "agent", "plugin", "system"],
+          "description": "Actor category"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable identifier of the actor (user id, agent id, plugin id, or system component name)"
+        }
+      },
+      "additionalProperties": false
+    },
+    "source": {
+      "type": "string",
+      "enum": ["ui", "cli", "mcp", "a2a", "acp", "plugin", "scheduled"],
+      "description": "Protocol adapter through which this command entered the system"
+    },
+    "workspaceId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Target workspace"
+    },
+    "projectId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Target project (optional; some commands operate at workspace scope)"
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional idempotency key. Side-effecting commands SHOULD provide one."
+    },
+    "payload": {
+      "type": "object",
+      "description": "Command-specific payload. Each commandType defines its own payload schema."
+    },
+    "requestedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 timestamp when the command was issued by the caller"
+    }
+  },
+  "additionalProperties": false
+}

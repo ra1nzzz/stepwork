@@ -1,0 +1,39 @@
+# STEPWORK 许可证说明
+
+STEPWORK 采用**双许可证**策略，不同模块适用不同许可证。本文件是许可证入口说明。
+
+## 模块 → 许可证映射
+
+| 模块路径 | 许可证 | 说明 |
+|---|---|---|
+| `core/` | AGPL-3.0-or-later | 领域模型、Application Services、Command Bus、Policies |
+| `worker/` | AGPL-3.0-or-later | Python Worker、任务引擎、Provider 集成、媒体处理 |
+| `apps/desktop/` | AGPL-3.0-or-later | Tauri 桌面宿主、React 前端 |
+| `agent-interop/` | AGPL-3.0-or-later | CLI / MCP / A2A / ACP 协议适配器 |
+| `publisher-engine/` | AGPL-3.0-or-later | 浏览器发布执行引擎 |
+| `sdk/python/` | Apache-2.0 | Python SDK |
+| `sdk/typescript/` | Apache-2.0 | TypeScript SDK |
+| `sdk/plugin/` | Apache-2.0 | Plugin SDK |
+| `sdk/agent-adapter/` | Apache-2.0 | Agent Adapter SDK |
+| `plugins/examples/` | Apache-2.0 | 示例插件 |
+| `docs/` | CC BY-SA 4.0 | 所有文档 |
+| `schemas/` | CC0-1.0 | JSON Schema 定义（供任意实现自由使用） |
+
+## 许可证全文
+
+- **AGPL-3.0-or-later**：见 [LICENSE-AGPL-3.0.txt](./LICENSE-AGPL-3.0.txt)
+- **Apache-2.0**：见 [LICENSE-APACHE-2.0.txt](./LICENSE-APACHE-2.0.txt)
+- **CC BY-SA 4.0**：https://creativecommons.org/licenses/by-sa/4.0/legalcode
+- **CC0-1.0**：https://creativecommons.org/publicdomain/zero/1.0/legalcode
+
+## 商标
+
+"STEPWORK" 名称、Logo 与相关标识由项目维护者保留商标权。许可证授权不延伸至商标使用。详见 [TRADEMARK.md](./TRADEMARK.md)。
+
+## 贡献者协议
+
+提交 Pull Request 即表示您同意您贡献的代码按上述对应模块的许可证发布。详见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
+
+## 第三方组件
+
+STEPWORK 依赖多个第三方开源组件，其许可证各自独立。详见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。
