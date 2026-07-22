@@ -1,0 +1,68 @@
+{
+  "type": "object",
+  "title": "AnalysisReport",
+  "properties": {
+    "summary": {
+      "type": "string"
+    },
+    "topics": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "sentiment": {
+      "type": "string",
+      "enum": [
+        "positive",
+        "neutral",
+        "negative"
+      ]
+    },
+    "suggested_title": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "suggested_tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "key_points": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "target_audience": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "provider": {
+      "type": "string"
+    },
+    "model": {
+      "type": "string"
+    },
+    "confidence": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "summary",
+    "topics",
+    "sentiment",
+    "suggested_title",
+    "suggested_tags",
+    "key_points",
+    "target_audience",
+    "provider",
+    "model",
+    "confidence"
+  ]
+}

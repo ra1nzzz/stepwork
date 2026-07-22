@@ -299,6 +299,12 @@ class ContentVersionRepo:
         self.conn.commit()
         return cv.id
 
+    def get(self, cv_id: str) -> ContentVersion | None:
+        row = self.conn.execute(
+            "SELECT * FROM content_versions WHERE id=?", (cv_id,)
+        ).fetchone()
+        return _row_to_content_version(row) if row is not None else None
+
 
 class Repos:
     """聚合所有 repo，统一从同一 ``conn`` 构造。"""
