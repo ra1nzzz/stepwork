@@ -30,6 +30,10 @@
     "targets": ["nsis"],
     "icon": [],
     "externalBin": [],
-    "webviewInstallMode": "embedBootstrapper"
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      }
+    }
   }
 }
