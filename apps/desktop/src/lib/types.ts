@@ -92,7 +92,9 @@ export interface CommandEnvelope {
     | "AnalyzeSource"
     | "GenerateTopic"
     | "GenerateScript"
-    | "SaveScript";
+    | "SaveScript"
+    | "CreateRenderJob"
+    | "CancelJob";
   schemaVersion: string;
   actor: string;
   source: string;
@@ -231,6 +233,32 @@ export interface GenerateScriptPayload {
 export interface SaveScriptPayload {
   content: string | Record<string, unknown>;
   parent_version_id?: string | null;
+}
+
+/** CreateRenderJob payload（对齐 RenderSpec / render_source.py） */
+export interface CreateRenderJobPayload {
+  source_version_id: string;
+  template?: string;
+  tts_engine?: "synthesize" | "user_audio";
+  tts_provider?: string | null;
+  user_audio_uri?: string | null;
+  background_uri?: string | null;
+}
+
+/** CancelJob payload（对齐 cancel_job.py） */
+export interface CancelJobPayload {
+  job_id: string;
+}
+
+/** 渲染产物元数据（对齐 VideoDraftMeta / video_draft 内容） */
+export interface VideoDraftMeta {
+  video_uri: string;
+  duration_seconds: number;
+  template: string;
+  tts_engine: string;
+  resolution: [number, number];
+  fps: number;
+  source_version_id: string;
 }
 
 /** 前端 provider 选择（provider-switch UI） */

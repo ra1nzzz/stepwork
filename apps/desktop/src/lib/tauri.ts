@@ -182,5 +182,16 @@ function mockDetail(commandType: CommandEnvelope["commandType"]): Record<string,
       },
     };
   }
+  if (commandType === "CreateRenderJob") {
+    return {
+      mock: true,
+      video_uri: "file:///mock/render/out.mp4",
+      template: "vertical-caption-v1",
+      tts_engine: "synthesize",
+    };
+  }
+  if (commandType === "CancelJob") {
+    return { mock: true, cancelled: true };
+  }
   return { mock: true };
 }
