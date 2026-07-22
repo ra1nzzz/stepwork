@@ -9,6 +9,17 @@ import type { AppInfo, HealthStatus } from "./types";
 export const isTauri = (): boolean =>
   typeof window !== "undefined" && "__TAURI__" in window;
 
+/**
+ * Dev bridge 模式（P1）：当以 `VITE_DEV_BRIDGE=1 npm run dev` 启动时，
+ * 浏览器版 GUI 不再走 mock，而是把命令转发到本地 Python dev_bridge
+ * （worker/dev_bridge.py），从而调用**真实**的 worker Command Bus。
+ * 这在没有 Rust sidecar 的纯前端开发/沙箱环境里，让 MVP 功能真正可用。
+ */
+export const DEV_BRIDGE = import.meta.env.VITE_DEV_BRIDGE === "1";
+const DEV_BRIDGE_URL =
+  (import.meta.env.VITE_DEV_BRIDGE_URL as string | undefined) ??
+  "http://127.0.0.1:8787";
+
 type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
 let cachedInvoke: InvokeFn | null = null;
@@ -53,6 +64,26 @@ function mockAppInfo(): AppInfo {
 }
 
 export async function getWorkerHealth(): Promise<HealthStatus> {
+  if (DEV_BRIDGE) {
+    try {
+      const res = await fetch(`${DEV_BRIDGE_URL}/health`);
+      if (res.ok) return (await res.json()) as HealthStatus;
+    } catch {
+      /* 桥未启动：返回降级健康，UI 仍可渲染 */
+    }
+    return {
+      status: "degraded",
+      version: "0.1.0-bridge-offline",
+      protocol_version: "1",
+      uptime_seconds: 0,
+      pid: 0,
+      last_heartbeat_at: new Date().toISOString(),
+      startup_duration_ms: 0,
+      active_jobs: 0,
+      degraded_reasons: ["dev_bridge_offline"],
+      runtime_info: { python_version: "n/a", sqlite_version: "n/a", platform: "browser-devbridge" },
+    };
+  }
   if (!isTauri()) {
     // 模拟网络/进程延迟
     await new Promise((r) => setTimeout(r, 220));
@@ -125,6 +156,36 @@ export function buildEnvelope<T>(
 export async function dispatchCommand(
   envelope: CommandEnvelope,
 ): Promise<CommandResult> {
+  if (DEV_BRIDGE) {
+    try {
+      const res = await fetch(`${DEV_BRIDGE_URL}/dispatch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(envelope),
+      });
+      if (!res.ok) {
+        const txt = await res.text();
+        return {
+          ok: false,
+          commandId: envelope.commandId,
+          job_id: null,
+          artifact_ids: [],
+          error: `DEV_BRIDGE_HTTP_${res.status}`,
+          detail: { http_body: txt },
+        };
+      }
+      return (await res.json()) as CommandResult;
+    } catch (e) {
+      return {
+        ok: false,
+        commandId: envelope.commandId,
+        job_id: null,
+        artifact_ids: [],
+        error: "DEV_BRIDGE_OFFLINE",
+        detail: { cause: String(e) },
+      };
+    }
+  }
   if (!isTauri()) {
     await new Promise((r) => setTimeout(r, 300));
     return mockDispatchResult(envelope);
