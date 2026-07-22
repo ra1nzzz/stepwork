@@ -40,7 +40,7 @@ def _env(command_type: str, payload: dict[str, Any], project_id: str) -> Command
     )
 
 
-def test_render_end_to_end() -> None:
+async def test_render_end_to_end() -> None:
     conn = in_memory()
     run_migrations(conn, MIGRATIONS_DIR)
     repos = Repos(conn)
@@ -67,7 +67,7 @@ def test_render_end_to_end() -> None:
         {"source_version_id": cv_id, "tts_engine": "synthesize"},
         prj_id,
     )
-    out = dispatch(env.model_dump(), deps)
+    out = await dispatch(env.model_dump(), deps)
     assert out["ok"] is True, out
     rows = conn.execute(
         "SELECT id FROM content_versions WHERE content_type='video_draft'"

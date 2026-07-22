@@ -15,7 +15,7 @@ from worker.runtime.jobs.cancel import request as request_cancel
 from worker.runtime.models import CommandEnvelope, CommandResult, JobState
 
 
-def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
+async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     """处理 ``CancelJob``。"""
     job_id = (env.payload or {}).get("job_id")
     if not job_id:

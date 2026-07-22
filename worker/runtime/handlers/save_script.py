@@ -18,7 +18,7 @@ from worker.runtime.models import (
 )
 
 
-def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
+async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     """处理 ``SaveScript``。"""
     repos = deps.repos
     p: dict[str, Any] = env.payload

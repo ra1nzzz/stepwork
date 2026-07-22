@@ -79,9 +79,9 @@ def _env(
     }
 
 
-def test_dispatch_analyze_by_text() -> None:
+async def test_dispatch_analyze_by_text() -> None:
     deps = _deps(_FakeAIProvider())
-    res = dispatch(_env("AnalyzeSource", {"text": "素材转写内容……"}), deps)
+    res = await dispatch(_env("AnalyzeSource", {"text": "素材转写内容……"}), deps)
     assert res["ok"] is True
     assert len(res["artifact_ids"]) == 1
 
@@ -95,7 +95,7 @@ def test_dispatch_analyze_by_text() -> None:
     assert report.sentiment == "positive"
 
 
-def test_dispatch_analyze_by_transcript_version() -> None:
+async def test_dispatch_analyze_by_transcript_version() -> None:
     c = in_memory()
     run_migrations(c, _MIG_DIR)
     repos = Repos(c)
@@ -110,7 +110,7 @@ def test_dispatch_analyze_by_transcript_version() -> None:
     tv_id = repos.content_versions.insert(tv)
 
     deps = Deps(repos=repos, ingest=ingest, asr=None, ai=_FakeAIProvider())
-    res = dispatch(
+    res = await dispatch(
         _env("AnalyzeSource", {"transcript_version_id": tv_id}, ws_id, prj_id),
         deps,
     )
@@ -118,15 +118,15 @@ def test_dispatch_analyze_by_transcript_version() -> None:
     assert res["detail"]["sentiment"] == "positive"
 
 
-def test_analyze_without_provider_fails() -> None:
+async def test_analyze_without_provider_fails() -> None:
     deps = _deps(None)
-    res = dispatch(_env("AnalyzeSource", {"text": "x"}), deps)
+    res = await dispatch(_env("AnalyzeSource", {"text": "x"}), deps)
     assert res["ok"] is False
     assert "UNAVAILABLE" in (res.get("error") or "")
 
 
-def test_analyze_invalid_report_fails() -> None:
+async def test_analyze_invalid_report_fails() -> None:
     deps = _deps(_BadAIProvider())
-    res = dispatch(_env("AnalyzeSource", {"text": "x"}), deps)
+    res = await dispatch(_env("AnalyzeSource", {"text": "x"}), deps)
     assert res["ok"] is False
     assert "ANALYSIS_FAILED" in (res.get("error") or "")

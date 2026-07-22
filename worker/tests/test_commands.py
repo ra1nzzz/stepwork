@@ -44,19 +44,19 @@ def test_parse_envelope_invalid() -> None:
     assert raised, "expected EnvelopeError"
 
 
-def test_dispatch_import_source() -> None:
+async def test_dispatch_import_source() -> None:
     deps = _deps()
     payload: dict[str, Any] = {
         "local_uri": "file://a.mp4",
         "content_hash": "h123",
         "kind": "video",
     }
-    res = dispatch(_envelope("ImportSource", payload), deps)
+    res = await dispatch(_envelope("ImportSource", payload), deps)
     assert res["ok"] is True
     assert len(res["artifact_ids"]) == 1
 
 
-def test_dispatch_unknown() -> None:
+async def test_dispatch_unknown() -> None:
     deps = _deps()
-    res = dispatch(_envelope("NoSuchCommand", {}), deps)
+    res = await dispatch(_envelope("NoSuchCommand", {}), deps)
     assert res["ok"] is False

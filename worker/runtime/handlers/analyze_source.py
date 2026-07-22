@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 from typing import Any
 
@@ -30,7 +29,7 @@ from worker.runtime.models import (
 from worker.runtime.providers.resolve import ai_provider_from_hint
 
 
-def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
+async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     """处理 ``AnalyzeSource``。"""
     repos = deps.repos
     p: dict[str, Any] = env.payload
@@ -87,7 +86,7 @@ def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     acquire(repos.conn, job.id, owner="analyze_source", ttl_sec=600)
 
     try:
-        raw = asyncio.run(ai.complete(prompt, ANALYSIS_SCHEMA))
+        raw = await ai.complete(prompt, ANALYSIS_SCHEMA)
         report = parse_analysis_report(raw)
     except Exception as e:  # 分析失败需转译为领域错误
         transition(repos, job.id, JobState.FAILED, error=str(e)[:200])

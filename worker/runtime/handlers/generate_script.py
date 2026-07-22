@@ -8,7 +8,6 @@
 """
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 from typing import Any
@@ -29,7 +28,7 @@ from worker.runtime.script.parse import parse_script
 from worker.runtime.script.prompt import SCRIPT_SCHEMA, build_script_prompt
 
 
-def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
+async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     """处理 ``GenerateScript``。"""
     repos = deps.repos
     try:
@@ -64,7 +63,7 @@ def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     )
     job = transition(repos, job.id, JobState.RUNNING)
     try:
-        raw = asyncio.run(ai.complete(prompt, SCRIPT_SCHEMA))
+        raw = await ai.complete(prompt, SCRIPT_SCHEMA)
         script = parse_script(raw)
     except Exception as e:
         transition(repos, job.id, JobState.FAILED, error=str(e)[:200])

@@ -67,10 +67,10 @@ def _src_id(deps: Deps) -> str:
     )
 
 
-def test_generate_topic() -> None:
+async def test_generate_topic() -> None:
     deps = _deps()
     src = _src_id(deps)
-    res = dispatch(_env("GenerateTopic", {"source_version_id": src, "count": 3}), deps)
+    res = await dispatch(_env("GenerateTopic", {"source_version_id": src, "count": 3}), deps)
     assert res["ok"] is True
     assert len(res["artifact_ids"]) == 1
     row = deps.repos.conn.execute(
@@ -82,7 +82,7 @@ def test_generate_topic() -> None:
     assert len(data["angles"]) == 1  # fake 只给 1 个，截断到 count
 
 
-def test_generate_script() -> None:
+async def test_generate_script() -> None:
     deps = _deps()
     pid = _pid(deps)
     prop_id = deps.repos.content_versions.insert(
@@ -96,7 +96,10 @@ def test_generate_script() -> None:
             producer={},
         )
     )
-    res = dispatch(_env("GenerateScript", {"proposal_version_id": prop_id, "topic_id": "a1"}), deps)
+    res = await dispatch(
+        _env("GenerateScript", {"proposal_version_id": prop_id, "topic_id": "a1"}),
+        deps,
+    )
     assert res["ok"] is True
     row = deps.repos.conn.execute(
         "SELECT content_type, parent_version_id FROM content_versions WHERE id=?",
@@ -106,7 +109,7 @@ def test_generate_script() -> None:
     assert row["parent_version_id"] == prop_id
 
 
-def test_save_script_version_chain() -> None:
+async def test_save_script_version_chain() -> None:
     deps = _deps()
     pid = _pid(deps)
     v1 = deps.repos.content_versions.insert(
@@ -118,7 +121,7 @@ def test_save_script_version_chain() -> None:
             producer={},
         )
     )
-    res = dispatch(
+    res = await dispatch(
         _env(
             "SaveScript",
             {"content": json.dumps({"title": "v2", "body": "b2"}), "parent_version_id": v1},

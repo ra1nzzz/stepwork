@@ -37,7 +37,7 @@ class DispatchError(Exception):
         super().__init__(f"{code}: {message}")
 
 
-def dispatch(raw: dict[str, Any], deps: Any) -> dict[str, Any]:
+async def dispatch(raw: dict[str, Any], deps: Any) -> dict[str, Any]:
     """校验信封并路由到对应 handler。
 
     Args:
@@ -61,9 +61,14 @@ def dispatch(raw: dict[str, Any], deps: Any) -> dict[str, Any]:
 
     handler = importlib.import_module(module_path).handle
     try:
-        result: CommandResult = handler(env, deps)
+        result: CommandResult = await handler(env, deps)
     except DispatchError as e:
         return CommandResult(
             ok=False, commandId=env.commandId, error=f"{e.code}: {e.message}"
+        ).model_dump()
+    except Exception as exc:
+        # 兜底：任何未预期异常都转为干净的 ok=False，避免击垮 RPC 循环
+        return CommandResult(
+            ok=False, commandId=env.commandId, error=f"internal: {exc}"
         ).model_dump()
     return result.model_dump()

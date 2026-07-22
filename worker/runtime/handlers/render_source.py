@@ -15,6 +15,7 @@ import hashlib
 import os
 import tempfile
 import threading
+from pathlib import Path
 
 from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
@@ -38,7 +39,15 @@ from worker.runtime.render.ffmpeg_runner import (
 _MAX_DRAFT_META_CHARS = 20000
 
 
-def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
+def _video_content_hash(video_uri: str) -> str:
+    """对视频文件字节做 sha256，文件缺失时回退到路径哈希。"""
+    try:
+        return hashlib.sha256(Path(video_uri).read_bytes()).hexdigest()
+    except (OSError, ValueError):
+        return hashlib.sha256(video_uri.encode("utf-8")).hexdigest()
+
+
+async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     """处理 ``RenderSource``。"""
     repos = deps.repos
     try:
@@ -81,18 +90,32 @@ def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             tts = deps.tts
             if tts is None:
                 raise DispatchError("UNAVAILABLE", "tts provider not configured")
-            audio_uri = asyncio.run(
-                tts.synthesize(src.content, {"out_dir": tts_out_dir})
+            audio_uri = await tts.synthesize(
+                src.content, {"out_dir": tts_out_dir}
             )
 
         spec.caption_text = (src.content or "")[:200]
 
+        # renderer.render 是阻塞的同步调用（跑 ffmpeg），放入 worker 线程，
+        # 避免阻塞主事件循环。进度回调会跨线程触发，因此通过主线程的 loop
+        # 把 DB 写入（transition）调度回主线程执行，确保所有 DB 访问留在
+        # 创建连接的主线程（db_conn 使用 check_same_thread=True）。
+        loop = asyncio.get_running_loop()
+
         def _progress(prog: float) -> None:
-            transition(
-                repos, job.id, JobState.RUNNING, progress=prog, stage=JobStage.RENDERING
+            loop.call_soon_threadsafe(
+                lambda: transition(
+                    repos,
+                    job.id,
+                    JobState.RUNNING,
+                    progress=prog,
+                    stage=JobStage.RENDERING,
+                )
             )
 
-        result = renderer.render(spec, audio_uri, _progress, cancel_event)
+        result = await asyncio.to_thread(
+            renderer.render, spec, audio_uri, _progress, cancel_event
+        )
 
         meta = VideoDraftMeta(
             video_uri=result.video_uri,
@@ -116,7 +139,7 @@ def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             parent_version_id=spec.source_version_id,
             content_type="video_draft",
             content=content,
-            content_hash=hashlib.sha256(result.video_uri.encode("utf-8")).hexdigest(),
+            content_hash=_video_content_hash(result.video_uri),
             producer=meta.producer,
         )
         cv_id = repos.content_versions.insert(cv)

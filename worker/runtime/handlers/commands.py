@@ -52,4 +52,4 @@ async def handle_command(
         tts=resolve_tts(),
         renderer=resolve_renderer(),
     )
-    return dispatch(raw, deps)
+    return await dispatch(raw, deps)

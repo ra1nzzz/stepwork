@@ -35,13 +35,13 @@ def _env(command_type: str, payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def test_dispatch_transcribe_source() -> None:
+async def test_dispatch_transcribe_source() -> None:
     deps = _deps()
     payload: dict[str, Any] = {
         "local_uri": "file://a.mp4",
         "opts": {"duration_sec": 12},
     }
-    res = dispatch(_env("TranscribeSource", payload), deps)
+    res = await dispatch(_env("TranscribeSource", payload), deps)
     assert res["ok"] is True
     assert len(res["artifact_ids"]) == 1
 
@@ -54,11 +54,11 @@ def test_dispatch_transcribe_source() -> None:
     assert len(row["content"]) > 0
 
 
-def test_transcribe_without_provider_fails() -> None:
+async def test_transcribe_without_provider_fails() -> None:
     c = in_memory()
     run_migrations(c, _MIG_DIR)
     deps = Deps(repos=Repos(c), ingest=ingest, asr=None, ai=None)
     payload: dict[str, Any] = {"local_uri": "file://a.mp4"}
-    res = dispatch(_env("TranscribeSource", payload), deps)
+    res = await dispatch(_env("TranscribeSource", payload), deps)
     assert res["ok"] is False
     assert "UNAVAILABLE" in (res.get("error") or "")

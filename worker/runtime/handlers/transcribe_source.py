@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 from typing import Any
 
@@ -29,7 +28,7 @@ from worker.runtime.models import (
 _MAX_TRANSCRIPT_CHARS = 20000
 
 
-def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
+async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     """处理 ``TranscribeSource``。"""
     repos = deps.repos
     p: dict[str, Any] = env.payload
@@ -68,7 +67,7 @@ def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     acquire(repos.conn, job.id, owner="transcribe_source", ttl_sec=600)
 
     try:
-        transcript = asyncio.run(asr.transcribe(local_uri, p.get("opts")))
+        transcript = await asr.transcribe(local_uri, p.get("opts"))
     except Exception as e:  # 转写失败需转译为领域错误
         transition(repos, job.id, JobState.FAILED, error=str(e)[:200])
         raise DispatchError("TRANSCRIBE_FAILED", str(e)[:200]) from None

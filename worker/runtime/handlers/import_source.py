@@ -17,7 +17,7 @@ from worker.runtime.deps import Deps
 from worker.runtime.models import CommandEnvelope, CommandResult, SourceAsset
 
 
-def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
+async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     """处理 ``ImportSource``。"""
     repos = deps.repos
     p: dict[str, Any] = env.payload

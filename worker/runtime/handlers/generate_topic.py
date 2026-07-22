@@ -9,7 +9,6 @@
 """
 from __future__ import annotations
 
-import asyncio
 import hashlib
 
 from worker.runtime.commands.bus import DispatchError
@@ -28,7 +27,7 @@ from worker.runtime.topic.parse import parse_topic_proposal
 from worker.runtime.topic.prompt import TOPIC_SCHEMA, build_topic_prompt
 
 
-def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
+async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     """处理 ``GenerateTopic``。"""
     repos = deps.repos
     try:
@@ -59,7 +58,7 @@ def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     )
     job = transition(repos, job.id, JobState.RUNNING)
     try:
-        raw = asyncio.run(ai.complete(prompt, TOPIC_SCHEMA))
+        raw = await ai.complete(prompt, TOPIC_SCHEMA)
         proposal = parse_topic_proposal(raw, spec.count)
     except Exception as e:
         transition(repos, job.id, JobState.FAILED, error=str(e)[:200])
