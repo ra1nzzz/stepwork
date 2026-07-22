@@ -52,4 +52,6 @@ async def handle_command(
         tts=resolve_tts(),
         renderer=resolve_renderer(),
     )
-    return await dispatch(raw, deps)
+    # 包装为 {"result": <CommandResult dict>}，与模块 docstring 合约一致；
+    # _dispatch 据此走 result 分支（否则会把 error 字符串当 dict 调 .get 崩）。
+    return {"result": await dispatch(raw, deps)}
