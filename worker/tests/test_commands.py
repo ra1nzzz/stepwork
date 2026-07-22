@@ -60,3 +60,27 @@ async def test_dispatch_unknown() -> None:
     deps = _deps()
     res = await dispatch(_envelope("NoSuchCommand", {}), deps)
     assert res["ok"] is False
+
+
+def test_parse_envelope_invalid_actor_type() -> None:
+    # R3 非阻项 #3：契约漂移路径（未知 actor.type）应被干净拒绝
+    raw = _envelope("ImportSource", {"local_uri": "file://a.mp4"})
+    raw["actor"] = {"type": "bot", "id": "x"}
+    raised = False
+    try:
+        parse_envelope(raw)
+    except EnvelopeError:
+        raised = True
+    assert raised, "expected EnvelopeError for unknown actor.type"
+
+
+def test_parse_envelope_bad_schema_version() -> None:
+    # R3 非阻项 #3：契约漂移路径（schemaVersion 错配）应被干净拒绝
+    raw = _envelope("ImportSource", {"local_uri": "file://a.mp4"})
+    raw["schemaVersion"] = "99"
+    raised = False
+    try:
+        parse_envelope(raw)
+    except EnvelopeError:
+        raised = True
+    assert raised, "expected EnvelopeError for unsupported schemaVersion"

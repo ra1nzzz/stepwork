@@ -68,20 +68,27 @@ export interface AppInfo {
  */
 
 export type JobState =
-  | "PENDING"
-  | "LEASED"
-  | "RUNNING"
-  | "SUCCEEDED"
-  | "FAILED"
-  | "CANCELLED"
-  | "EXPIRED";
+  | "pending"
+  | "leased"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "cancelled-request-ed"
+  | "expired";
 
 export type JobStage =
-  | "PENDING"
-  | "IMPORTING"
-  | "TRANSCRIBING"
-  | "ANALYZING"
-  | "DONE";
+  | "downloading"
+  | "transcribing"
+  | "analyzing"
+  | "delegating"
+  | "generating"
+  | "proposing"
+  | "scripting"
+  | "synthesizing"
+  | "rendering"
+  | "publishing"
+  | "verifying";
 
 /** Command Bus 信封（对齐 schemas/command-envelope.schema.json） */
 export interface CommandEnvelope {

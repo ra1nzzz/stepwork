@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import threading
@@ -17,6 +18,7 @@ from worker.runtime.models import (
     CommandEnvelope,
     ContentProject,
     ContentVersion,
+    VideoDraftMeta,
     Workspace,
 )
 from worker.runtime.providers.renderer.ffmpeg import FFmpegRenderer
@@ -84,3 +86,26 @@ def test_cancel_registry() -> None:
     assert ev.is_set()
     assert request("job-nope") is False
     clear("job-z")
+
+
+def test_truncate_meta_json_valid_and_bounded() -> None:
+    # R3 非阻项（quality #2）：超长 VideoDraftMeta 必须落库为合法 JSON 且 <= 上限
+    from worker.runtime.handlers.render_source import _truncate_meta_json
+
+    meta = VideoDraftMeta(
+        video_uri="file:///tmp/out.mp4",
+        duration_seconds=12.5,
+        template="X" * 30000,
+        tts_engine="synthesize",
+        resolution=(1920, 1080),
+        fps=30,
+        source_version_id="cv-1",
+    )
+    out = _truncate_meta_json(meta)
+    # 必须是合法 JSON（可回读）
+    parsed = json.loads(out)
+    assert isinstance(parsed, dict)
+    # 不超过上限
+    assert len(out) <= 20000
+    # 超长字段确实被裁剪
+    assert len(parsed.get("template", "")) < 30000

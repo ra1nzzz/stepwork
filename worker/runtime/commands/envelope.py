@@ -9,14 +9,27 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
 
 from worker.runtime.models import CommandEnvelope
 
-# 与 schemas/command-envelope.schema.json 的 actor.type 枚举保持一致
-ALLOWED_ACTOR_TYPES: tuple[str, ...] = ("user", "agent", "plugin", "system", "desktop")
+# 单一事实源：actor.type 枚举直接从仓库根 schemas/command-envelope.schema.json
+# 读取，避免与 types.ts / schema.json 三处手工维护产生漂移（R3 非阻项 #1）。
+# envelope.py 位于 worker/runtime/commands/，故 parents[3] 即仓库根。
+_SCHEMA_PATH = Path(__file__).resolve().parents[3] / "schemas" / "command-envelope.schema.json"
+try:
+    with _SCHEMA_PATH.open(encoding="utf-8") as _f:
+        _SCHEMA = json.load(_f)
+    ALLOWED_ACTOR_TYPES: tuple[str, ...] = tuple(
+        _SCHEMA["properties"]["actor"]["properties"]["type"]["enum"]
+    )
+except (OSError, KeyError, json.JSONDecodeError):
+    # 兜底：schema 文件缺失/结构变更时仍保证可用（与 types.ts 当前取值一致）
+    ALLOWED_ACTOR_TYPES = ("user", "agent", "plugin", "system", "desktop")
 # 当前信封契约版本（schema.json 中 schemaVersion 为 const "1"）
 EXPECTED_SCHEMA_VERSION = "1"
 
