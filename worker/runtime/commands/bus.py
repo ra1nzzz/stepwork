@@ -22,6 +22,9 @@ _ROUTES: dict[str, str] = {
     "AnalyzeSource": "worker.runtime.handlers.analyze_source",
     "CreateRenderJob": "worker.runtime.handlers.render_source",
     "CancelJob": "worker.runtime.handlers.cancel_job",
+    "GenerateTopic": "worker.runtime.handlers.generate_topic",
+    "GenerateScript": "worker.runtime.handlers.generate_script",
+    "SaveScript": "worker.runtime.handlers.save_script",
 }
 
 

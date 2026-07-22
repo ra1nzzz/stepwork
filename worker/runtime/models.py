@@ -47,6 +47,8 @@ class JobStage(StrEnum):
     ANALYZING = "analyzing"
     DELEGATING = "delegating"
     GENERATING = "generating"
+    PROPOSING = "proposing"
+    SCRIPTING = "scripting"
     SYNTHESIZING = "synthesizing"
     RENDERING = "rendering"
     PUBLISHING = "publishing"
@@ -191,6 +193,35 @@ class VideoDraftMeta(BaseModel):
     fps: int
     source_version_id: str
     producer: dict[str, Any] = Field(default_factory=dict)
+
+
+class TopicAngle(BaseModel):
+    """单一选题角度（W5）。"""
+    id: str
+    title: str
+    rationale: str
+    hook: str
+
+
+class TopicProposal(BaseModel):
+    """选题提案（W5，落 ``content_versions(content_type="topic_proposal")``）。"""
+    angles: list[TopicAngle]
+
+
+class TopicProposalSpec(BaseModel):
+    """``GenerateTopic`` 命令输入（W5）。"""
+    source_version_id: str
+    count: int = 5
+    provider: dict[str, Any] | None = None
+
+
+class ScriptSpec(BaseModel):
+    """``GenerateScript`` 命令输入（W5）。"""
+    proposal_version_id: str | None = None
+    topic_id: str | None = None
+    outline: str | None = None
+    style: str = "short_video"
+    provider: dict[str, Any] | None = None
 
 
 class CommandEnvelope(BaseModel):
