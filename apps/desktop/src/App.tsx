@@ -7,6 +7,7 @@ import { useViewStore } from "@/stores/useViewStore";
 import { ImportView } from "@/features/import/ImportView";
 import { TranscriptView } from "@/features/transcript/TranscriptView";
 import { AnalysisView } from "@/features/analysis/AnalysisView";
+import { ScriptView } from "@/features/script/ScriptView";
 
 function Splash() {
   return (
@@ -58,6 +59,9 @@ export default function App() {
       break;
     case "analysis":
       content = <AnalysisView />;
+      break;
+    case "script":
+      content = <ScriptView />;
       break;
     default:
       content = <HealthCard />;

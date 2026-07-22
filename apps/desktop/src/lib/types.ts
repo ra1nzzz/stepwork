@@ -86,7 +86,13 @@ export type JobStage =
 /** Command Bus 信封（对齐 schemas/command-envelope.schema.json） */
 export interface CommandEnvelope {
   commandId: string;
-  commandType: "ImportSource" | "TranscribeSource" | "AnalyzeSource";
+  commandType:
+    | "ImportSource"
+    | "TranscribeSource"
+    | "AnalyzeSource"
+    | "GenerateTopic"
+    | "GenerateScript"
+    | "SaveScript";
   schemaVersion: string;
   actor: string;
   source: string;
@@ -175,6 +181,56 @@ export interface AnalysisReport {
   confidence: number | null;
   created_at: string | null;
   error: string | null;
+}
+
+/**
+ * ===== W5 领域类型（选题角度 + 脚本编辑器，对齐 worker/runtime/models.py） =====
+ */
+
+export interface TopicAngle {
+  id: string;
+  title: string;
+  rationale: string;
+  hook: string;
+}
+
+export interface TopicProposal {
+  angles: TopicAngle[];
+}
+
+export interface ScriptContent {
+  title: string;
+  body: string;
+}
+
+/** 版本链节点（VersionHistory 用；对齐 content_versions 的 parent 链） */
+export interface ScriptVersionRef {
+  id: string;
+  parent_version_id: string | null;
+  created_at: string;
+  producer_kind: string | null;
+}
+
+/** GenerateTopic payload（对齐 TopicProposalSpec） */
+export interface GenerateTopicPayload {
+  source_version_id: string;
+  count?: number;
+  provider?: Record<string, unknown> | null;
+}
+
+/** GenerateScript payload（对齐 ScriptSpec） */
+export interface GenerateScriptPayload {
+  proposal_version_id?: string | null;
+  topic_id?: string | null;
+  outline?: string | null;
+  style?: string;
+  provider?: Record<string, unknown> | null;
+}
+
+/** SaveScript payload（自动保存 = 版本链追加） */
+export interface SaveScriptPayload {
+  content: string | Record<string, unknown>;
+  parent_version_id?: string | null;
 }
 
 /** 前端 provider 选择（provider-switch UI） */

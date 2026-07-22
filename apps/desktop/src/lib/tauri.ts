@@ -136,15 +136,51 @@ export async function dispatchCommand(
 /**
  * 浏览器 mock：导入 / 转写默认成功（无密钥也可演示流程）；
  * 分析默认失败（需要真实密钥），借此暴露失败重试 UI 路径。
+ * W5：GenerateTopic 返回示例角度；GenerateScript/SaveScript 返回示例脚本，
+ * 使选题→脚本→编辑器链路在纯浏览器下也可演示。
  */
 function mockDispatchResult(env: CommandEnvelope): CommandResult {
-  const ok = env.commandType !== "AnalyzeSource";
+  if (env.commandType === "AnalyzeSource") {
+    return {
+      ok: false,
+      commandId: env.commandId,
+      job_id: null,
+      artifact_ids: [],
+      error: "MOCK_NO_PROVIDER",
+      detail: null,
+    };
+  }
   return {
-    ok,
+    ok: true,
     commandId: env.commandId,
-    job_id: ok ? `job-${uuid()}` : null,
-    artifact_ids: ok ? [`cv-${uuid()}`] : [],
-    error: ok ? null : "MOCK_NO_PROVIDER",
-    detail: ok ? { mock: true } : null,
+    job_id: `job-${uuid()}`,
+    artifact_ids: [`cv-${uuid()}`],
+    error: null,
+    detail: mockDetail(env.commandType),
   };
+}
+
+function mockDetail(commandType: CommandEnvelope["commandType"]): Record<string, unknown> {
+  if (commandType === "GenerateTopic") {
+    return {
+      mock: true,
+      angles: [
+        { id: "a1", title: "角度一：反常识开场", rationale: "用冲突感抓住注意力", hook: "你以为…其实…" },
+        { id: "a2", title: "角度二：实用清单", rationale: "可收藏的干货结构", hook: "3 个立刻能用的招" },
+        { id: "a3", title: "角度三：真实故事", rationale: "情绪共鸣驱动转发", hook: "我朋友亲身经历…" },
+      ],
+    };
+  }
+  if (commandType === "GenerateScript" || commandType === "SaveScript") {
+    return {
+      mock: true,
+      title: "示例短视频脚本",
+      parent: null,
+      script: {
+        title: "示例短视频脚本",
+        body: "（镜头 0-3s）钩子：你以为剪视频很难？\n（3-10s）其实只要三步…\n（10-15s）关注我，下期拆解。",
+      },
+    };
+  }
+  return { mock: true };
 }
