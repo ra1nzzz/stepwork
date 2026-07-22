@@ -92,7 +92,7 @@ export const useScriptStore = create<ScriptStoreState>((set, get) => ({
         "GenerateTopic",
         WORKSPACE,
         null,
-        payload as unknown as Record<string, unknown>,
+        payload,
       );
       const res = await dispatchCommand(env);
       if (!res.ok) throw new Error(res.error ?? "TOPIC_FAILED");
@@ -130,7 +130,7 @@ export const useScriptStore = create<ScriptStoreState>((set, get) => ({
         "GenerateScript",
         WORKSPACE,
         null,
-        payload as unknown as Record<string, unknown>,
+        payload,
       );
       const res = await dispatchCommand(env);
       if (!res.ok) throw new Error(res.error ?? "SCRIPT_FAILED");
@@ -164,7 +164,7 @@ export const useScriptStore = create<ScriptStoreState>((set, get) => ({
       "SaveScript",
       WORKSPACE,
       null,
-      payload as unknown as Record<string, unknown>,
+      payload,
     );
     try {
       const res = await dispatchCommand(env);

@@ -88,7 +88,7 @@ export const useRenderStore = create<RenderStoreState>((set, get) => ({
         "CreateRenderJob",
         WORKSPACE,
         null,
-        payload as unknown as Record<string, unknown>,
+        payload,
       );
       const res = await dispatchCommand(env);
       if (!res.ok) {
@@ -128,7 +128,7 @@ export const useRenderStore = create<RenderStoreState>((set, get) => ({
       "CancelJob",
       WORKSPACE,
       null,
-      payload as unknown as Record<string, unknown>,
+      payload,
     );
     try {
       await dispatchCommand(env);

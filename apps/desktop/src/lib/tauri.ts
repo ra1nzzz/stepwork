@@ -100,12 +100,12 @@ function uuid(): string {
   return `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-/** 构造一个符合 command-envelope.schema.json 的信封 */
-export function buildEnvelope(
+/** 构造一个符合 command-envelope.schema.json 的信封（泛型透传已类型化的 payload） */
+export function buildEnvelope<T>(
   commandType: CommandEnvelope["commandType"],
   workspaceId: string,
   projectId: string | null,
-  payload: Record<string, unknown>,
+  payload: T,
 ): CommandEnvelope {
   return {
     commandId: uuid(),
@@ -116,7 +116,7 @@ export function buildEnvelope(
     workspaceId,
     projectId,
     idempotencyKey: null,
-    payload,
+    payload: payload as unknown as Record<string, unknown>,
     requestedAt: new Date().toISOString(),
   };
 }
