@@ -101,7 +101,9 @@ export interface CommandEnvelope {
     | "GenerateScript"
     | "SaveScript"
     | "CreateRenderJob"
-    | "CancelJob";
+    | "CancelJob"
+    | "GetConfig"
+    | "UpdateConfig";
   schemaVersion: string;
   actor: { type: "user" | "agent" | "plugin" | "system" | "desktop"; id: string };
   source: string;
@@ -277,4 +279,23 @@ export interface ProviderConfig {
   /** 来自运行时输入，绝不写死 */
   api_key: string;
   model: string;
+}
+
+/** 后端 GetConfig 返回的「已合并 + 掩码」配置视图。
+ *  密钥一律掩码（"••••"），永不回显明文。 */
+export interface ConfigView {
+  config: Record<string, unknown>;
+  resolved: {
+    ai: { provider: string | null; model: string | null; hasKey: boolean };
+    asr: { provider: string | null; hasKey: boolean };
+    tts: { provider: string | null; model: string | null; hasKey: boolean };
+  };
+}
+
+/** getConfig / updateConfig 的统一返回形状（与 SettingsView 中本地别名一致）。 */
+export interface ConfigResult {
+  ok: boolean;
+  config?: Record<string, unknown>;
+  resolved?: ConfigView["resolved"];
+  error?: string;
 }

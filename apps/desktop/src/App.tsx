@@ -9,6 +9,7 @@ import { TranscriptView } from "@/features/transcript/TranscriptView";
 import { AnalysisView } from "@/features/analysis/AnalysisView";
 import { ScriptView } from "@/features/script/ScriptView";
 import { RenderView } from "@/features/render/RenderView";
+import SettingsView from "@/features/settings/SettingsView";
 
 function Splash() {
   return (
@@ -66,6 +67,9 @@ export default function App() {
       break;
     case "render":
       content = <RenderView />;
+      break;
+    case "settings":
+      content = <SettingsView />;
       break;
     default:
       content = <HealthCard />;

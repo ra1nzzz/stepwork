@@ -1,0 +1,208 @@
+/* SET.3 — SettingsView 样式
+ * 移植 Prototype/settings.html 的类，统一使用 tokens.css 的真实 CSS 变量；
+ * 不发明 tokens.css 中不存在的变量。暗色优先（app 为 oklch 暗色）。
+ * 依赖 tokens.css 已注入 :root 变量（--surface / --border / --radius / --text 等）。
+ */
+
+.settings-view { color: var(--fg); }
+
+/* 布局：左 tab 菜单 + 右面板 */
+.settings-grid {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.settings-menu { display: grid; gap: 5px; }
+.settings-menu button {
+  min-height: 42px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: color .15s cubic-bezier(.2, 0, 0, 1), background-color .15s cubic-bezier(.2, 0, 0, 1);
+}
+.settings-menu button:hover { color: var(--fg); background: var(--surface-2); }
+.settings-menu button.active {
+  color: var(--fg);
+  background: var(--surface-2);
+  box-shadow: inset 2px 0 var(--accent);
+}
+
+/* 面板 */
+.panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in oklch, var(--surface) 92%, transparent);
+  overflow: hidden;
+}
+.panel-head {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.panel-body { padding: 16px; }
+.panel-title { margin: 0; font: 660 16px/1.2 var(--font-display); }
+.panel-meta { color: var(--muted); font-size: 13px; line-height: 1.45; }
+
+/* 表单行 */
+.form-row {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  gap: 18px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+}
+.form-row:last-child { border-bottom: 0; }
+.form-row > label,
+.form-row > .row-label { font-weight: 650; }
+.form-help { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+
+/* 输入控件（与 Prototype 同名类一致） */
+.field, .select, .textarea {
+  min-height: 40px;
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-2);
+}
+.field { min-width: 210px; padding: 0 12px; }
+.select { padding: 0 34px 0 12px; }
+.textarea { width: 100%; min-height: 112px; padding: 12px; resize: vertical; }
+.field:focus-visible, .select:focus-visible, .textarea:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 25%, transparent);
+}
+
+/* filters / chips */
+.filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.chip {
+  min-height: 31px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  transition: color .15s ease, background-color .15s ease, border-color .15s ease;
+}
+.chip.active {
+  color: var(--accent);
+  border-color: color-mix(in oklch, var(--accent) 45%, var(--border));
+  background: color-mix(in oklch, var(--accent) 9%, transparent);
+}
+
+/* 复选项组 */
+.check-grid { display: grid; gap: 12px; }
+.check-grid label { display: flex; align-items: center; gap: 9px; font-weight: 500; cursor: pointer; }
+.check-grid input { accent-color: var(--accent); }
+
+/* 空态 */
+.empty { padding: 26px; text-align: center; color: var(--muted); }
+.empty h2 { margin: 0 0 8px; }
+.empty p { max-width: 52ch; margin: 0 auto 16px; }
+
+/* 按钮（与 Prototype 同名类一致） */
+.btn {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 15px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--fg);
+  background: var(--surface-2);
+  cursor: pointer;
+  font-weight: 650;
+  transition: transform .16s ease, border-color .16s ease, background-color .16s ease;
+}
+.btn:hover { transform: translateY(-1px); border-color: color-mix(in oklch, var(--muted) 65%, var(--border)); }
+.btn:active { transform: translateY(0); background: color-mix(in oklch, var(--surface-2) 82%, var(--fg)); }
+.btn.primary { color: oklch(14% .02 220); border-color: var(--accent); background: var(--accent); }
+.btn.primary:active { background: color-mix(in oklch, var(--accent) 84%, var(--fg)); }
+.btn.ghost { background: transparent; }
+.btn.small { min-height: 34px; padding: 0 11px; font-size: 13px; }
+.btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+
+/* 状态行 / 反馈 */
+.status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font: 600 11px/1 var(--font-mono);
+}
+.status.success { color: var(--success); background: color-mix(in oklch, var(--success) 11%, transparent); }
+.status.warning { color: var(--warning); background: color-mix(in oklch, var(--warning) 11%, transparent); }
+.status.danger { color: var(--danger); background: color-mix(in oklch, var(--danger) 11%, transparent); }
+.status.ai { color: var(--accent-2); background: color-mix(in oklch, var(--accent-2) 12%, transparent); }
+
+/* 错误/反馈卡片（复用现有 .error-guide-card 风格） */
+.error-guide-card {
+  margin: 16px 0 0;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in oklch, var(--danger) 38%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in oklch, var(--danger) 8%, var(--surface-2));
+  color: var(--fg);
+}
+.error-guide-card h4 { margin: 0 0 6px; color: var(--danger); font-size: 14px; }
+.error-guide-card pre {
+  margin: 0;
+  white-space: pre-wrap;
+  font: 12px/1.5 var(--font-mono);
+  color: var(--muted);
+}
+
+/* 面板切换过渡 */
+.settings-view .panel-body { transition: opacity .15s cubic-bezier(.2, 0, 0, 1), transform .15s cubic-bezier(.2, 0, 0, 1); }
+.settings-view .panel-body.is-leaving { opacity: 0; transform: translateY(4px); }
+
+/* 密码框辅助类 */
+.password-wrap { position: relative; display: flex; align-items: center; }
+.password-wrap .field { flex: 1; min-width: 0; padding-right: 44px; }
+.pw-toggle {
+  position: absolute;
+  right: 6px;
+  min-height: 30px;
+  width: 32px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+}
+.pw-toggle:hover { color: var(--fg); background: var(--surface); }
+
+/* 顶部操作条 */
+.settings-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.settings-topbar[hidden] { display: none; }
+
+@media (max-width: 920px) {
+  .settings-grid { grid-template-columns: 1fr; }
+  .form-row { grid-template-columns: 1fr; gap: 8px; }
+}

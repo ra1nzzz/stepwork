@@ -118,10 +118,17 @@ export async function getAppInfo(): Promise<AppInfo> {
  * 真实 Tauri 环境走 invoke；纯浏览器环境返回 mock 以便独立调试。
  */
 
-import type { CommandEnvelope, CommandResult } from "./types";
+import type { CommandEnvelope, CommandResult, ConfigResult } from "./types";
+import { useSettingsStore } from "@/stores/useSettingsStore";
+import type { SettingsConfig } from "@/stores/useSettingsStore";
 
 /** 浏览器/mock 环境的默认工作区 id */
 export const DEFAULT_WORKSPACE_ID = "ws-local";
+
+/** 当前工作区 id（单工作区占位；未来接入真实 workspace 上下文时替换此函数）。 */
+export function getWorkspaceId(): string {
+  return DEFAULT_WORKSPACE_ID;
+}
 
 /** 轻量 uuid（浏览器 crypto.randomUUID 优先，降级到时间+随机） */
 function uuid(): string {
@@ -255,4 +262,65 @@ function mockDetail(commandType: CommandEnvelope["commandType"]): Record<string,
     return { mock: true, cancelled: true };
   }
   return { mock: true };
+}
+
+/* ===== SET.4 设置页配置桥接 ===== */
+
+/** 本地推导解析摘要（mock 模式用）。 */
+function deriveResolved(s: SettingsConfig): ConfigResult["resolved"] {
+  return {
+    ai: { provider: s.llm.provider, model: s.llm.model, hasKey: !!s.llm.apiKey },
+    asr: { provider: s.asr.provider, hasKey: !!s.asr.apiKey },
+    tts: { provider: s.tts.provider, model: s.tts.model, hasKey: !!s.tts.apiKey },
+  };
+}
+
+/** 把后端 CommandResult（detail={config,resolved}）适配为前端 ConfigResult。 */
+function adaptConfig(res: CommandResult): ConfigResult {
+  if (!res.ok) return { ok: false, error: res.error ?? "bridge_error" };
+  const detail = (res.detail ?? {}) as {
+    config?: Record<string, unknown>;
+    resolved?: ConfigResult["resolved"];
+  };
+  return { ok: true, config: detail.config, resolved: detail.resolved };
+}
+
+/** 经 dev-bridge 转发配置命令到真实 worker Command Bus。 */
+async function bridgeConfig(
+  commandType: CommandEnvelope["commandType"],
+  payload: Record<string, unknown>,
+): Promise<ConfigResult> {
+  const env = buildEnvelope(commandType, getWorkspaceId(), null, payload);
+  const res = await dispatchCommand(env);
+  return adaptConfig(res);
+}
+
+/** 读取合并后的配置（掩码视图）+ 解析摘要。 */
+export async function getConfig(): Promise<ConfigResult> {
+  if (DEV_BRIDGE) return bridgeConfig("GetConfig", {});
+  if (!isTauri()) {
+    const s = useSettingsStore.getState().settings;
+    return {
+      ok: true,
+      config: s as unknown as Record<string, unknown>,
+      resolved: deriveResolved(s),
+    };
+  }
+  const env = buildEnvelope("GetConfig", getWorkspaceId(), null, {});
+  const invoke = await getInvoke();
+  return adaptConfig(await invoke<CommandResult>("dispatch_command", { envelope: env }));
+}
+
+/** 保存配置：非密钥落 Workspace.settings；密钥仅进内存覆盖层（后端剥离+内存）。 */
+export async function updateConfig(settings: SettingsConfig): Promise<ConfigResult> {
+  const payload = settings as unknown as Record<string, unknown>;
+  if (DEV_BRIDGE) return bridgeConfig("UpdateConfig", payload);
+  if (!isTauri()) {
+    // mock：仅更新内存 store（persist 的 partialize 会剔除密钥）
+    useSettingsStore.getState().update({ ...settings });
+    return { ok: true };
+  }
+  const env = buildEnvelope("UpdateConfig", getWorkspaceId(), null, payload);
+  const invoke = await getInvoke();
+  return adaptConfig(await invoke<CommandResult>("dispatch_command", { envelope: env }));
 }

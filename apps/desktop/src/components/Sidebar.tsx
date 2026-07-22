@@ -14,6 +14,7 @@ const NAV_ITEMS: NavItemDef[] = [
   { id: "analysis", label: "内容分析", icon: "04" },
   { id: "script", label: "脚本创作", icon: "05" },
   { id: "render", label: "视频渲染", icon: "06" },
+  { id: "settings", label: "设置", icon: "07" },
 ];
 
 function statusLabel(status: "ok" | "degraded" | "down" | null): string {
