@@ -25,7 +25,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::health::get_worker_health,
             commands::health::restart_worker,
-            commands::health::get_app_info
+            commands::health::get_app_info,
+            commands::dispatch::dispatch_command
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();

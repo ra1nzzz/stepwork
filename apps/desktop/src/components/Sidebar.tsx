@@ -1,18 +1,17 @@
 import { useHealthStore } from "@/stores/useHealthStore";
+import { useViewStore, type ViewId } from "@/stores/useViewStore";
 
 interface NavItemDef {
-  id: string;
+  id: ViewId;
   label: string;
   icon: string;
-  active: boolean;
 }
 
 const NAV_ITEMS: NavItemDef[] = [
-  { id: "home", label: "首页", icon: "01", active: true },
-  { id: "projects", label: "项目", icon: "02", active: false },
-  { id: "create", label: "创作", icon: "03", active: false },
-  { id: "tasks", label: "任务", icon: "04", active: false },
-  { id: "settings", label: "设置", icon: "05", active: false },
+  { id: "home", label: "概览", icon: "01" },
+  { id: "import", label: "素材导入", icon: "02" },
+  { id: "transcript", label: "转写", icon: "03" },
+  { id: "analysis", label: "内容分析", icon: "04" },
 ];
 
 function statusLabel(status: "ok" | "degraded" | "down" | null): string {
@@ -23,11 +22,14 @@ function statusLabel(status: "ok" | "degraded" | "down" | null): string {
 }
 
 /**
- * 左侧导航栏：复用 Prototype .sidebar 结构（index.html L57-159）
+ * 左侧导航栏：复用 Prototype .sidebar 结构，导航项驱动视图切换
+ * （W3-W4 Batch3 接入素材导入 / 转写 / 内容分析）。
  */
 export function Sidebar() {
   const health = useHealthStore((s) => s.health);
   const status = health?.status ?? null;
+  const currentView = useViewStore((s) => s.currentView);
+  const setView = useViewStore((s) => s.setView);
 
   return (
     <aside className="sidebar" data-od-id="primary-sidebar">
@@ -41,10 +43,10 @@ export function Sidebar() {
           <button
             key={item.id}
             type="button"
-            className={`nav-item${item.active ? " active" : ""}`}
-            disabled={!item.active}
-            aria-current={item.active ? "page" : undefined}
+            className={`nav-item${currentView === item.id ? " active" : ""}`}
+            aria-current={currentView === item.id ? "page" : undefined}
             data-od-id={`nav-${item.id}`}
+            onClick={() => setView(item.id)}
           >
             <span className="nav-icon" aria-hidden="true">
               {item.icon}

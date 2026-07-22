@@ -14,6 +14,7 @@ from worker.runtime import ingest
 from worker.runtime.commands.bus import dispatch
 from worker.runtime.db.repos import Repos
 from worker.runtime.deps import Deps
+from worker.runtime.providers.resolve import resolve_ai, resolve_asr
 from worker.runtime.state import WorkerState
 
 
@@ -38,5 +39,10 @@ async def handle_command(
         return {"error": {"code": -32602, "message": "missing envelope in params"}}
 
     repos = Repos(state.db_conn)
-    deps = Deps(repos=repos, ingest=ingest, asr=None, ai=None)
+    deps = Deps(
+        repos=repos,
+        ingest=ingest,
+        asr=resolve_asr(),
+        ai=resolve_ai(),
+    )
     return dispatch(raw, deps)

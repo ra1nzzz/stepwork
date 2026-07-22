@@ -78,3 +78,73 @@ export async function getAppInfo(): Promise<AppInfo> {
   const invoke = await getInvoke();
   return invoke<AppInfo>("get_app_info");
 }
+
+/**
+ * ===== W3 / W4 Command Bus 桥接（Batch3） =====
+ *
+ * 所有 W3/W4 命令（ImportSource / TranscribeSource / AnalyzeSource）
+ * 都经由 Rust `dispatch_command` 单点转发到 worker 的 Command Bus。
+ * 真实 Tauri 环境走 invoke；纯浏览器环境返回 mock 以便独立调试。
+ */
+
+import type { CommandEnvelope, CommandResult } from "./types";
+
+/** 浏览器/mock 环境的默认工作区 id */
+export const DEFAULT_WORKSPACE_ID = "ws-local";
+
+/** 轻量 uuid（浏览器 crypto.randomUUID 优先，降级到时间+随机） */
+function uuid(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+/** 构造一个符合 command-envelope.schema.json 的信封 */
+export function buildEnvelope(
+  commandType: CommandEnvelope["commandType"],
+  workspaceId: string,
+  projectId: string | null,
+  payload: Record<string, unknown>,
+): CommandEnvelope {
+  return {
+    commandId: uuid(),
+    commandType,
+    schemaVersion: "1.0.0",
+    actor: "desktop",
+    source: "ui",
+    workspaceId,
+    projectId,
+    idempotencyKey: null,
+    payload,
+    requestedAt: new Date().toISOString(),
+  };
+}
+
+/** 转发信封到 worker Command Bus（经 Rust dispatch_command） */
+export async function dispatchCommand(
+  envelope: CommandEnvelope,
+): Promise<CommandResult> {
+  if (!isTauri()) {
+    await new Promise((r) => setTimeout(r, 300));
+    return mockDispatchResult(envelope);
+  }
+  const invoke = await getInvoke();
+  return invoke<CommandResult>("dispatch_command", { envelope });
+}
+
+/**
+ * 浏览器 mock：导入 / 转写默认成功（无密钥也可演示流程）；
+ * 分析默认失败（需要真实密钥），借此暴露失败重试 UI 路径。
+ */
+function mockDispatchResult(env: CommandEnvelope): CommandResult {
+  const ok = env.commandType !== "AnalyzeSource";
+  return {
+    ok,
+    commandId: env.commandId,
+    job_id: ok ? `job-${uuid()}` : null,
+    artifact_ids: ok ? [`cv-${uuid()}`] : [],
+    error: ok ? null : "MOCK_NO_PROVIDER",
+    detail: ok ? { mock: true } : null,
+  };
+}

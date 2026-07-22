@@ -3,6 +3,10 @@ import { AppShell } from "@/components/AppShell";
 import { HealthCard } from "@/components/HealthCard";
 import { ErrorGuideCard } from "@/components/ErrorGuideCard";
 import { useHealthStore } from "@/stores/useHealthStore";
+import { useViewStore } from "@/stores/useViewStore";
+import { ImportView } from "@/features/import/ImportView";
+import { TranscriptView } from "@/features/transcript/TranscriptView";
+import { AnalysisView } from "@/features/analysis/AnalysisView";
 
 function Splash() {
   return (
@@ -21,6 +25,7 @@ export default function App() {
   const isLoading = useHealthStore((s) => s.isLoading);
   const startPolling = useHealthStore((s) => s.startPolling);
   const stopPolling = useHealthStore((s) => s.stopPolling);
+  const currentView = useViewStore((s) => s.currentView);
 
   useEffect(() => {
     startPolling();
@@ -43,9 +48,20 @@ export default function App() {
     );
   }
 
-  return (
-    <AppShell>
-      <HealthCard />
-    </AppShell>
-  );
+  let content;
+  switch (currentView) {
+    case "import":
+      content = <ImportView />;
+      break;
+    case "transcript":
+      content = <TranscriptView />;
+      break;
+    case "analysis":
+      content = <AnalysisView />;
+      break;
+    default:
+      content = <HealthCard />;
+  }
+
+  return <AppShell>{content}</AppShell>;
 }

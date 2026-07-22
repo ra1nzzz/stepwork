@@ -27,6 +27,7 @@ from worker.runtime.models import (
     JobStage,
     JobState,
 )
+from worker.runtime.providers.resolve import ai_provider_from_hint
 
 
 def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
@@ -39,7 +40,9 @@ def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         env.workspaceId
     ).id
 
-    ai = deps.ai
+    # per-request provider 切换（前端 provider-switch 生效点）；
+    # 无提示时回退到 bootstrap 注入的默认 provider。
+    ai = ai_provider_from_hint(p.get("provider")) or deps.ai
     if ai is None:
         raise DispatchError("UNAVAILABLE", "ai provider not configured")
 
