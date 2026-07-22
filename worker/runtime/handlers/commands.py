@@ -43,13 +43,14 @@ async def handle_command(
     if raw is None:
         return {"error": {"code": -32602, "message": "missing envelope in params"}}
 
+    ws_id = (raw or {}).get("workspaceId")
     repos = Repos(state.db_conn)
     deps = Deps(
         repos=repos,
         ingest=ingest,
-        asr=resolve_asr(),
-        ai=resolve_ai(),
-        tts=resolve_tts(),
+        asr=resolve_asr(ws_id),
+        ai=resolve_ai(ws_id),
+        tts=resolve_tts(ws_id),
         renderer=resolve_renderer(),
     )
     # 包装为 {"result": <CommandResult dict>}，与模块 docstring 合约一致；

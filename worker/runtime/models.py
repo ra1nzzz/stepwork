@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 def _now() -> str:
@@ -248,3 +248,44 @@ class CommandResult(BaseModel):
     artifact_ids: list[str] = Field(default_factory=list)
     error: str | None = None
     detail: dict[str, Any] = Field(default_factory=dict)
+
+
+# ===== 设置页配置（SET.5 / SET.7） =====
+# 所有字段给默认值，避免旧库 / 缺字段的 payload 触发 KeyError。
+class ConfigSpec(BaseModel):
+    """``UpdateConfig`` 命令输入：前端完整 ``SettingsConfig``。
+
+    密钥（``*Key`` / ``*Secret``）随 payload 一道进入 handler，但**绝不**
+    落入 SQLite——handler 会剥离后写入 ``Workspace.settings``，仅把密钥推入
+    进程内存的覆盖层（``resolve.CONFIG_OVERRIDES``）。
+    """
+
+    llm: dict[str, Any] = Field(default_factory=dict)
+    asr: dict[str, Any] = Field(default_factory=dict)
+    tts: dict[str, Any] = Field(default_factory=dict)
+    workspace: dict[str, Any] = Field(default_factory=dict)
+    brand: dict[str, Any] = Field(default_factory=dict)
+    data: dict[str, Any] = Field(default_factory=dict)
+    export: dict[str, Any] = Field(default_factory=dict)
+    ui: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _check_sections(self) -> ConfigSpec:
+        # 防御：每个非空 section 必须是对象，否则 payload 畸形，
+        # 在 handler 内被转译为干净的 INVALID_ARGUMENT 错误。
+        for name in ("llm", "asr", "tts", "workspace", "brand", "data", "export", "ui"):
+            val = getattr(self, name)
+            if val is not None and not isinstance(val, dict):
+                raise ValueError(f"config section {name!r} must be an object")
+        return self
+
+
+class ConfigView(BaseModel):
+    """``GetConfig`` 命令输出。
+
+    - ``config``：合并后的完整配置，密钥一律掩码（``"••••"``），永不回显明文。
+    - ``resolved``：解析摘要（provider / model / 是否持有密钥），供前端「检查配置」展示。
+    """
+
+    config: dict[str, Any] = Field(default_factory=dict)
+    resolved: dict[str, Any] = Field(default_factory=dict)

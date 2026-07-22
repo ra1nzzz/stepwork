@@ -1,10 +1,12 @@
-"""命令总线（W3-W4 Batch 0）。
+"""命令总线（W3-W4 Batch 0 + SET.5 设置页）。
 
 路由规则（懒加载 handler 模块，规避 ``bus`` ↔ ``handlers`` 循环依赖）：
 
 - ``ImportSource``   → ``worker.runtime.handlers.import_source``
 - ``TranscribeSource``→ ``worker.runtime.handlers.transcribe_source``
 - ``AnalyzeSource``  → ``worker.runtime.handlers.analyze_source``
+- ``GetConfig`` / ``UpdateConfig`` → ``worker.runtime.handlers.config``
+  （设置类命令，仅允许 ``user`` / ``desktop`` 两类 actor，见 ``_ALLOWED_CONFIG_ACTORS``）
 """
 
 from __future__ import annotations
@@ -25,7 +27,13 @@ _ROUTES: dict[str, str] = {
     "GenerateTopic": "worker.runtime.handlers.generate_topic",
     "GenerateScript": "worker.runtime.handlers.generate_script",
     "SaveScript": "worker.runtime.handlers.save_script",
+    "GetConfig": "worker.runtime.handlers.config",
+    "UpdateConfig": "worker.runtime.handlers.config",
 }
+
+# 设置类命令仅允许来自「用户态 / 桌面壳」的 actor（三角色 P0 安全模型）。
+# agent / plugin / system 等自动化主体不得读写配置。
+_ALLOWED_CONFIG_ACTORS: tuple[str, ...] = ("user", "desktop")
 
 
 class DispatchError(Exception):
@@ -58,6 +66,16 @@ async def dispatch(raw: dict[str, Any], deps: Any) -> dict[str, Any]:
             ok=False, commandId=env.commandId,
             error=f"unknown commandType: {env.commandType}",
         ).model_dump()
+
+    # 设置类命令：actor 白名单（user / desktop）。
+    if env.commandType in ("GetConfig", "UpdateConfig"):
+        actor_type = (env.actor or {}).get("type")
+        if actor_type not in _ALLOWED_CONFIG_ACTORS:
+            return CommandResult(
+                ok=False, commandId=env.commandId,
+                error=f"FORBIDDEN_ACTOR: config command requires actor in "
+                f"{_ALLOWED_CONFIG_ACTORS}, got {actor_type!r}",
+            ).model_dump()
 
     handler = importlib.import_module(module_path).handle
     try:

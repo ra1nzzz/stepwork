@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import UTC, datetime
-from typing import Optional
+from typing import Any, Optional
 
 from worker.runtime.models import (
     ContentProject,
@@ -157,6 +157,18 @@ class WorkspaceRepo:
         row = self.conn.execute("SELECT * FROM workspaces WHERE id=?", (ws_id,)).fetchone()
         assert row is not None
         return _row_to_workspace(row)
+
+    def update_settings(self, ws_id: str, settings: dict[str, Any]) -> None:
+        """覆盖写入某工作区的 ``settings`` 列（JSON）。
+
+        设置页用：非密钥配置落库，跨会话保留；密钥字段由调用方
+        预先剥离（见 :mod:`worker.runtime.handlers.config`）。
+        """
+        self.conn.execute(
+            "UPDATE workspaces SET settings=? WHERE id=?",
+            (json.dumps(settings), ws_id),
+        )
+        self.conn.commit()
 
 
 class ProjectRepo:
