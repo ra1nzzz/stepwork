@@ -18,10 +18,10 @@
 | Rust `dispatch_command` 单一桥接 | **直接复用，W6 不新增任何 Rust 命令** |
 | `JobStage.RENDERING` 已存在于 models.py | 渲染阶段直接用 |
 
-**关键路径**：W1→W2→W3-W4→W5 脚本→**W6 渲染**→W9 RC1。用户明确"执行 W6"，**跳过 W5（脚本编辑器 UI 未做）**。
+**关键路径**：W1→W2→W3-W4→**W5 脚本**（先于 W6 完整交付）→**W6 渲染**→W9 RC1。用户更正决策：选"完整 W5 功能"，**W5 在 W6 之前做**；W6 RenderSource 已 content-agnostic，直接消费 W5 产出的 `script` ContentVersion。
 
 ### 范围决策（必须记录）
-- **渲染输入不依赖 W5**：W6 的 RenderJob 消费 W3/W4 已落库的 `ContentVersion`（`content_type` 为 `transcript` 或后续 `script` 文本），直接喂给 TTS + 9:16 模板。W5 编辑器仅是 UI 录入入口，不影响渲染管线本身。
+- **渲染输入消费 W5 的 `script`**：W6 的 RenderJob 消费 W5 落库的 `ContentVersion`（`content_type="script"`，由 W5 编辑器产出）。W6 RenderSource 已是 content-agnostic（只看 `.content` 文本），故 W5 做不做、做多少都不影响 W6 后端，主要差别在 UI 选源默认指向 `script`。详见 W5_PLAN.md。
 - **Renderer 是插件类型（SYSTEM_SPEC §12.1）**：W6 交付"接口雏形"——定义 `RendererProvider` 协议 + 一个**内置** `FFmpegRenderer`（capability `render:vertical-caption-v1`）。完整"独立进程插件运行时"属 V0.2（ADR-009），W6 仅接口 + 内置实现，协议设计对齐 ADR-009（凭据经受控 RPC、输出经 Schema 校验）。
 - **不新增 DB 表/migration**：渲染产物存 `content_versions(content_type="video_draft", content=JSON 元数据含磁盘 uri)`，落在既有版本链（parent = 源版本）。
 - **FFmpeg 受控外部二进制（§10.4 / SYSTEM_SPEC 行 1080）**：路径来自配置白名单或 `PATH`；**缺失即 `UNAVAILABLE`，绝不伪造渲染结果**。
