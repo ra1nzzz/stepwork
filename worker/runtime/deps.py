@@ -19,3 +19,5 @@ class Deps:
     ingest: Any = None
     asr: Any = None
     ai: Any = None
+    tts: Any = None
+    renderer: Any = None

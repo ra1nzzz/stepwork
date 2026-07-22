@@ -24,6 +24,12 @@ from worker.runtime.providers.ai.openai_compatible import (
 from worker.runtime.providers.asr.base import ASRProvider
 from worker.runtime.providers.asr.cloud import CloudASRProvider
 from worker.runtime.providers.asr.local import LocalASRProvider
+from worker.runtime.providers.renderer.base import RendererProvider
+from worker.runtime.providers.renderer.ffmpeg import FFmpegRenderer
+from worker.runtime.providers.tts.base import TTSProvider
+from worker.runtime.providers.tts.cloud import CloudTTSProvider
+from worker.runtime.providers.tts.local import LocalTTSProvider
+from worker.runtime.render.ffmpeg_runner import FFmpegRunner
 
 
 def _env(key: str) -> str | None:
@@ -104,3 +110,27 @@ def ai_provider_from_hint(hint: dict[str, Any] | None) -> AIProvider | None:
             return None
         return OpenAICompatibleProvider(api_key=key, base_url=url, model=model)
     return None
+
+
+def resolve_tts() -> TTSProvider | None:
+    """按 ``STEPWORK_TTS_PROVIDER`` 解析 TTS Provider（W6）。
+
+    默认 ``local``（离线确定性占位，满足渲染可运行证伪）；
+    设为 ``cloud`` 时需要 ``STEPWORK_TTS_API_KEY`` + ``STEPWORK_TTS_BASE_URL``，
+    否则回退 ``None``（handler 转译为 ``UNAVAILABLE``）。
+    """
+    kind = (_env("STEPWORK_TTS_PROVIDER") or "local").lower()
+    if kind == "local":
+        return LocalTTSProvider()
+    if kind == "cloud":
+        key = _env("STEPWORK_TTS_API_KEY")
+        url = _env("STEPWORK_TTS_BASE_URL")
+        if not key or not url:
+            return None
+        return CloudTTSProvider(api_key=key, base_url=url, model=_env("STEPWORK_TTS_MODEL"))
+    return None
+
+
+def resolve_renderer() -> RendererProvider | None:
+    """W6 内置 FFmpeg 渲染器（vertical-caption-v1）。"""
+    return FFmpegRenderer(FFmpegRunner())

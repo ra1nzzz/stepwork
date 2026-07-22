@@ -35,6 +35,7 @@ class JobState(StrEnum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    CANCELLED_REQUESTED = "cancelled-requested"
     EXPIRED = "expired"
 
 
@@ -147,6 +148,49 @@ class ArtifactEnvelope(BaseModel):
     ref_uri: str
     producer: dict[str, Any] = Field(default_factory=dict)
     created_at: str = Field(default_factory=_now)
+
+
+class TTSEngine(StrEnum):
+    """TTS 旁白生成方式（SYSTEM_SPEC W6）。"""
+
+    SYNTHESIZE = "synthesize"
+    USER_AUDIO = "user_audio"
+
+
+class RenderSpec(BaseModel):
+    """渲染规格（W6 RenderJob 输入）。"""
+
+    source_version_id: str
+    template: str = "vertical-caption-v1"
+    tts_engine: TTSEngine = TTSEngine.SYNTHESIZE
+    tts_provider: str | None = None
+    user_audio_uri: str | None = None
+    background_uri: str | None = None
+    caption_text: str | None = None
+    resolution: tuple[int, int] = (1080, 1920)
+    fps: int = 30
+
+
+class RenderResult(BaseModel):
+    """渲染结果元数据。"""
+
+    video_uri: str
+    duration_seconds: float
+    template: str
+    tts_engine: str
+
+
+class VideoDraftMeta(BaseModel):
+    """落库到 ``content_versions(content_type="video_draft")`` 的元数据。"""
+
+    video_uri: str
+    duration_seconds: float
+    template: str
+    tts_engine: str
+    resolution: tuple[int, int]
+    fps: int
+    source_version_id: str
+    producer: dict[str, Any] = Field(default_factory=dict)
 
 
 class CommandEnvelope(BaseModel):

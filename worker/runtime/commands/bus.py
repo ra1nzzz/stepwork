@@ -20,6 +20,8 @@ _ROUTES: dict[str, str] = {
     "ImportSource": "worker.runtime.handlers.import_source",
     "TranscribeSource": "worker.runtime.handlers.transcribe_source",
     "AnalyzeSource": "worker.runtime.handlers.analyze_source",
+    "CreateRenderJob": "worker.runtime.handlers.render_source",
+    "CancelJob": "worker.runtime.handlers.cancel_job",
 }
 
 

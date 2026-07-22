@@ -14,7 +14,12 @@ from worker.runtime import ingest
 from worker.runtime.commands.bus import dispatch
 from worker.runtime.db.repos import Repos
 from worker.runtime.deps import Deps
-from worker.runtime.providers.resolve import resolve_ai, resolve_asr
+from worker.runtime.providers.resolve import (
+    resolve_ai,
+    resolve_asr,
+    resolve_renderer,
+    resolve_tts,
+)
 from worker.runtime.state import WorkerState
 
 
@@ -44,5 +49,7 @@ async def handle_command(
         ingest=ingest,
         asr=resolve_asr(),
         ai=resolve_ai(),
+        tts=resolve_tts(),
+        renderer=resolve_renderer(),
     )
     return dispatch(raw, deps)
