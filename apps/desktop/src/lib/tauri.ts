@@ -110,8 +110,8 @@ export function buildEnvelope(
   return {
     commandId: uuid(),
     commandType,
-    schemaVersion: "1.0.0",
-    actor: "desktop",
+    schemaVersion: "1",
+    actor: { type: "desktop", id: "ui" },
     source: "ui",
     workspaceId,
     projectId,

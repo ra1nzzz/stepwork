@@ -96,7 +96,7 @@ export interface CommandEnvelope {
     | "CreateRenderJob"
     | "CancelJob";
   schemaVersion: string;
-  actor: string;
+  actor: { type: string; id: string };
   source: string;
   workspaceId: string;
   projectId: string | null;
