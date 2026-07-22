@@ -18,13 +18,11 @@ from worker.runtime.analysis.report import parse_analysis_report
 from worker.runtime.analysis.schema import ANALYSIS_SCHEMA
 from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
-from worker.runtime.jobs import acquire, create_job, record_result, transition
+from worker.runtime.jobs import content_job, persist_content_version
 from worker.runtime.models import (
     CommandEnvelope,
     CommandResult,
-    ContentVersion,
     JobStage,
-    JobState,
 )
 from worker.runtime.providers.resolve import ai_provider_from_hint
 
@@ -33,11 +31,6 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     """处理 ``AnalyzeSource``。"""
     repos = deps.repos
     p: dict[str, Any] = env.payload
-
-    repos.workspaces.ensure(env.workspaceId)
-    project_id = env.projectId or repos.projects.get_or_create_default(
-        env.workspaceId
-    ).id
 
     # per-request provider 切换（前端 provider-switch 生效点）；
     # 无提示时回退到 bootstrap 注入的默认 provider。
@@ -73,50 +66,41 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     }
     prompt = build_analysis_prompt(source_meta, brand)
 
-    job = create_job(
+    async with content_job(
         repos,
-        "analyze",
-        {
+        job_type="analyze",
+        stage=JobStage.ANALYZING,
+        env=env,
+        fail_code="ANALYSIS_FAILED",
+        lease="analyze_source",
+        payload={
             "transcript_version_id": tv_id,
             "provider": getattr(ai, "name", "unknown"),
         },
-        stage=JobStage.ANALYZING,
-    )
-    job = transition(repos, job.id, JobState.RUNNING)
-    acquire(repos.conn, job.id, owner="analyze_source", ttl_sec=600)
-
-    try:
+    ) as ctx:
         raw = await ai.complete(prompt, ANALYSIS_SCHEMA)
         report = parse_analysis_report(raw)
-    except Exception as e:  # 分析失败需转译为领域错误
-        transition(repos, job.id, JobState.FAILED, error=str(e)[:200])
-        raise DispatchError("ANALYSIS_FAILED", str(e)[:200]) from None
-
-    cv = ContentVersion(
-        project_id=project_id,
-        content_type="analysis",
-        content=report.model_dump_json(),
-        content_hash=hashlib.sha256(
-            report.model_dump_json().encode("utf-8")
-        ).hexdigest(),
-        producer={
-            "kind": "ai-analysis",
-            "provider": report.provider or getattr(ai, "name", "unknown"),
-            "model": report.model,
-            "schema_version": "analysis.schema.json",
-        },
-    )
-    cv_id = repos.content_versions.insert(cv)
-    transition(
-        repos, job.id, JobState.SUCCEEDED,
-        progress=1.0, error=None, stage=JobStage.ANALYZING,
-    )
-    record_result(repos, job.id, [cv_id])
+        content = report.model_dump_json()
+        cv_id = persist_content_version(
+            repos,
+            ctx.job,
+            project_id=ctx.project_id,
+            content=content,
+            content_type="analysis",
+            content_hash=hashlib.sha256(content.encode("utf-8")).hexdigest(),
+            producer={
+                "kind": "ai-analysis",
+                "provider": report.provider or getattr(ai, "name", "unknown"),
+                "model": report.model,
+                "schema_version": "analysis.schema.json",
+            },
+            stage=JobStage.ANALYZING,
+        )
 
     return CommandResult(
         ok=True,
         commandId=env.commandId,
-        job_id=job.id,
+        job_id=ctx.job.id,
         artifact_ids=[cv_id],
         detail={
             "transcript_version_id": tv_id,

@@ -13,6 +13,7 @@ from worker.runtime.jobs.engine import (
     transition,
 )
 from worker.runtime.jobs.lease import acquire, is_expired, sweep_expired
+from worker.runtime.jobs.lifecycle import content_job, persist_content_version
 
 __all__ = [
     "acquire",
@@ -23,4 +24,6 @@ __all__ = [
     "record_result",
     "transition",
     "retry_eligible",
+    "content_job",
+    "persist_content_version",
 ]

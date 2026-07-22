@@ -2,17 +2,19 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://stepwork.dev/schemas/job-stage.enum.json",
   "title": "JobStage",
-  "description": "STEPWORK Job business stage (SYSTEM_SPEC §10.1). Nine business phases recorded in the `stage` field, orthogonal to JobState.",
+  "description": "STEPWORK Job 业务阶段（SYSTEM_SPEC §10.1）。与 runtime/models.py 的 JobStage(StrEnum) 完全一致（小写值），与 jobs.stage 正交。",
   "type": "string",
   "enum": [
-    "DOWNLOADING",
-    "TRANSCRIBING",
-    "ANALYZING",
-    "DELEGATING",
-    "GENERATING",
-    "SYNTHESIZING",
-    "RENDERING",
-    "PUBLISHING",
-    "VERIFYING"
+    "downloading",
+    "transcribing",
+    "analyzing",
+    "delegating",
+    "generating",
+    "proposing",
+    "scripting",
+    "synthesizing",
+    "rendering",
+    "publishing",
+    "verifying"
   ]
 }

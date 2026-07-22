@@ -46,7 +46,7 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["user", "agent", "plugin", "system"],
+          "enum": ["user", "agent", "plugin", "system", "desktop"],
           "description": "Actor category"
         },
         "id": {

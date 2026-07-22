@@ -2,17 +2,16 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://stepwork.dev/schemas/job-state.enum.json",
   "title": "JobState",
-  "description": "STEPWORK Job primary state machine (SYSTEM_SPEC §10.1). Nine top-level states.",
+  "description": "STEPWORK Job 主状态机（SYSTEM_SPEC §10.1）。与 runtime/models.py 的 JobState(StrEnum) 完全一致（小写值）。由命令总线迁移逻辑保证。",
   "type": "string",
   "enum": [
-    "PENDING",
-    "READY",
-    "RUNNING",
-    "WAITING_EXTERNAL",
-    "WAITING_USER",
-    "RETRY_SCHEDULED",
-    "COMPLETED",
-    "FAILED_FINAL",
-    "CANCELLED"
+    "pending",
+    "leased",
+    "running",
+    "succeeded",
+    "failed",
+    "cancelled",
+    "cancelled-requested",
+    "expired"
   ]
 }
