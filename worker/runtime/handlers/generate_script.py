@@ -94,5 +94,10 @@ def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         commandId=env.commandId,
         job_id=job.id,
         artifact_ids=[cv_id],
-        detail={"title": script.get("title"), "parent": parent_id},
+        detail={
+            "title": script.get("title"),
+            "parent": parent_id,
+            # 供前端直接 seed 编辑器，无需额外 content-fetch 接口
+            "script": script,
+        },
     )

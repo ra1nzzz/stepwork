@@ -93,5 +93,7 @@ def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         detail={
             "angle_count": len(proposal.angles),
             "source_version_id": spec.source_version_id,
+            # 供前端直接渲染，无需额外 content-fetch 接口
+            "angles": [a.model_dump() for a in proposal.angles],
         },
     )
