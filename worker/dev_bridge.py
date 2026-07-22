@@ -25,7 +25,7 @@ import platform
 import sqlite3
 import tempfile
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
@@ -51,10 +51,20 @@ try:
     STATE.db_conn = _conn
     STATE.db_path = _DB_PATH
 except Exception as exc:  # pragma: no cover - 启动期依赖缺失时给出清晰报错
-    raise SystemExit(f"[dev_bridge] 初始化数据库失败: {exc}")
+    raise SystemExit(f"[dev_bridge] 初始化数据库失败: {exc}") from exc
 
 # SQLite 连接非线程安全，用锁串行化所有请求（本地开发并发极低，足够）。
 _DB_LOCK = threading.Lock()
+
+# CORS 收窄（SET.5 P0 安全）：仅放行本地开发 GUI 源。
+# 不再使用 ``*``，避免任意站点读取 dev_bridge 响应。
+_ALLOWED_ORIGINS = {"http://localhost:1420", "http://127.0.0.1:1420"}
+
+def _cors_origin(handler: _Handler) -> str:
+    origin = handler.headers.get("Origin")
+    if origin in _ALLOWED_ORIGINS:
+        return origin
+    return "http://localhost:1420"
 
 
 def _to_command_result(payload: dict) -> dict:
@@ -85,7 +95,7 @@ def _health() -> dict:
         "protocol_version": "1",
         "uptime_seconds": 0,
         "pid": os.getpid(),
-        "last_heartbeat_at": datetime.now(timezone.utc).isoformat(),
+        "last_heartbeat_at": datetime.now(UTC).isoformat(),
         "startup_duration_ms": 0,
         "active_jobs": 0,
         "degraded_reasons": [],
@@ -102,14 +112,16 @@ class _Handler(BaseHTTPRequestHandler):
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", _cors_origin(self))
         self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        # 反射具体 Origin（非 ``*``）时必须带 Vary: Origin，避免代理误缓存。
+        self.send_header("Vary", "Origin")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
-    def log_message(self, *args) -> None:  # 静默
+    def log_message(self, *args: object) -> None:  # 静默
         return
 
     def do_OPTIONS(self) -> None:
