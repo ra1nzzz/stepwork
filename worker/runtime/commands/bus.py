@@ -6,7 +6,8 @@
 - ``TranscribeSource``→ ``worker.runtime.handlers.transcribe_source``
 - ``AnalyzeSource``  → ``worker.runtime.handlers.analyze_source``
 - ``GetConfig`` / ``UpdateConfig`` → ``worker.runtime.handlers.config``
-  （设置类命令，仅允许 ``user`` / ``desktop`` 两类 actor，见 ``_ALLOWED_CONFIG_ACTORS``）
+  （写配置 ``UpdateConfig`` 仅允许 ``user`` / ``desktop`` 两类 actor；
+  读配置 ``GetConfig`` 返回掩码视图，对任何合法 actor 开放，见 ``_ALLOWED_CONFIG_ACTORS``）
 """
 
 from __future__ import annotations
@@ -29,10 +30,14 @@ _ROUTES: dict[str, str] = {
     "SaveScript": "worker.runtime.handlers.save_script",
     "GetConfig": "worker.runtime.handlers.config",
     "UpdateConfig": "worker.runtime.handlers.config",
+    "ListProjects": "worker.runtime.handlers.queries",
+    "GetProject": "worker.runtime.handlers.queries",
+    "GetJobStatus": "worker.runtime.handlers.queries",
 }
 
-# 设置类命令仅允许来自「用户态 / 桌面壳」的 actor（三角色 P0 安全模型）。
-# agent / plugin / system 等自动化主体不得读写配置。
+# 写配置（UpdateConfig）仅允许来自「用户态 / 桌面壳」的 actor（三角色 P0 安全模型）；
+# 读配置（GetConfig）返回掩码视图（``••••`` + ``hasKey:bool``），无任何密钥外泄风险，
+# 故对任何合法 actor 开放。MCP 不越权的根保证是「MCP 永不注册 UpdateConfig」（tool 集边界）。
 _ALLOWED_CONFIG_ACTORS: tuple[str, ...] = ("user", "desktop")
 
 
@@ -67,13 +72,14 @@ async def dispatch(raw: dict[str, Any], deps: Any) -> dict[str, Any]:
             error=f"unknown commandType: {env.commandType}",
         ).model_dump()
 
-    # 设置类命令：actor 白名单（user / desktop）。
-    if env.commandType in ("GetConfig", "UpdateConfig"):
+    # 写配置（UpdateConfig）受 actor 白名单限制（user / desktop）；
+    # 读配置（GetConfig）返回掩码，不对 actor 限制。
+    if env.commandType == "UpdateConfig":
         actor_type = (env.actor or {}).get("type")
         if actor_type not in _ALLOWED_CONFIG_ACTORS:
             return CommandResult(
                 ok=False, commandId=env.commandId,
-                error=f"FORBIDDEN_ACTOR: config command requires actor in "
+                error=f"FORBIDDEN_ACTOR: write config (UpdateConfig) requires actor in "
                 f"{_ALLOWED_CONFIG_ACTORS}, got {actor_type!r}",
             ).model_dump()
 
