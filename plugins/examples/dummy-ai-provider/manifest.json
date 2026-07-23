@@ -1,0 +1,16 @@
+{
+  "id": "dummy-ai-provider",
+  "name": "Dummy AI Provider (示例)",
+  "version": "0.1.0",
+  "apiVersion": "1",
+  "type": "ai-provider",
+  "license": "Apache-2.0",
+  "description": "W8 示例插件：演示 PluginManifest 形状。注册但默认不启用，不起子进程（ADR-009 独立进程属 V0.2）。",
+  "entry": {
+    "runtime": "python",
+    "module": "plugin.main"
+  },
+  "permissions": ["ai:complete"],
+  "capabilities": ["chat"],
+  "platforms": ["windows", "macos", "linux"]
+}
