@@ -10,6 +10,10 @@ import { AnalysisView } from "@/features/analysis/AnalysisView";
 import { ScriptView } from "@/features/script/ScriptView";
 import { RenderView } from "@/features/render/RenderView";
 import SettingsView from "@/features/settings/SettingsView";
+import { ProvenanceView } from "@/features/provenance/ProvenanceView";
+import { AgentView } from "@/features/agent/AgentView";
+import { DiagnosticsView } from "@/features/diagnostics/DiagnosticsView";
+import { PluginsView } from "@/features/plugins/PluginsView";
 
 function Splash() {
   return (
@@ -70,6 +74,18 @@ export default function App() {
       break;
     case "settings":
       content = <SettingsView />;
+      break;
+    case "provenance":
+      content = <ProvenanceView />;
+      break;
+    case "agent":
+      content = <AgentView />;
+      break;
+    case "diagnostics":
+      content = <DiagnosticsView />;
+      break;
+    case "plugins":
+      content = <PluginsView />;
       break;
     default:
       content = <HealthCard />;

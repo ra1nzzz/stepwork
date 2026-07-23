@@ -5,7 +5,18 @@
 
 import { create } from "zustand";
 
-export type ViewId = "home" | "import" | "transcript" | "analysis" | "script" | "render" | "settings";
+export type ViewId =
+  | "home"
+  | "import"
+  | "transcript"
+  | "analysis"
+  | "script"
+  | "render"
+  | "settings"
+  | "provenance"
+  | "agent"
+  | "diagnostics"
+  | "plugins";
 
 interface ViewStoreState {
   currentView: ViewId;

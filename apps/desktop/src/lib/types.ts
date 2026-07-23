@@ -103,7 +103,14 @@ export interface CommandEnvelope {
     | "CreateRenderJob"
     | "CancelJob"
     | "GetConfig"
-    | "UpdateConfig";
+    | "UpdateConfig"
+    | "GetProvenance"
+    | "ListAgentTasks"
+    | "ListAgentArtifacts"
+    | "ExportDiagnosticsBundle"
+    | "ListPlugins"
+    | "EnablePlugin"
+    | "DisablePlugin";
   schemaVersion: string;
   actor: { type: "user" | "agent" | "plugin" | "system" | "desktop"; id: string };
   source: string;

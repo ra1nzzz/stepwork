@@ -261,6 +261,34 @@ function mockDetail(commandType: CommandEnvelope["commandType"]): Record<string,
   if (commandType === "CancelJob") {
     return { mock: true, cancelled: true };
   }
+  // W8：溯源 / Agent / 诊断 / 插件——MVP 阶段返回空态结构（不含虚假记录），
+  // 诊断包导出返回 plausible 路径以便 UI 演示结果展示。
+  if (commandType === "GetProvenance") {
+    return { mock: true, records: [] };
+  }
+  if (commandType === "ListAgentTasks") {
+    return { mock: true, tasks: [] };
+  }
+  if (commandType === "ListAgentArtifacts") {
+    return { mock: true, artifacts: [] };
+  }
+  if (commandType === "ExportDiagnosticsBundle") {
+    return {
+      mock: true,
+      bundle_path: `file:///mock/diagnostics/stepwork-bundle-${Date.now()}.zip`,
+      size_bytes: 0,
+      desensitized: true,
+    };
+  }
+  if (commandType === "ListPlugins") {
+    return { mock: true, plugins: [] };
+  }
+  if (commandType === "EnablePlugin") {
+    return { mock: true, enabled: true };
+  }
+  if (commandType === "DisablePlugin") {
+    return { mock: true, enabled: false };
+  }
   return { mock: true };
 }
 

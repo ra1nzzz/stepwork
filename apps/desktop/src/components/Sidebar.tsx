@@ -15,6 +15,10 @@ const NAV_ITEMS: NavItemDef[] = [
   { id: "script", label: "脚本创作", icon: "05" },
   { id: "render", label: "视频渲染", icon: "06" },
   { id: "settings", label: "设置", icon: "07" },
+  { id: "provenance", label: "溯源", icon: "08" },
+  { id: "agent", label: "Agent", icon: "09" },
+  { id: "diagnostics", label: "诊断", icon: "10" },
+  { id: "plugins", label: "插件", icon: "11" },
 ];
 
 function statusLabel(status: "ok" | "degraded" | "down" | null): string {
