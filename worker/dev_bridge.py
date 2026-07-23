@@ -27,6 +27,7 @@ import tempfile
 import threading
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
 from urllib.parse import urlparse
 
 from worker.runtime.bootstrap import MIGRATIONS_DIR
@@ -67,28 +68,32 @@ def _cors_origin(handler: _Handler) -> str:
     return "http://localhost:1420"
 
 
-def _to_command_result(payload: dict) -> dict:
+# Forward reference resolved below class definition.
+
+
+def _to_command_result(payload: dict[str, Any]) -> dict[str, Any]:
     """把 ``handle_command`` 的返回归一为前端期望的 ``CommandResult`` 形状。"""
     if "result" in payload:
-        return payload["result"]
+        result = payload["result"]
+        return result if isinstance(result, dict) else {}
     err = payload.get("error", {})
     return {
         "ok": False,
         "commandId": None,
         "job_id": None,
         "artifact_ids": [],
-        "error": err.get("message", "bridge_error"),
+        "error": err.get("message", "bridge_error") if isinstance(err, dict) else "bridge_error",
         "detail": None,
     }
 
 
-async def _dispatch_envelope(envelope: dict) -> dict:
-    params = {"envelope": envelope}
+async def _dispatch_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
+    params: dict[str, Any] = {"envelope": envelope}
     payload = await commands.handle_command(params, STATE)
     return _to_command_result(payload)
 
 
-def _health() -> dict:
+def _health() -> dict[str, Any]:
     return {
         "status": "ok",
         "version": "0.1.0-bridge",
@@ -108,7 +113,7 @@ def _health() -> dict:
 
 
 class _Handler(BaseHTTPRequestHandler):
-    def _send(self, status: int, obj: dict) -> None:
+    def _send(self, status: int, obj: dict[str, Any]) -> None:
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")

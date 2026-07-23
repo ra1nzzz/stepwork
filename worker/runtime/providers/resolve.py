@@ -207,9 +207,9 @@ def resolve_tts(workspace_id: str | None = None) -> TTSProvider | None:
         return LocalTTSProvider()
     if kind == "cloud":
         ov = _override_for(workspace_id, "tts")
-        key = _env("STEPWORK_TTS_API_KEY") or ov.get("apiKey")
-        url = _env("STEPWORK_TTS_BASE_URL") or ov.get("baseUrl")
-        model = _env("STEPWORK_TTS_MODEL") or ov.get("model")
+        key = _env("STEPWORK_TTS_API_KEY") or str(ov.get("apiKey") or "")
+        url = _env("STEPWORK_TTS_BASE_URL") or str(ov.get("baseUrl") or "")
+        model = _env("STEPWORK_TTS_MODEL") or str(ov.get("model") or "") or None
         if not key or not _valid_base_url(url):
             return None
         return CloudTTSProvider(api_key=key, base_url=url, model=model)
