@@ -31,7 +31,12 @@
         "CancelJob",
         "GenerateTopic",
         "GenerateScript",
-        "SaveScript"
+        "SaveScript",
+        "GetConfig",
+        "UpdateConfig",
+        "ListProjects",
+        "GetProject",
+        "GetJobStatus"
       ],
       "description": "Command type identifier. See SYSTEM_SPEC §7.2 for the canonical list."
     },
