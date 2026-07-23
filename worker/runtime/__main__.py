@@ -28,6 +28,7 @@ from typing import IO
 
 from worker.runtime.handlers import commands, health, lifecycle
 from worker.runtime.heartbeat import heartbeat_loop
+from worker.runtime.logging_config import configure_logging
 from worker.runtime.rpc import (
     ConnectionClosedError,
     FrameTooLargeError,
@@ -57,15 +58,6 @@ JSONRPC_UNAUTHORIZED: int = -32001
 
 _SESSION_TOKEN_KEY: str = "_session_token"
 """请求 params 中携带 session token 的保留字段名。"""
-
-
-def _configure_logging() -> None:
-    """将日志输出到 stderr（stdout 专用于 RPC 帧）。"""
-    logging.basicConfig(
-        stream=sys.stderr,
-        level=logging.INFO,
-        format='{"ts":"%(asctime)s","level":"%(levelname)s","name":"%(name)s","msg":"%(message)s"}',
-    )
 
 
 def _stdin_binary() -> IO[bytes]:
@@ -177,7 +169,7 @@ async def amain() -> int:
     Returns:
         进程退出码（0 表示正常）。
     """
-    _configure_logging()
+    configure_logging()
 
     monotonic_start = time.monotonic()
     state = WorkerState(monotonic_start=monotonic_start)
