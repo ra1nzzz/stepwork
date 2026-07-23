@@ -27,6 +27,8 @@ dev = [
 
 [project.scripts]
 stepwork-worker = "worker.runtime.__main__:main"
+stepwork-cli = "cli.__main__:main"
+stepwork-mcp = "mcp.server:main"
 
 # W2 carry-over #3: package the `worker` top-level package (which has a
 # real worker/__init__.py) instead of only `runtime`. Resolving the
