@@ -33,6 +33,16 @@ _ROUTES: dict[str, str] = {
     "ListProjects": "worker.runtime.handlers.queries",
     "GetProject": "worker.runtime.handlers.queries",
     "GetJobStatus": "worker.runtime.handlers.queries",
+    # W8: 插件 / Provenance / Agent / 诊断包（Layer 0 路由先行，handler 由各支线补齐）
+    "ListPlugins": "worker.runtime.handlers.plugins",
+    "GetPluginManifest": "worker.runtime.handlers.plugins",
+    "EnablePlugin": "worker.runtime.handlers.plugins",
+    "DisablePlugin": "worker.runtime.handlers.plugins",
+    "GetProvenance": "worker.runtime.handlers.provenance",
+    "ListAgentTasks": "worker.runtime.handlers.agent",
+    "ListAgentArtifacts": "worker.runtime.handlers.agent",
+    "GetAgentTask": "worker.runtime.handlers.agent",
+    "ExportDiagnosticsBundle": "worker.runtime.handlers.diagnostics",
 }
 
 # 写配置（UpdateConfig）仅允许来自「用户态 / 桌面壳」的 actor（三角色 P0 安全模型）；

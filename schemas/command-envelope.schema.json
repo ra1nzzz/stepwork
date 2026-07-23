@@ -36,7 +36,16 @@
         "UpdateConfig",
         "ListProjects",
         "GetProject",
-        "GetJobStatus"
+        "GetJobStatus",
+        "ListPlugins",
+        "GetPluginManifest",
+        "EnablePlugin",
+        "DisablePlugin",
+        "GetProvenance",
+        "ListAgentTasks",
+        "ListAgentArtifacts",
+        "GetAgentTask",
+        "ExportDiagnosticsBundle"
       ],
       "description": "Command type identifier. See SYSTEM_SPEC §7.2 for the canonical list."
     },
