@@ -43,6 +43,11 @@ _ROUTES: dict[str, str] = {
     "ListAgentArtifacts": "worker.runtime.handlers.agent",
     "GetAgentTask": "worker.runtime.handlers.agent",
     "ExportDiagnosticsBundle": "worker.runtime.handlers.diagnostics",
+    # W9: 集成 / 数据迁移 / 种子测试（Layer 0 路由先行，handler 由各支线补齐）
+    "ExportProject": "worker.runtime.handlers.project_io",
+    "ImportProject": "worker.runtime.handlers.project_io",
+    "BackupWorkspace": "worker.runtime.handlers.backup",
+    "RestoreWorkspace": "worker.runtime.handlers.backup",
 }
 
 # 写配置（UpdateConfig）仅允许来自「用户态 / 桌面壳」的 actor（三角色 P0 安全模型）；
