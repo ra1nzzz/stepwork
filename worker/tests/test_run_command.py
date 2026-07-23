@@ -105,3 +105,44 @@ def test_run_command_list_projects(tmp_path: Path) -> None:
     projects = result["detail"]["projects"]
     assert isinstance(projects, list)
     assert any(p["title"] == "demo" for p in projects)
+
+
+def test_three_clients_produce_equivalent_command_result(tmp_path: Path) -> None:
+    """Gate 测试：同命令经 CLI / UI(mock) / MCP 产出**相同 CommandResult**。
+
+    W7_PLAN §10 核心 Gate。同一只读查询（GetConfig）经三个 source 构造
+    信封后送入 run_command，断言 detail 字段一致（除 commandId/requestedAt
+    等不可比字段外）。
+    """
+    from worker.runtime.db.connection import connect
+    from worker.runtime.db.migrations import run_migrations
+    from worker.runtime.db.repos import Repos
+
+    db_path = str(tmp_path / "three_clients.db")
+    conn = connect(db_path)
+    run_migrations(conn, _MIG_DIR)
+    repos = Repos(conn)
+    repos.workspaces.ensure("ws-local")
+    conn.close()
+
+    def _result_for(source: str, actor_type: str) -> dict[str, Any]:
+        env = build_envelope(
+            command_type="GetConfig",
+            source=source,
+            actor_type=actor_type,
+            workspace_id="ws-local",
+        )
+        return _run(env, db_path=db_path)
+
+    cli_res = _result_for("cli", "desktop")
+    ui_res = _result_for("ui", "desktop")
+    mcp_res = _result_for("mcp", "agent")
+
+    # 三端都成功
+    assert cli_res["ok"] is True and ui_res["ok"] is True and mcp_res["ok"] is True
+    # detail（掩码配置视图）一致 —— 三端一致性 Gate 的字面断言
+    # （commandId/requestedAt 等不可比字段不在 CommandResult 内）
+    assert cli_res["detail"] == ui_res["detail"] == mcp_res["detail"]
+    # error 字段三端一致（均无错误）
+    assert cli_res["error"] == ui_res["error"] == mcp_res["error"] is None
+
