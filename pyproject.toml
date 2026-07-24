@@ -70,6 +70,11 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["worker/tests"]
 addopts = "-v --tb=short"
+markers = [
+  # W9 L.42：性能基线测试，默认不跑（pytest -m "not perf"），手动 `pytest -m perf` 建立基线。
+  # 理由：性能测试在不同机器/CI 环境抖动大，避免污染常规 CI（W9_PLAN D5）。
+  "perf: performance baseline tests (skipped by default; run with `-m perf`)",
+]
 
 [tool.coverage.run]
 source = ["worker"]
