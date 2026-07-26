@@ -1,0 +1,23 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "artifacts": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Artifacts",
+      "type": "array"
+    },
+    "note": {
+      "title": "Note",
+      "type": "string"
+    }
+  },
+  "required": [
+    "artifacts",
+    "note"
+  ],
+  "title": "ListAgentArtifactsDetail",
+  "type": "object"
+}

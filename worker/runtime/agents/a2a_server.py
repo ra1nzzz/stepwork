@@ -108,21 +108,32 @@ def _make_handler() -> type[BaseHTTPRequestHandler]:
             self._send(404, {"error": "not found"})
 
         def do_POST(self) -> None:
-            if not self._authorized():
-                self._send(401, _rpc_error(None, -32001, "unauthorized"))
-                return
+            # **先把请求体读完再决定怎么回**。此前鉴权失败时直接回 401 就关连接，
+            # 而客户端还在写 body —— 对方收到的是连接被重置（WinError 10053），
+            # 不是干净的 401，完全看不出是「没带令牌」。这不是测试不稳定，是真
+            # 协议 bug：任何带 body 的未授权请求都会撞上。
             try:
                 length = int(self.headers.get("Content-Length", "0") or "0")
             except ValueError:
                 self._send(400, _rpc_error(None, -32600, "bad Content-Length"))
                 return
-            if length > MAX_BODY_BYTES:
+            if length < 0 or length > MAX_BODY_BYTES:
+                # 超限就不读了（读它正是攻击者想要的），明确告知后关闭
                 self._send(413, _rpc_error(None, -32600, "body too large"))
                 return
             try:
                 raw = self.rfile.read(length) if length else b"{}"
+            except OSError as exc:
+                logger.debug("a2a failed to read request body: %s", exc)
+                return
+
+            # 体已读完，此时无论回什么都是完整的一次 HTTP 往返
+            if not self._authorized():
+                self._send(401, _rpc_error(None, -32001, "unauthorized"))
+                return
+            try:
                 req = json.loads(raw or b"{}")
-            except (ValueError, OSError) as exc:
+            except ValueError as exc:
                 self._send(400, _rpc_error(None, -32700, f"parse error: {exc}"))
                 return
             if not isinstance(req, dict):

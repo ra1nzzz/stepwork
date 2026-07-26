@@ -1,0 +1,15 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "card": {
+      "additionalProperties": true,
+      "title": "Card",
+      "type": "object"
+    }
+  },
+  "required": [
+    "card"
+  ],
+  "title": "GetAgentCardDetail",
+  "type": "object"
+}

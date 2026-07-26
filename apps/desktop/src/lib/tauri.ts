@@ -11,6 +11,7 @@ import type {
   CommandEnvelope,
   CommandResult,
   ConfigResult,
+  TypedCommandResult,
 } from "./types";
 import { useSettingsStore } from "@/stores/useSettingsStore";
 import type { SettingsConfig } from "@/stores/useSettingsStore";
@@ -244,6 +245,21 @@ function disconnectedResult(envelope: CommandEnvelope): CommandResult {
         "未连接到后端。请在 Tauri 桌面环境中运行，或启动 dev_bridge（python worker/dev_bridge.py）。",
     },
   };
+}
+
+/**
+ * 带 detail 类型推导的 dispatch。
+ *
+ * 已登记响应契约的命令（见 worker/runtime/results）会把 ``detail`` 收窄成
+ * 具体形状；未登记的回落 ``Record<string, unknown>``，与改造前完全一致。
+ *
+ * 为什么要这层：此前一律 ``as { xxx?: T }`` 裸断言，后端改字段名前端只会
+ * 静默拿到 undefined —— 没有编译错误、没有测试变红，功能就此消失。
+ */
+export async function dispatchTyped<K extends CommandEnvelope["commandType"]>(
+  envelope: CommandEnvelope & { commandType: K },
+): Promise<TypedCommandResult<K>> {
+  return (await dispatchCommand(envelope)) as TypedCommandResult<K>;
 }
 
 export async function dispatchCommand(

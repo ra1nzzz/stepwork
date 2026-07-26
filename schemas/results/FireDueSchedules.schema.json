@@ -1,0 +1,23 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "fired": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Fired",
+      "type": "array"
+    },
+    "count": {
+      "title": "Count",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "fired",
+    "count"
+  ],
+  "title": "FireDueSchedulesDetail",
+  "type": "object"
+}

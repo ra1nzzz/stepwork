@@ -1,0 +1,34 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "bundle_path": {
+      "title": "Bundle Path",
+      "type": "string"
+    },
+    "variant_id": {
+      "title": "Variant Id",
+      "type": "string"
+    },
+    "files": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "title": "Files",
+      "type": "object"
+    }
+  },
+  "required": [
+    "bundle_path",
+    "variant_id",
+    "files"
+  ],
+  "title": "ExportBundleDetail",
+  "type": "object"
+}

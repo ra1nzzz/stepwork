@@ -20,6 +20,7 @@ from typing import Any
 from worker.runtime.commands import idempotency
 from worker.runtime.commands.envelope import EnvelopeError, parse_envelope
 from worker.runtime.models import CommandEnvelope, CommandResult
+from worker.runtime.results import validate_detail
 
 logger = logging.getLogger("worker.runtime")
 
@@ -401,6 +402,13 @@ async def dispatch(raw: dict[str, Any], deps: Any) -> dict[str, Any]:
         record_agent_activity(
             conn, env, artifact_ids=list(result.artifact_ids), ok=result.ok
         )
+
+    # 响应契约（worker/runtime/results）：handler 产出的 detail 必须符合登记的
+    # 形状。放在 dispatch 出口而不是各 handler 里，是为了「登记了就一定被校验」
+    # —— 逐个 handler 埋点必然会漏，而漏掉的那条恰好就是会静默漂移的那条。
+    # 只校验成功路径：失败 detail 是诊断信息，形状本就自由。
+    if result.ok:
+        validate_detail(env.commandType, result.detail)
 
     dumped: dict[str, Any] = result.model_dump()
     # 只缓存成功结果：失败若被缓存，一次网络抖动就会把同一个 key 永久钉死

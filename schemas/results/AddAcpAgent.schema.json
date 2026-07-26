@@ -1,0 +1,20 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "connection_id": {
+      "title": "Connection Id",
+      "type": "string"
+    },
+    "agent_info": {
+      "additionalProperties": true,
+      "title": "Agent Info",
+      "type": "object"
+    }
+  },
+  "required": [
+    "connection_id",
+    "agent_info"
+  ],
+  "title": "AddAcpAgentDetail",
+  "type": "object"
+}

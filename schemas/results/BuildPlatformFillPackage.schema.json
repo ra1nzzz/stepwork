@@ -1,0 +1,15 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "fill_package": {
+      "additionalProperties": true,
+      "title": "Fill Package",
+      "type": "object"
+    }
+  },
+  "required": [
+    "fill_package"
+  ],
+  "title": "BuildPlatformFillPackageDetail",
+  "type": "object"
+}

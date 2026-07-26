@@ -585,3 +585,36 @@ def test_stop_releases_thread_connections(tmp_path: Path) -> None:
         assert not a2a_handler._THREAD_DEPS, "停机后线程连接应已释放"
     finally:
         conn.close()
+
+
+def test_unauthorized_post_with_body_gets_clean_401(tmp_path: Path) -> None:
+    """带 body 的未授权请求必须拿到干净的 401，而不是连接被重置。
+
+    早先实现鉴权失败就直接回 401 并关连接，客户端还在写 body →
+    对方收到 WinError 10053（连接被中止），完全看不出是「没带令牌」。
+    这曾表现为「测试偶发红」，实际是真协议 bug：任何带 body 的未授权
+    请求都会撞上，只是 body 小的时候恰好写完了。
+    """
+    conn, repos = _new_db(tmp_path)
+    try:
+        deps = Deps(repos=repos)
+        started = _run(_env("StartA2aServer"), deps)["detail"]
+        _wait_ready(started["card_url"])
+
+        # 用一个明显大于单个 TCP 段的 body，逼出「没读完就关」的行为
+        big = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "message/send",
+            "params": {
+                "message": {
+                    "role": "user",
+                    "parts": [{"kind": "text", "text": "x" * 200_000}],
+                }
+            },
+        }
+        r = httpx.post(started["url"], json=big, timeout=15)
+        assert r.status_code == 401
+        assert r.json()["error"]["message"] == "unauthorized"
+    finally:
+        conn.close()

@@ -1,0 +1,15 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "publish_job": {
+      "additionalProperties": true,
+      "title": "Publish Job",
+      "type": "object"
+    }
+  },
+  "required": [
+    "publish_job"
+  ],
+  "title": "RecordPublishResultDetail",
+  "type": "object"
+}

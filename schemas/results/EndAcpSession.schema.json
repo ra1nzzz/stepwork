@@ -1,0 +1,14 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "ended": {
+      "title": "Ended",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "ended"
+  ],
+  "title": "EndAcpSessionDetail",
+  "type": "object"
+}

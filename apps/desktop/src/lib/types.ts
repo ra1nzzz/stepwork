@@ -3,6 +3,8 @@
  * 与 Python worker/runtime/handlers/health.py 及 Rust sidecar 错误枚举对称
  */
 
+import type { CommandResultDetails } from "./results.generated";
+
 export type HealthState = "ok" | "degraded" | "down";
 
 /**
@@ -191,6 +193,18 @@ export interface CommandEnvelope {
   payload: Record<string, unknown>;
   requestedAt: string;
 }
+
+/**
+ * 带 detail 推导的 CommandResult。
+ *
+ * 已登记响应契约的命令拿到具体形状；其余回落 Record<string, unknown>
+ * —— 契约按域分批推进，未覆盖的域行为保持不变。
+ */
+export type TypedCommandResult<K extends string> = Omit<CommandResult, "detail"> & {
+  detail: K extends keyof CommandResultDetails
+    ? CommandResultDetails[K] | null
+    : Record<string, unknown> | null;
+};
 
 /** Command Bus 统一返回（对齐 worker/runtime/models.py CommandResult） */
 export interface CommandResult {

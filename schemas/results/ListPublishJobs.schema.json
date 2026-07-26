@@ -1,0 +1,18 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "publish_jobs": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Publish Jobs",
+      "type": "array"
+    }
+  },
+  "required": [
+    "publish_jobs"
+  ],
+  "title": "ListPublishJobsDetail",
+  "type": "object"
+}

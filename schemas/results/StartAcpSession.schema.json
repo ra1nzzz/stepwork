@@ -1,0 +1,29 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "session_id": {
+      "title": "Session Id",
+      "type": "string"
+    },
+    "external_session_id": {
+      "title": "External Session Id",
+      "type": "string"
+    },
+    "root": {
+      "title": "Root",
+      "type": "string"
+    },
+    "project_id": {
+      "title": "Project Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "session_id",
+    "external_session_id",
+    "root",
+    "project_id"
+  ],
+  "title": "StartAcpSessionDetail",
+  "type": "object"
+}

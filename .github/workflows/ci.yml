@@ -121,6 +121,9 @@ jobs:
         working-directory: worker
         run: ruff check .
 
+      - name: 响应契约生成物同步检查
+        run: python scripts/gen_result_types.py --check
+
       - name: Type check (mypy)
         working-directory: worker
         run: mypy .

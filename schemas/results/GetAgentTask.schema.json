@@ -1,0 +1,15 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "task": {
+      "additionalProperties": true,
+      "title": "Task",
+      "type": "object"
+    }
+  },
+  "required": [
+    "task"
+  ],
+  "title": "GetAgentTaskDetail",
+  "type": "object"
+}

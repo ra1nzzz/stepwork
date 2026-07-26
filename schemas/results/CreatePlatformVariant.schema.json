@@ -1,0 +1,15 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "variant": {
+      "additionalProperties": true,
+      "title": "Variant",
+      "type": "object"
+    }
+  },
+  "required": [
+    "variant"
+  ],
+  "title": "CreatePlatformVariantDetail",
+  "type": "object"
+}

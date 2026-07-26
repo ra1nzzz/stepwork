@@ -1,0 +1,18 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "variants": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Variants",
+      "type": "array"
+    }
+  },
+  "required": [
+    "variants"
+  ],
+  "title": "ListPlatformVariantsDetail",
+  "type": "object"
+}
