@@ -11,6 +11,7 @@
 import { create } from "zustand";
 import { buildEnvelope, dispatchCommand } from "@/lib/tauri";
 import { useSettingsStore } from "@/stores/useSettingsStore";
+import { useViewStore } from "@/stores/useViewStore";
 import type {
   AnalysisChapter,
   AnalysisReport,
@@ -19,6 +20,10 @@ import type {
 } from "@/lib/types";
 
 const WORKSPACE = "ws-local";
+
+/** 当前选中项目 id（envelope.projectId）；确实没有时才回落 null */
+const currentProjectId = (): string | null =>
+  useViewStore.getState().selectedProjectId ?? null;
 
 interface AnalysisStoreState {
   reports: AnalysisReport[];
@@ -88,7 +93,7 @@ export const useAnalysisStore = create<AnalysisStoreState>((set, get) => ({
       }));
 
     try {
-      const env = buildEnvelope("AnalyzeSource", WORKSPACE, null, {
+      const env = buildEnvelope("AnalyzeSource", WORKSPACE, currentProjectId(), {
         transcript_version_id: transcriptVersionId,
         brand: brand ?? null,
         provider: {

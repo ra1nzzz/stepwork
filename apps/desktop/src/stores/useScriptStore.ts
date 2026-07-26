@@ -10,6 +10,7 @@
 
 import { create } from "zustand";
 import { buildEnvelope, dispatchCommand } from "@/lib/tauri";
+import { useViewStore } from "@/stores/useViewStore";
 import type {
   TopicAngle,
   ScriptVersionRef,
@@ -19,6 +20,10 @@ import type {
 } from "@/lib/types";
 
 const WORKSPACE = "ws-local";
+
+/** 当前选中项目 id（envelope.projectId）；确实没有时才回落 null */
+const currentProjectId = (): string | null =>
+  useViewStore.getState().selectedProjectId ?? null;
 
 export type ScriptStatus = "idle" | "running" | "succeeded" | "failed";
 
@@ -90,7 +95,7 @@ export const useScriptStore = create<ScriptStoreState>((set, get) => ({
       const env = buildEnvelope(
         "GenerateTopic",
         WORKSPACE,
-        null,
+        currentProjectId(),
         payload,
       );
       const res = await dispatchCommand(env);
@@ -128,7 +133,7 @@ export const useScriptStore = create<ScriptStoreState>((set, get) => ({
       const env = buildEnvelope(
         "GenerateScript",
         WORKSPACE,
-        null,
+        currentProjectId(),
         payload,
       );
       const res = await dispatchCommand(env);
@@ -162,7 +167,7 @@ export const useScriptStore = create<ScriptStoreState>((set, get) => ({
     const env = buildEnvelope(
       "SaveScript",
       WORKSPACE,
-      null,
+      currentProjectId(),
       payload,
     );
     try {

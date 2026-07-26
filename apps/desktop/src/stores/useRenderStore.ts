@@ -12,13 +12,19 @@
 
 import { create } from "zustand";
 import { buildEnvelope, dispatchCommand } from "@/lib/tauri";
+import { useViewStore } from "@/stores/useViewStore";
 import type {
   VideoDraftMeta,
   CreateRenderJobPayload,
   CancelJobPayload,
+  JobProgressParams,
 } from "@/lib/types";
 
 const WORKSPACE = "ws-local";
+
+/** 当前选中项目 id（envelope.projectId）；确实没有时才回落 null */
+const currentProjectId = (): string | null =>
+  useViewStore.getState().selectedProjectId ?? null;
 
 export type RenderStatus =
   | "idle"
@@ -45,6 +51,8 @@ interface RenderStoreState {
   render: () => Promise<void>;
   cancel: () => Promise<void>;
   retry: () => Promise<void>;
+  /** 应用后端 job.progress 通知（渲染进行中时实时推进进度条） */
+  applyJobProgress: (p: JobProgressParams) => void;
   reset: () => void;
 }
 
@@ -96,7 +104,7 @@ export const useRenderStore = create<RenderStoreState>((set, get) => ({
       const env = buildEnvelope(
         "CreateRenderJob",
         WORKSPACE,
-        null,
+        currentProjectId(),
         payload,
       );
       const res = await dispatchCommand(env);
@@ -138,7 +146,7 @@ export const useRenderStore = create<RenderStoreState>((set, get) => ({
     const env = buildEnvelope(
       "CancelJob",
       WORKSPACE,
-      null,
+      currentProjectId(),
       payload,
     );
     try {
@@ -147,6 +155,26 @@ export const useRenderStore = create<RenderStoreState>((set, get) => ({
       const msg = e instanceof Error ? e.message : String(e);
       set({ error: msg });
     }
+  },
+
+  applyJobProgress: (p) => {
+    if (p.job_type !== "render") return;
+    const s = get();
+    // dispatch 返回前 jobId 为 null：渲染中的通知按 job_type 归属当前活动任务
+    const isActive = s.jobId === p.job_id || (s.jobId === null && s.status === "running");
+    if (!isActive) return;
+    const changes: Partial<RenderStoreState> = {
+      jobId: p.job_id,
+      progress: p.progress,
+    };
+    // 终态（draft 等详情）仍由 dispatch 返回值裁决；通知只推进进度与失败/取消态
+    if (p.state === "failed") {
+      changes.status = "failed";
+      changes.error = p.error_code ?? s.error;
+    } else if (p.state === "cancelled") {
+      changes.status = "cancelled";
+    }
+    set(changes);
   },
 
   retry: async () => {

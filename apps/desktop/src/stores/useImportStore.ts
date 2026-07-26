@@ -27,9 +27,11 @@ function kindFromMime(mime: string): string {
 }
 
 export interface ImportFileInput {
+  /** 文件的真实绝对路径（Tauri dialog / 拖放事件返回） */
   uri: string;
   name: string;
-  sizeBytes: number;
+  /** 字节大小；dialog 选择路径时无法得知，缺省由 worker 落库时补全 */
+  sizeBytes?: number;
   mimeType: string;
 }
 
@@ -45,16 +47,15 @@ interface ImportStoreState {
 async function ensureProjectId(): Promise<string> {
   const existing = useViewStore.getState().selectedProjectId;
   if (existing) return existing;
-  const env = buildEnvelope("CreateProject", WORKSPACE, null, {
-    title: `草稿项目 ${new Date().toLocaleString("zh-CN")}`,
-  });
+  const title = `草稿项目 ${new Date().toLocaleString("zh-CN")}`;
+  const env = buildEnvelope("CreateProject", WORKSPACE, null, { title });
   const res = await dispatchCommand(env);
   if (!res.ok) throw new Error(res.error ?? "CREATE_PROJECT_FAILED");
   const detail = (res.detail ?? {}) as Record<string, unknown>;
-  const project = (detail.project as { id?: string } | undefined) ?? {};
+  const project = (detail.project as { id?: string; title?: string } | undefined) ?? {};
   const id = project.id;
   if (!id) throw new Error("CREATE_PROJECT_NO_ID");
-  useViewStore.getState().setSelectedProjectId(id);
+  useViewStore.getState().setSelectedProjectId(id, project.title ?? title);
   return id;
 }
 
@@ -75,7 +76,7 @@ export const useImportStore = create<ImportStoreState>((set, get) => ({
           kind,
           metadata: {
             name: f.name,
-            size_bytes: f.sizeBytes,
+            size_bytes: f.sizeBytes ?? null,
             mime_type: f.mimeType,
           },
         });
@@ -113,7 +114,7 @@ export const useImportStore = create<ImportStoreState>((set, get) => ({
     // 通知后端删除 source_assets 记录（失败静默忽略，前端仍清空）
     for (const a of assets) {
       try {
-        const env = buildEnvelope("DeleteAsset", WORKSPACE, null, {
+        const env = buildEnvelope("DeleteAsset", WORKSPACE, a.project_id, {
           assetId: a.id,
         });
         await dispatchCommand(env);

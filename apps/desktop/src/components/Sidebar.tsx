@@ -7,13 +7,14 @@ interface NavItemDef {
   icon: string;
 }
 
-/** 与 Prototype index.html .nav 5 项 1:1 对齐 */
+/** Prototype index.html .nav 5 项 + 插件（PRD-PLG，恢复孤儿路由） */
 const NAV_ITEMS: NavItemDef[] = [
   { id: "home", label: "首页", icon: "01" },
   { id: "projects", label: "项目", icon: "02" },
   { id: "create", label: "创作", icon: "03" },
   { id: "tasks", label: "任务", icon: "04" },
   { id: "settings", label: "设置", icon: "05" },
+  { id: "plugins", label: "插件", icon: "06" },
 ];
 
 function statusLabel(status: "ok" | "degraded" | "down" | null): string {
@@ -24,8 +25,8 @@ function statusLabel(status: "ok" | "degraded" | "down" | null): string {
 }
 
 /**
- * 左侧导航栏：与 Prototype .sidebar 结构 1:1 对齐
- * 5 项一级导航（首页/项目/创作/任务/设置）
+ * 左侧导航栏：与 Prototype .sidebar 结构对齐
+ * 6 项一级导航（首页/项目/创作/任务/设置/插件）
  */
 export function Sidebar() {
   const health = useHealthStore((s) => s.health);

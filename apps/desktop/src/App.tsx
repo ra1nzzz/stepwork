@@ -11,6 +11,8 @@ import { CreateView } from "@/features/create/CreateView";
 import { TasksView } from "@/features/tasks/TasksView";
 import SettingsView from "@/features/settings/SettingsView";
 import { DiagnosticsView } from "@/features/diagnostics/DiagnosticsView";
+import { PluginsView } from "@/features/plugins/PluginsView";
+import { useWorkerNotifications } from "@/lib/workerEvents";
 
 function Splash() {
   return (
@@ -27,6 +29,7 @@ function Splash() {
 function buildTopBar(
   view: string,
   failedCount: number,
+  projectTitle: string | null,
 ): { crumbs: ReactNode; topActions: ReactNode } {
   switch (view) {
     case "home":
@@ -65,13 +68,16 @@ function buildTopBar(
         topActions: null,
       };
     case "create":
+      // 面包屑用真实的选中项目标题；无选中项目时仅显示「创作」
       return {
-        crumbs: (
+        crumbs: projectTitle ? (
           <>
-            <span>AI 眼镜通勤实测</span>
+            <span>{projectTitle}</span>
             <span>/</span>
             <strong>创作</strong>
           </>
+        ) : (
+          <strong>创作</strong>
         ),
         topActions: null,
       };
@@ -83,6 +89,11 @@ function buildTopBar(
     case "settings":
       return {
         crumbs: <strong>设置</strong>,
+        topActions: null,
+      };
+    case "plugins":
+      return {
+        crumbs: <strong>插件</strong>,
         topActions: null,
       };
     case "diagnostics":
@@ -108,6 +119,10 @@ export default function App() {
   const startPolling = useHealthStore((s) => s.startPolling);
   const stopPolling = useHealthStore((s) => s.stopPolling);
   const currentView = useViewStore((s) => s.currentView);
+  const selectedProjectTitle = useViewStore((s) => s.selectedProjectTitle);
+
+  // 订阅 worker-notification（job.progress → 各任务 store；非 Tauri 环境内部跳过）
+  useWorkerNotifications();
 
   // 任务中心异常数：从 transcript/render store 派生真实失败计数
   const transcriptJobs = useTranscriptStore((s) => s.jobs);
@@ -154,13 +169,20 @@ export default function App() {
     case "diagnostics":
       content = <DiagnosticsView />;
       break;
+    case "plugins":
+      content = <PluginsView />;
+      break;
     case "home":
     default:
       content = <WorkbenchView />;
       break;
   }
 
-  const { crumbs, topActions } = buildTopBar(currentView, failedCount);
+  const { crumbs, topActions } = buildTopBar(
+    currentView,
+    failedCount,
+    selectedProjectTitle,
+  );
 
   return (
     <AppShell crumbs={crumbs} topActions={topActions}>

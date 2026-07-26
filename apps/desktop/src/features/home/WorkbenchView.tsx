@@ -211,7 +211,7 @@ export function WorkbenchView() {
                 key={p.id}
                 className="data-row simple-row"
                 onClick={() => {
-                  setSelectedProjectId(p.id);
+                  setSelectedProjectId(p.id, p.title);
                   goCreate("import");
                 }}
                 data-od-id={`project-${p.id}`}

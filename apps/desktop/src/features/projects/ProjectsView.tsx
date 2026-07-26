@@ -9,7 +9,7 @@
  * 由于后端无 ArchiveProject / UpdateProject，归档/恢复 UI 已移除。
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { buildEnvelope, dispatchCommand, isTauri } from "@/lib/tauri";
 import { useViewStore } from "@/stores/useViewStore";
 
@@ -52,7 +52,6 @@ export function ProjectsView() {
   const [notice, setNotice] = useState<string | null>(null);
   const [searchKeyword, setSearchKeyword] = useState("");
   const [creating, setCreating] = useState(false);
-  const importInputRef = useRef<HTMLInputElement | null>(null);
   const inTauri = isTauri();
 
   // 按标题本地过滤
@@ -101,13 +100,18 @@ export function ProjectsView() {
     }
   }
 
-  async function handleImport(file: File) {
+  /** 导入项目包：dialog 选择 zip 的真实绝对路径（浏览器环境无路径可用，按钮禁用） */
+  async function handleImport() {
+    if (!inTauri || importing) return;
     setImporting(true);
     setNotice(null);
     try {
-      const bundlePath = inTauri
-        ? ((file as File & { path?: string }).path ?? file.name)
-        : file.name;
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const bundlePath = await open({
+        multiple: false,
+        filters: [{ name: "项目包", extensions: ["zip"] }],
+      });
+      if (!bundlePath || typeof bundlePath !== "string") return;
       const env = buildEnvelope("ImportProject", "ws-local", null, {
         bundlePath,
       });
@@ -123,10 +127,9 @@ export function ProjectsView() {
     }
   }
 
-  function continueProject() {
-    if (selectedId) {
-      setSelectedProjectId(selectedId);
-    }
+  /** 进入创作流程前必须写入 selectedProjectId（下游 store 读取作为 envelope.projectId） */
+  function continueProject(row: ProjectRow) {
+    setSelectedProjectId(row.id, row.title);
     setCreateSubView("import");
     setView("create");
   }
@@ -135,15 +138,14 @@ export function ProjectsView() {
     setCreating(true);
     setError(null);
     try {
-      const env = buildEnvelope("CreateProject", "ws-local", null, {
-        title: `未命名项目 ${new Date().toLocaleString("zh-CN")}`,
-      });
+      const title = `未命名项目 ${new Date().toLocaleString("zh-CN")}`;
+      const env = buildEnvelope("CreateProject", "ws-local", null, { title });
       const res = await dispatchCommand(env);
       if (!res.ok) throw new Error(res.error ?? "CREATE_PROJECT_FAILED");
-      const detail = (res.detail ?? {}) as { project?: { id?: string } };
+      const detail = (res.detail ?? {}) as { project?: { id?: string; title?: string } };
       const newId = detail.project?.id;
       if (!newId) throw new Error("CREATE_PROJECT_NO_ID");
-      setSelectedProjectId(newId);
+      setSelectedProjectId(newId, detail.project?.title ?? title);
       setCreateSubView("import");
       setView("create");
     } catch (e) {
@@ -203,22 +205,12 @@ export function ProjectsView() {
               className="btn small"
               type="button"
               id="importProject"
-              onClick={() => importInputRef.current?.click()}
-              disabled={importing}
+              onClick={() => void handleImport()}
+              disabled={!inTauri || importing}
+              title={inTauri ? undefined : "导入项目需要在桌面应用中使用"}
             >
               {importing ? "导入中…" : "导入项目"}
             </button>
-            <input
-              ref={importInputRef}
-              type="file"
-              accept=".zip"
-              style={{ display: "none" }}
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void handleImport(f);
-                e.target.value = "";
-              }}
-            />
           </div>
         </div>
 
@@ -285,7 +277,7 @@ export function ProjectsView() {
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        continueProject();
+                        continueProject(row);
                       }}
                     >
                       继续

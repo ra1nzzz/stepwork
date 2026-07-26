@@ -10,9 +10,14 @@
 
 import { create } from "zustand";
 import { buildEnvelope, dispatchCommand } from "@/lib/tauri";
-import type { TranscriptSegment } from "@/lib/types";
+import { useViewStore } from "@/stores/useViewStore";
+import type { JobProgressParams, TranscriptSegment } from "@/lib/types";
 
 const WORKSPACE = "ws-local";
+
+/** 当前选中项目 id（envelope.projectId）；确实没有时才回落 null */
+const currentProjectId = (): string | null =>
+  useViewStore.getState().selectedProjectId ?? null;
 
 export type TranscriptStatus =
   | "pending"
@@ -43,6 +48,8 @@ interface TranscriptStoreState {
   transcribe: (assetId: string, opts?: Record<string, unknown>) => Promise<void>;
   cancel: (id: string) => Promise<void>;
   retry: (id: string) => Promise<void>;
+  /** 应用后端 job.progress 通知（按后端 jobId 匹配本地任务条目） */
+  applyJobProgress: (p: JobProgressParams) => void;
   reset: () => void;
 }
 
@@ -72,7 +79,7 @@ export const useTranscriptStore = create<TranscriptStoreState>((set, get) => ({
     set({ jobs: [...get().jobs, job], isBusy: true, error: null });
     try {
       set({ jobs: patch(get().jobs, job.id, { status: "running", progress: 0.1 }) });
-      const env = buildEnvelope("TranscribeSource", WORKSPACE, null, {
+      const env = buildEnvelope("TranscribeSource", WORKSPACE, currentProjectId(), {
         asset_id: assetId,
         opts: opts ?? {},
       });
@@ -110,7 +117,7 @@ export const useTranscriptStore = create<TranscriptStoreState>((set, get) => ({
     // 通知后端 CancelJob（如果有 jobId）
     if (job.jobId) {
       try {
-        const env = buildEnvelope("CancelJob", WORKSPACE, null, {
+        const env = buildEnvelope("CancelJob", WORKSPACE, currentProjectId(), {
           job_id: job.jobId,
         });
         await dispatchCommand(env);
@@ -118,6 +125,20 @@ export const useTranscriptStore = create<TranscriptStoreState>((set, get) => ({
         // 静默：本地已标记 cancelled，后端失败不回滚
       }
     }
+  },
+
+  applyJobProgress: (p) => {
+    const job = get().jobs.find((j) => j.jobId === p.job_id);
+    if (!job) return;
+    // 终态由 dispatch 返回值裁决；通知只推进 running 中的进度与失败态
+    const changes: Partial<TranscriptJob> = { progress: p.progress };
+    if (p.state === "running") changes.status = "running";
+    else if (p.state === "succeeded") changes.status = "succeeded";
+    else if (p.state === "failed") {
+      changes.status = "failed";
+      changes.error = p.error_code ?? job.error;
+    } else if (p.state === "cancelled") changes.status = "cancelled";
+    set({ jobs: patch(get().jobs, job.id, changes) });
   },
 
   retry: async (id) => {

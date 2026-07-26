@@ -118,6 +118,8 @@ export interface CommandEnvelope {
     | "ListProjects"
     | "GetProject"
     | "GetJobStatus"
+    | "ListJobs"
+    | "InstallPlugin"
     | "CreateProject"
     | "DeleteAsset"
     | "BackupWorkspace"
@@ -316,4 +318,69 @@ export interface ConfigResult {
   config?: Record<string, unknown>;
   resolved?: ConfigView["resolved"];
   error?: string;
+}
+
+/**
+ * ===== Tranche 1 类型（ListJobs / InstallPlugin / job.progress 通知） =====
+ */
+
+/** ListJobs payload（对齐 worker/runtime/handlers/queries.py，state 为小写 JobState） */
+export interface ListJobsPayload {
+  states?: JobState[];
+  limit?: number;
+}
+
+/** 持久化任务行（与 GetJobStatus / ListJobs 的 job dict 同构） */
+export interface PersistedJob {
+  id: string;
+  job_type: string;
+  state: JobState;
+  stage: JobStage | null;
+  progress: number;
+  attempt_count: number;
+  error_code: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** InstallPlugin payload（path 为含 manifest.json 的目录绝对路径） */
+export interface InstallPluginPayload {
+  path: string;
+}
+
+/** 插件 manifest（对齐 worker installed_plugins.manifest_json 解析结果） */
+export interface PluginManifest {
+  id?: string;
+  name?: string;
+  version?: string;
+  apiVersion?: number | string;
+  permissions?: string[];
+  [key: string]: unknown;
+}
+
+/** ListPlugins / InstallPlugin 返回的单条插件行
+ *  （manifest 解析失败时为 null，status 覆盖为 'error'） */
+export interface InstalledPlugin {
+  id: string;
+  enabled: boolean;
+  status: string;
+  manifest: PluginManifest | null;
+  installed_at: string;
+  error_message: string | null;
+}
+
+/** worker → Rust → 前端的 job.progress 通知 params */
+export interface JobProgressParams {
+  job_id: string;
+  job_type: string;
+  state: JobState;
+  stage: string | null;
+  progress: number;
+  error_code: string | null;
+}
+
+/** Tauri 事件 'worker-notification' 的 payload 形状 */
+export interface WorkerNotification {
+  method: string;
+  params: Record<string, unknown>;
 }
