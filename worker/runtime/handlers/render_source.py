@@ -28,6 +28,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 from worker.runtime.audit import build_invocation, record_provider_invocation
 from worker.runtime.commands.bus import DispatchError
@@ -233,10 +234,16 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
                 parent_version_id=spec.source_version_id,
                 notify=deps.notify,
             )
-            # 费用透明（Tranche 2）：detail.invocation + 审计行
-            # （renderer 无 estimated_cost_per_1k 配置 → estimated_cost=None）
+            # 费用透明（Tranche 2 / PRD-REN-002）：
+            # - renderer：本机 ffmpeg，无外部费用 → estimated_cost=None
+            # - tts：真正产生费用的环节，按**实际合成字符数**计价并单独审计。
+            #   用户录音路径（user_audio）不调 TTS，故无 tts 调用记录。
             invocation = build_invocation(renderer, 0, model=result.template)
             record_provider_invocation(repos.conn, env, invocation)
+            tts_invocation: dict[str, Any] | None = None
+            if spec.tts_engine.value != "user_audio" and deps.tts is not None:
+                tts_invocation = build_invocation(deps.tts, len(src.content or ""))
+                record_provider_invocation(repos.conn, env, tts_invocation)
             return CommandResult(
                 ok=True,
                 commandId=env.commandId,
@@ -253,6 +260,8 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
                         "audio": _abs_or_none(audio_path),
                     },
                     "invocation": invocation,
+                    # PRD-REN-002：旁白合成的来源与预计费用（user_audio 时为 None）
+                    "tts_invocation": tts_invocation,
                 },
             )
         except FFmpegCancelled:

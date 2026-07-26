@@ -29,6 +29,8 @@ class EdgeTTSProvider:
     """微软 Edge 神经语音 TTS（可选、需联网）。"""
 
     name = "edge-tts"
+    # 微软 Edge 神经语音当前不计费（PRD-REN-002：明确为 0 而非「未知」）
+    estimated_cost_per_1k = 0.0
 
     def __init__(self, voice: str | None = None, out_dir: str | None = None) -> None:
         self.voice = voice or _DEFAULT_VOICE

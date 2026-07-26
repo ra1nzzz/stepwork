@@ -109,3 +109,88 @@ def test_truncate_meta_json_valid_and_bounded() -> None:
     assert len(out) <= 20000
     # 超长字段确实被裁剪
     assert len(parsed.get("template", "")) < 30000
+
+
+async def test_render_reports_tts_invocation_cost() -> None:
+    """PRD-REN-002：旁白合成的来源与预计费用必须可见（此前恒为 None）。"""
+    conn = in_memory()
+    run_migrations(conn, MIGRATIONS_DIR)
+    repos = Repos(conn)
+    ws = repos.workspaces.insert(Workspace(name="ws", root_path="/tmp/ws"))
+    prj_id = repos.projects.insert(ContentProject(workspace_id=ws, title="p"))
+    text = "旁白文本" * 50  # 200 字符
+    cv_id = repos.content_versions.insert(
+        ContentVersion(
+            project_id=prj_id,
+            content_type="transcript",
+            content=text,
+            content_hash="abc",
+            producer={},
+        )
+    )
+
+    class _PricedTTS(LocalTTSProvider):
+        name = "priced-tts"
+        model = "tts-1"
+        estimated_cost_per_1k = 2.0  # 每千字符 2.0
+
+    deps = Deps(
+        repos=repos,
+        tts=_PricedTTS(),
+        renderer=FFmpegRenderer(FFmpegRunner(bin_path=PY), ffmpeg_bin=FAKE),
+    )
+    env = _env(
+        "CreateRenderJob",
+        {"source_version_id": cv_id, "tts_engine": "synthesize"},
+        prj_id,
+    )
+    out = await dispatch(env.model_dump(), deps)
+    assert out["ok"] is True, out
+
+    inv = out["detail"]["tts_invocation"]
+    assert inv is not None, "TTS 调用必须出现在 detail 中"
+    assert inv["provider"] == "priced-tts"
+    # 按实际字符量计价：200 字符 × 2.0/1k = 0.4（此前 chars 恒为 0）
+    assert inv["estimated_cost"] == 0.4
+
+    # 审计行：renderer + tts 各一条
+    rows = conn.execute(
+        "SELECT payload FROM audit_events WHERE event_type='provider_invocation'"
+    ).fetchall()
+    providers = {json.loads(r["payload"])["provider"] for r in rows}
+    assert "priced-tts" in providers
+
+
+async def test_render_user_audio_has_no_tts_invocation() -> None:
+    """用户录音路径不调 TTS，不应产生 TTS 费用记录（PRD-REN-003）。"""
+    conn = in_memory()
+    run_migrations(conn, MIGRATIONS_DIR)
+    repos = Repos(conn)
+    ws = repos.workspaces.insert(Workspace(name="ws", root_path="/tmp/ws"))
+    prj_id = repos.projects.insert(ContentProject(workspace_id=ws, title="p"))
+    cv_id = repos.content_versions.insert(
+        ContentVersion(
+            project_id=prj_id,
+            content_type="transcript",
+            content="用户自带录音",
+            content_hash="abc2",
+            producer={},
+        )
+    )
+    deps = Deps(
+        repos=repos,
+        tts=LocalTTSProvider(),
+        renderer=FFmpegRenderer(FFmpegRunner(bin_path=PY), ffmpeg_bin=FAKE),
+    )
+    env = _env(
+        "CreateRenderJob",
+        {
+            "source_version_id": cv_id,
+            "tts_engine": "user_audio",
+            "user_audio_uri": "file:///tmp/my.wav",
+        },
+        prj_id,
+    )
+    out = await dispatch(env.model_dump(), deps)
+    assert out["ok"] is True, out
+    assert out["detail"]["tts_invocation"] is None

@@ -52,6 +52,11 @@ interface RenderStoreState {
   artifacts: RenderArtifacts | null;
   /** 费用透明：detail.invocation（执行后展示） */
   invocation: ProviderInvocation | null;
+  /**
+   * PRD-REN-002：旁白合成的来源与预计费用（detail.tts_invocation）。
+   * 用户自带录音（user_audio）不调 TTS，故为 null。
+   */
+  ttsInvocation: ProviderInvocation | null;
   isBusy: boolean;
   error: string | null;
 
@@ -100,6 +105,7 @@ export const useRenderStore = create<RenderStoreState>((set, get) => ({
   videoVersionId: null,
   artifacts: null,
   invocation: null,
+  ttsInvocation: null,
   isBusy: false,
   error: null,
 
@@ -158,6 +164,8 @@ export const useRenderStore = create<RenderStoreState>((set, get) => ({
             }
           : null,
         invocation: (detail.invocation as ProviderInvocation | undefined) ?? null,
+        ttsInvocation:
+          (detail.tts_invocation as ProviderInvocation | undefined) ?? null,
         draft: metaFromDetail(
           detail,
           get().template,
@@ -224,6 +232,7 @@ export const useRenderStore = create<RenderStoreState>((set, get) => ({
       videoVersionId: null,
       artifacts: null,
       invocation: null,
+      ttsInvocation: null,
     });
     await get().render();
   },
@@ -237,6 +246,7 @@ export const useRenderStore = create<RenderStoreState>((set, get) => ({
       videoVersionId: null,
       artifacts: null,
       invocation: null,
+      ttsInvocation: null,
       error: null,
       isBusy: false,
     }),

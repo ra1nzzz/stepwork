@@ -12,12 +12,17 @@
  *   - 费用透明：执行前展示 TTS provider/model，执行后展示 detail.invocation
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRenderStore, type RenderStatus } from "@/stores/useRenderStore";
 import { useViewStore } from "@/stores/useViewStore";
-import { isTauri } from "@/lib/tauri";
+import {
+  buildEnvelope,
+  dispatchCommand,
+  getWorkspaceId,
+  isTauri,
+} from "@/lib/tauri";
 import { dirname, openLocalPath } from "@/lib/shell";
-import { formatCost, useProviderInfo } from "@/lib/useProviderInfo";
+import { estimateCost, formatCost, useProviderInfo } from "@/lib/useProviderInfo";
 
 /** 用户录音可选的音频扩展名（与导入的 AUDIO_EXTS 一致） */
 const AUDIO_EXTS = ["mp3", "wav", "m4a", "flac", "aac", "ogg", "opus"];
@@ -61,6 +66,7 @@ export function CreateRenderView() {
   const draft = useRenderStore((s) => s.draft);
   const artifacts = useRenderStore((s) => s.artifacts);
   const invocation = useRenderStore((s) => s.invocation);
+  const ttsInvocation = useRenderStore((s) => s.ttsInvocation);
   const isBusy = useRenderStore((s) => s.isBusy);
   const error = useRenderStore((s) => s.error);
   const setTemplate = useRenderStore((s) => s.setTemplate);
@@ -72,6 +78,38 @@ export function CreateRenderView() {
 
   const providerInfo = useProviderInfo();
   const [openNotice, setOpenNotice] = useState<string | null>(null);
+  // PRD-REN-002：执行前旁白费用需要源文本字符量（经 GetContentVersion 取）
+  const [sourceCharCount, setSourceCharCount] = useState(0);
+
+  const selectedProjectId = useViewStore((s) => s.selectedProjectId);
+  useEffect(() => {
+    let cancelled = false;
+    if (!sourceVersionId) {
+      setSourceCharCount(0);
+      return;
+    }
+    void (async () => {
+      try {
+        const env = buildEnvelope(
+          "GetContentVersion",
+          getWorkspaceId(),
+          selectedProjectId ?? null,
+          { versionId: sourceVersionId },
+        );
+        const res = await dispatchCommand(env);
+        if (cancelled || !res.ok) return;
+        const detail = (res.detail ?? {}) as {
+          version?: { content?: string };
+        };
+        setSourceCharCount((detail.version?.content ?? "").length);
+      } catch {
+        /* 拉取失败不影响渲染，仅费用预估显示为未知字数 */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sourceVersionId, selectedProjectId]);
   const inTauri = isTauri();
 
   const canRender =
@@ -256,27 +294,58 @@ export function CreateRenderView() {
                 </div>
                 <div className="provenance-row">
                   <dt>TTS</dt>
-                  <dd>{ttsEngine === "synthesize" ? "Edge TTS" : "用户录音"}</dd>
+                  <dd>
+                    {ttsEngine === "synthesize"
+                      ? (providerInfo?.tts.provider ?? "合成旁白")
+                      : "用户录音"}
+                  </dd>
                 </div>
-                {/* 费用透明：执行前展示将使用的 TTS provider/model */}
+                {/* 费用透明：执行前展示将使用的 TTS provider/model 与预计费用 */}
                 {ttsEngine === "synthesize" && (
-                  <div className="provenance-row">
-                    <dt>将使用模型</dt>
-                    <dd className="mono">
-                      {providerInfo
-                        ? `${providerInfo.tts.provider ?? "未配置"} / ${providerInfo.tts.model ?? "未配置"}`
-                        : "读取配置中…"}
-                    </dd>
-                  </div>
+                  <>
+                    <div className="provenance-row">
+                      <dt>将使用模型</dt>
+                      <dd className="mono">
+                        {providerInfo
+                          ? `${providerInfo.tts.provider ?? "未配置"} / ${providerInfo.tts.model ?? "未配置"}`
+                          : "读取配置中…"}
+                      </dd>
+                    </div>
+                    <div className="provenance-row">
+                      <dt>预计旁白费用</dt>
+                      <dd>
+                        {providerInfo
+                          ? formatCost(
+                              estimateCost(
+                                sourceCharCount,
+                                providerInfo.ttsCostPer1k,
+                              ),
+                            )
+                          : "读取配置中…"}
+                        {sourceCharCount > 0 && `（${sourceCharCount} 字粗估）`}
+                      </dd>
+                    </div>
+                  </>
                 )}
-                {/* 费用透明：执行后展示 detail.invocation */}
+                {/* 费用透明：执行后展示 detail.invocation（渲染器，本机无费用） */}
                 {invocation && (
                   <div className="provenance-row">
-                    <dt>本次调用</dt>
+                    <dt>渲染</dt>
                     <dd>
                       {invocation.provider} / {invocation.model}
                       {" · "}
                       {formatCost(invocation.estimated_cost)}
+                    </dd>
+                  </div>
+                )}
+                {/* PRD-REN-002：执行后旁白合成的真实来源与费用 */}
+                {ttsInvocation && (
+                  <div className="provenance-row">
+                    <dt>本次旁白合成</dt>
+                    <dd>
+                      {ttsInvocation.provider} / {ttsInvocation.model}
+                      {" · "}
+                      {formatCost(ttsInvocation.estimated_cost)}
                     </dd>
                   </div>
                 )}

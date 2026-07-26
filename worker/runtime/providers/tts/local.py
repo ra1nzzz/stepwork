@@ -44,6 +44,8 @@ class LocalTTSProvider:
     """确定性本地 TTS（始终可用、零配置；静音但时长真实）。"""
 
     name = "local-tts"
+    # 本地合成不产生费用（PRD-REN-002：明确为 0 而非「未知」）
+    estimated_cost_per_1k = 0.0
 
     def __init__(
         self, out_dir: str | None = None, chars_per_sec: float = _DEFAULT_CHARS_PER_SEC

@@ -16,7 +16,7 @@ import importlib
 from typing import Any
 
 from worker.runtime.commands.envelope import EnvelopeError, parse_envelope
-from worker.runtime.models import CommandResult
+from worker.runtime.models import CommandEnvelope, CommandResult
 
 # commandType -> handler 模块路径（参数名 ``handle(env, deps)``）
 _ROUTES: dict[str, str] = {
@@ -74,6 +74,50 @@ _ROUTES: dict[str, str] = {
 # 故对任何合法 actor 开放。MCP 不越权的根保证是「MCP 永不注册 UpdateConfig」（tool 集边界）。
 _ALLOWED_CONFIG_ACTORS: tuple[str, ...] = ("user", "desktop")
 
+# ---------------------------------------------------------------------------
+# PRD §9.1「默认禁止外部 Agent 直接执行」——bus 层纵深防御。
+#
+# 第一层是「MCP 只注册只读工具」（tool 集边界）；但那层依赖「永远别注册错」，
+# 一旦未来 MCP 加工具、或 A2A/ACP 适配器（source enum 已预留 a2a/acp）复用
+# 同一条 dispatch，写命令会立刻可达且无告警。故在此再设一道按 commandType
+# 的黑名单，对 agent 类调用方一律拒绝，与工具集是否注册无关。
+#
+# 映射 §9.1 七项（未列出的 = 系统中尚无对应能力）：
+#   发布            → ExportBundle（写出导出包到磁盘）
+#   删除项目或资产  → DeleteAsset / ArchiveWorkspace
+#   覆盖原文件      → RestoreWorkspace / ImportProject（覆盖库与项目数据）
+#   向外部上传原素材→ TranscribeSource（cloud ASR 会上传媒体本体）
+#   安装插件        → InstallPlugin / EnablePlugin / DisablePlugin
+#   读取平台凭据    → GetConfig 已是掩码视图，无需拉黑
+#   使用高费用模型  → AnalyzeSource 按 PRD-AGT-002「外部 Agent 可发起分析」
+#                     显式允许，费用由 audit 记录；预算上限属后续能力
+#
+# 注：UpdateConfig 另由 _ALLOWED_CONFIG_ACTORS 拦截（更严：仅 user/desktop）。
+# ---------------------------------------------------------------------------
+_AGENT_FORBIDDEN_COMMANDS: frozenset[str] = frozenset(
+    {
+        "ExportBundle",
+        "DeleteAsset",
+        "ArchiveWorkspace",
+        "RestoreWorkspace",
+        "ImportProject",
+        "TranscribeSource",
+        "InstallPlugin",
+        "EnablePlugin",
+        "DisablePlugin",
+    }
+)
+
+# 视为「外部 Agent」的调用方特征：actor.type 或 source 任一命中即算。
+_AGENT_ACTOR_TYPES: frozenset[str] = frozenset({"agent"})
+_AGENT_SOURCES: frozenset[str] = frozenset({"mcp", "a2a", "acp"})
+
+
+def is_agent_caller(env: CommandEnvelope) -> bool:
+    """判断信封是否来自外部 Agent（PRD §9.1 的约束对象）。"""
+    actor_type = (env.actor or {}).get("type")
+    return actor_type in _AGENT_ACTOR_TYPES or env.source in _AGENT_SOURCES
+
 
 class DispatchError(Exception):
     """handler 内抛出的领域错误（转为 CommandResult.ok=False）。"""
@@ -104,6 +148,17 @@ async def dispatch(raw: dict[str, Any], deps: Any) -> dict[str, Any]:
         return CommandResult(
             ok=False, commandId=env.commandId,
             error=f"unknown commandType: {env.commandType}",
+        ).model_dump()
+
+    # PRD §9.1：外部 Agent 默认不得直接执行发布/删除/覆盖/外传/装插件类命令。
+    # 与 MCP 工具集边界互为冗余——即便某天工具被误注册，这里仍然拒绝。
+    if env.commandType in _AGENT_FORBIDDEN_COMMANDS and is_agent_caller(env):
+        return CommandResult(
+            ok=False, commandId=env.commandId,
+            error=(
+                f"FORBIDDEN_ACTOR: {env.commandType} 属 PRD §9.1 高风险操作，"
+                f"外部 Agent 不可直接执行，需由用户在桌面端确认后发起"
+            ),
         ).model_dump()
 
     # 写配置（UpdateConfig）受 actor 白名单限制（user / desktop）；

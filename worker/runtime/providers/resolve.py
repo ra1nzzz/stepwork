@@ -265,7 +265,17 @@ def resolve_tts(workspace_id: str | None = None) -> TTSProvider | None:
         model = _env("STEPWORK_TTS_MODEL") or str(ov.get("model") or "") or None
         if not key or not _valid_base_url(url):
             return None
-        return CloudTTSProvider(api_key=key, base_url=url, model=model)
+        # PRD-REN-002：每千字符单价来自 env / 设置页覆盖层；非法值视为未配置
+        raw_cost = _env("STEPWORK_TTS_COST_PER_1K") or ov.get("costPer1k")
+        cost: float | None = None
+        if raw_cost not in (None, ""):
+            try:
+                cost = float(raw_cost)
+            except (TypeError, ValueError):
+                cost = None
+        return CloudTTSProvider(
+            api_key=key, base_url=url, model=model, cost_per_1k=cost
+        )
     return None
 
 
