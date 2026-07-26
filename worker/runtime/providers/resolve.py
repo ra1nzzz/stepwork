@@ -123,32 +123,49 @@ def _valid_base_url(url: str | None) -> bool:
     return parsed.scheme in ("http", "https") and bool(parsed.netloc)
 
 
+def _build_whisper(workspace_id: str | None) -> ASRProvider:
+    """构造 faster-whisper Provider（模型 size 取 env / 覆盖层 / 默认 small）。
+
+    调用前须确保 ``faster_whisper`` 已安装（``_has_module`` 守卫）。
+    """
+    ov = _override_for(workspace_id, "asr")
+    model = _env("STEPWORK_ASR_MODEL") or str(ov.get("model") or "") or "small"
+    from worker.runtime.providers.asr.whisper import FasterWhisperASRProvider
+
+    return FasterWhisperASRProvider(model_size=model)
+
+
 def resolve_asr(workspace_id: str | None = None) -> ASRProvider | None:
     """按 ``STEPWORK_ASR_PROVIDER`` 解析 ASR Provider。
 
-    - ``local``（默认）：离线确定性草稿转写，满足可运行证伪。
-    - ``whisper``（``faster-whisper``）：本地真实识别（可选依赖 ``.[asr]``；
-      未安装则回退 ``None`` → ``UNAVAILABLE``）；模型 size 取
-      ``STEPWORK_ASR_MODEL`` / 覆盖层 / 默认 ``small``。
+    - ``auto``（默认）：装了 ``faster-whisper``（可选依赖 ``.[asr]``）就用
+      本地真实识别，否则回退确定性草稿转写。安装即启用——装可选引擎
+      本身就是用户的启用信号，无需再改配置。
+    - ``local``：强制离线确定性草稿转写（canned demo）。测试/纯离线复现
+      需确定结果时显式选它，绕开 auto 的真实引擎优先。
+    - ``whisper``（``faster-whisper``）：显式真实识别；未安装则回退
+      ``None`` → ``UNAVAILABLE``（区别于 auto 的静默回退 demo）。模型 size
+      取 ``STEPWORK_ASR_MODEL`` / 覆盖层 / 默认 ``small``。
     - ``cloud``：需 ``STEPWORK_ASR_API_KEY`` + ``STEPWORK_ASR_BASE_URL``，
       否则回退 ``None``。
 
     若 env 缺失，则回退到 ``workspace_id`` 对应的密钥覆盖层
     （来自设置页保存的密钥，仅存内存）。
     """
-    kind = (_env("STEPWORK_ASR_PROVIDER") or "local").lower()
+    kind = (_env("STEPWORK_ASR_PROVIDER") or "auto").lower()
+    if kind == "auto":
+        # 默认：真实引擎优先，缺失静默回退确定性 demo（永不返回 None）
+        if _has_module("faster_whisper"):
+            return _build_whisper(workspace_id)
+        return LocalASRProvider()
     if kind == "local":
         return LocalASRProvider()
     if kind in ("whisper", "faster-whisper", "faster_whisper"):
-        # 可选真实引擎：包缺失即回退 None（handler → UNAVAILABLE），
-        # 绝不因缺依赖崩掉解析。模型 size 取 env / 覆盖层 / 默认 small。
+        # 显式选真实引擎：包缺失即回退 None（handler → UNAVAILABLE），
+        # 绝不因缺依赖崩掉解析。
         if not _has_module("faster_whisper"):
             return None
-        ov = _override_for(workspace_id, "asr")
-        model = _env("STEPWORK_ASR_MODEL") or str(ov.get("model") or "") or "small"
-        from worker.runtime.providers.asr.whisper import FasterWhisperASRProvider
-
-        return FasterWhisperASRProvider(model_size=model)
+        return _build_whisper(workspace_id)
     if kind == "cloud":
         ov = _override_for(workspace_id, "asr")
         key = _env("STEPWORK_ASR_API_KEY") or ov.get("apiKey")

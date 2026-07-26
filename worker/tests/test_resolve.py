@@ -1,7 +1,8 @@
 """Provider 解析器测试（W3-W4 Batch3 集成）。
 
 验证：
-- env 缺失时 resolve_asr 默认 local、resolve_ai 返回 None
+- resolve_asr 默认 auto（装了 whisper 用真实引擎、否则回退 local）、
+  显式 local 强制 demo、resolve_ai 返回 None
 - cloud 缺密钥回退 None
 - per-request hint 能构造出正确的 provider 类型
 """
@@ -42,10 +43,31 @@ def _clear_provider_env() -> None:
         os.environ.pop(k, None)
 
 
-def test_resolve_asr_default_local() -> None:
+def test_resolve_asr_explicit_local() -> None:
     _clear_provider_env()
+    os.environ["STEPWORK_ASR_PROVIDER"] = "local"
     asr = resolve_mod.resolve_asr()
     assert isinstance(asr, LocalASRProvider)
+
+
+def test_resolve_asr_auto_prefers_whisper_when_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 默认 auto：装了 faster-whisper → 真实引擎
+    _clear_provider_env()
+    monkeypatch.setattr(resolve_mod, "_has_module", lambda name: True)
+    assert isinstance(resolve_mod.resolve_asr(), FasterWhisperASRProvider)
+
+
+def test_resolve_asr_auto_falls_back_to_local_without_whisper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 默认 auto：未装 faster-whisper → 静默回退确定性 demo（非 None）
+    _clear_provider_env()
+    monkeypatch.setattr(
+        resolve_mod, "_has_module", lambda name: name != "faster_whisper"
+    )
+    assert isinstance(resolve_mod.resolve_asr(), LocalASRProvider)
 
 
 def test_resolve_asr_cloud_missing_keys_returns_none() -> None:
