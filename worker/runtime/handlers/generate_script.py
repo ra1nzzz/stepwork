@@ -28,8 +28,10 @@ from worker.runtime.models import (
     ScriptSpec,
 )
 from worker.runtime.providers.resolve import ai_provider_from_hint
+from worker.runtime.script.history import load_script_history
 from worker.runtime.script.parse import parse_script
 from worker.runtime.script.prompt import SCRIPT_SCHEMA, build_script_prompt
+from worker.runtime.script.similarity import find_similar, hits_to_warnings
 
 
 async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
@@ -105,6 +107,16 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             parent_version_id=parent_id,
             notify=deps.notify,
         )
+    # PRD-SCR-005「相似度与原创性提醒」：与同账号历史脚本比对。
+    # 措辞是「提醒」而非判定 —— PRD 明确要求不做法律结论。
+    similarity_warnings: list[dict[str, Any]] = []
+    history = load_script_history(repos.conn, ctx.project_id, exclude_version_id=cv_id)
+    if history:
+        body_text = str(script.get("body") or script.get("text") or "")
+        similarity_warnings = hits_to_warnings(
+            find_similar(body_text, history, limit=3), "similar_script"
+        )
+
     # 费用透明（Tranche 2）：detail.invocation + provider_invocation 审计行
     invocation = build_invocation(ai, len(prompt) + len(content))
     record_provider_invocation(repos.conn, env, invocation)
@@ -119,5 +131,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             # 供前端直接 seed 编辑器，无需额外 content-fetch 接口
             "script": script,
             "invocation": invocation,
+            # PRD-SCR-005：相似历史脚本提醒（空列表表示未发现相似）
+            "similarity_warnings": similarity_warnings,
         },
     )

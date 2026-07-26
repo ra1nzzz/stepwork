@@ -275,6 +275,19 @@ export interface TopicAngle {
   risks?: string[];
 }
 
+/**
+ * 相似度提醒（PRD-SCR-004 重复选题 / PRD-SCR-005 原创性）。
+ * 语义是「提醒用户确认」，不是判定——PRD 明确要求不做法律结论。
+ */
+export interface SimilarityWarning {
+  kind: "duplicate_topic" | "similar_script";
+  ref_id: string;
+  score: number;
+  label: string;
+  message: string;
+  angle_id?: string;
+}
+
 export interface TopicProposal {
   angles: TopicAngle[];
 }

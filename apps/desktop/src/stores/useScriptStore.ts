@@ -16,6 +16,7 @@ import { create } from "zustand";
 import { buildEnvelope, dispatchCommand } from "@/lib/tauri";
 import { useViewStore } from "@/stores/useViewStore";
 import type {
+  SimilarityWarning,
   TopicAngle,
   ScriptVersionRef,
   GenerateTopicPayload,
@@ -47,6 +48,10 @@ interface ScriptStoreState {
   /** 当前已保存脚本版本 id（作为下次保存的 parent） */
   scriptVersionId: string | null;
   versionChain: ScriptVersionRef[];
+  /** PRD-SCR-004：与历史选题重复的提醒（只提示，不拦截） */
+  duplicateWarnings: SimilarityWarning[];
+  /** PRD-SCR-005：与历史脚本相似的原创性提醒（不做法律结论） */
+  similarityWarnings: SimilarityWarning[];
   isBusy: boolean;
   error: string | null;
 
@@ -119,6 +124,8 @@ export const useScriptStore = create<ScriptStoreState>((set, get) => ({
   seedBody: null,
   scriptVersionId: null,
   versionChain: [],
+  duplicateWarnings: [],
+  similarityWarnings: [],
   isBusy: false,
   error: null,
 
@@ -153,6 +160,9 @@ export const useScriptStore = create<ScriptStoreState>((set, get) => ({
         proposalVersionId: res.artifact_ids[0] ?? null,
         selectedAngleId: angles[0]?.id ?? null,
         topicStatus: "succeeded",
+        // PRD-SCR-004：与历史选题重复的提醒
+        duplicateWarnings:
+          (detail.duplicate_warnings as SimilarityWarning[] | undefined) ?? [],
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -195,6 +205,9 @@ export const useScriptStore = create<ScriptStoreState>((set, get) => ({
         versionChain: versionId
           ? [newVersionRef(versionId, s.scriptVersionId, "ai-script"), ...s.versionChain]
           : s.versionChain,
+        // PRD-SCR-005：与历史脚本相似的原创性提醒
+        similarityWarnings:
+          (detail.similarity_warnings as SimilarityWarning[] | undefined) ?? [],
       }));
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

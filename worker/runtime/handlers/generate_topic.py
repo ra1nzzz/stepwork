@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import hashlib
+from typing import Any
 
 from worker.runtime.audit import build_invocation, record_provider_invocation
 from worker.runtime.commands.bus import DispatchError
@@ -27,6 +28,8 @@ from worker.runtime.models import (
     TopicProposalSpec,
 )
 from worker.runtime.providers.resolve import ai_provider_from_hint
+from worker.runtime.script.history import load_topic_history
+from worker.runtime.script.similarity import find_similar, hits_to_warnings
 from worker.runtime.topic.parse import parse_topic_proposal
 from worker.runtime.topic.prompt import TOPIC_SCHEMA, build_topic_prompt
 
@@ -91,6 +94,19 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             parent_version_id=spec.source_version_id,
             notify=deps.notify,
         )
+    # PRD-SCR-004「历史选题重复提醒」：与本项目 + 同 BrandProfile 其它项目的
+    # 历史角度比对，超阈值即提示。只提醒、不拦截（用户可能就是要做续集）。
+    duplicate_warnings: list[dict[str, Any]] = []
+    history = load_topic_history(repos.conn, ctx.project_id, exclude_version_id=cv_id)
+    if history:
+        for angle in proposal.angles:
+            hits = find_similar(
+                f"{angle.title} {angle.rationale}", history, limit=3
+            )
+            for warning in hits_to_warnings(hits, "duplicate_topic"):
+                warning["angle_id"] = angle.id
+                duplicate_warnings.append(warning)
+
     # 费用透明（Tranche 2）：detail.invocation + provider_invocation 审计行
     invocation = build_invocation(ai, len(prompt) + len(content))
     record_provider_invocation(repos.conn, env, invocation)
@@ -105,5 +121,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             # 供前端直接渲染，无需额外 content-fetch 接口
             "angles": [a.model_dump() for a in proposal.angles],
             "invocation": invocation,
+            # PRD-SCR-004：相似历史选题提醒（空列表表示无重复）
+            "duplicate_warnings": duplicate_warnings,
         },
     )

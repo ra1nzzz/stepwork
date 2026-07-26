@@ -21,6 +21,7 @@ export function CreateAngleView() {
   const error = useScriptStore((s) => s.error);
   const generateTopics = useScriptStore((s) => s.generateTopics);
   const useBrandProfile = useScriptStore((s) => s.useBrandProfile);
+  const duplicateWarnings = useScriptStore((s) => s.duplicateWarnings);
   const setUseBrandProfile = useScriptStore((s) => s.setUseBrandProfile);
   const selectAngle = useScriptStore((s) => s.selectAngle);
 
@@ -54,6 +55,24 @@ export function CreateAngleView() {
                 : "未生成"}
         </span>
       </section>
+
+      {/* PRD-SCR-004：与历史选题重复的提醒（只提示，不拦截） */}
+      {duplicateWarnings.length > 0 && (
+        <section className="section-gap" data-od-id="duplicate-warnings">
+          <div className="panel" style={{ borderColor: "var(--warning)" }}>
+            <div className="panel-body">
+              <p className="panel-meta" style={{ marginTop: 0 }}>
+                ⚠️ 发现与历史选题相似的角度（仅提醒，可继续使用）：
+              </p>
+              <ul className="report-list">
+                {duplicateWarnings.map((w, i) => (
+                  <li key={`${w.ref_id}-${i}`}>{w.message}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* PRD-BRD-002：生成时可选择是否启用项目绑定的品牌档 */}
       <section className="section-gap">

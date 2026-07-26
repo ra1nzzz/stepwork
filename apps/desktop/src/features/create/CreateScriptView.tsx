@@ -16,6 +16,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useScriptStore } from "@/stores/useScriptStore";
+import { useRenderStore } from "@/stores/useRenderStore";
+import { useViewStore } from "@/stores/useViewStore";
 
 /** PRD-SCR-003 四种段落级操作（与后端 OPERATIONS 一一对应） */
 const PARAGRAPH_OPS = [
@@ -24,8 +26,6 @@ const PARAGRAPH_OPS = [
   { id: "condense" as const, label: "压缩" },
   { id: "generate" as const, label: "生成" },
 ];
-import { useRenderStore } from "@/stores/useRenderStore";
-import { useViewStore } from "@/stores/useViewStore";
 
 export function CreateScriptView() {
   const setCreateSubView = useViewStore((s) => s.setCreateSubView);
@@ -43,6 +43,7 @@ export function CreateScriptView() {
   const loadVersions = useScriptStore((s) => s.loadVersions);
   const loadVersionContent = useScriptStore((s) => s.loadVersionContent);
   const editParagraph = useScriptStore((s) => s.editParagraph);
+  const similarityWarnings = useScriptStore((s) => s.similarityWarnings);
 
   const setRenderSourceVersion = useRenderStore((s) => s.setSourceVersion);
 
@@ -181,6 +182,24 @@ export function CreateScriptView() {
           {error ? "出错" : isBusy ? "生成中" : scriptVersionId ? "已生成" : "草稿"}
         </span>
       </section>
+
+      {/* PRD-SCR-005：原创性提醒（措辞是提醒，不做法律结论） */}
+      {similarityWarnings.length > 0 && (
+        <section className="section-gap" data-od-id="similarity-warnings">
+          <div className="panel" style={{ borderColor: "var(--warning)" }}>
+            <div className="panel-body">
+              <p className="panel-meta" style={{ marginTop: 0 }}>
+                ⚠️ 与历史脚本存在相似内容（仅提醒，请自行判断是否调整）：
+              </p>
+              <ul className="report-list">
+                {similarityWarnings.map((w, i) => (
+                  <li key={`${w.ref_id}-${i}`}>{w.message}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </section>
+      )}
 
       <section className="layout-studio" data-od-id="studio-workspace-grid">
         {/* 中：脚本编辑器（占两列） */}
