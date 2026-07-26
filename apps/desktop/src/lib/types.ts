@@ -161,7 +161,8 @@ export interface CommandEnvelope {
     | "DeleteAgentConnection"
     | "RequestPublishAuthorization"
     | "RecordPublishResult"
-    | "ListPublishJobs";
+    | "ListPublishJobs"
+    | "BuildPlatformFillPackage";
   schemaVersion: string;
   actor: { type: "user" | "agent" | "plugin" | "system" | "desktop"; id: string };
   source: string;
@@ -475,6 +476,29 @@ export interface PluginManifest {
 
 /** ListPlugins / InstallPlugin 返回的单条插件行
  *  （manifest 解析失败时为 null，status 覆盖为 'error'） */
+/**
+ * PRD-PUB-003 填充包（ADR-008 FILL_AND_PREVIEW）。
+ * auto_publish 恒为 false —— 消费方据此知道不得点击最终发布。
+ */
+export interface FillPackageIssue {
+  field: string;
+  level: "error" | "warning";
+  message: string;
+}
+
+export interface FillPackage {
+  platform: string;
+  platform_label: string;
+  mode: string;
+  auto_publish: false;
+  requires_manual_publish: true;
+  fields: { title: string; body: string; tags: string[] };
+  assets: { video: string | null; cover: string | null };
+  constraints: Record<string, number>;
+  issues: FillPackageIssue[];
+  ready: boolean;
+}
+
 /** PRD-PLG-004 插件信任分级 */
 export type PluginTrustTier =
   | "official"

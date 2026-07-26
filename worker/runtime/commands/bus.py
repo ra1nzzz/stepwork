@@ -102,6 +102,8 @@ _ROUTES: dict[str, str] = {
     "RequestPublishAuthorization": "worker.runtime.handlers.publish",
     "RecordPublishResult": "worker.runtime.handlers.publish",
     "ListPublishJobs": "worker.runtime.handlers.publish",
+    # PRD-PUB-003：填充包（ADR-008 只填写+预览，绝不自动发布）
+    "BuildPlatformFillPackage": "worker.runtime.handlers.publish",
     # PRD-AGT-008 / §9.1 §9.2：审批中心
     "CreateApprovalRequest": "worker.runtime.handlers.approvals",
     "ListApprovalRequests": "worker.runtime.handlers.approvals",

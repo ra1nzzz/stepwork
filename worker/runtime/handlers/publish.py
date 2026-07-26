@@ -34,6 +34,7 @@ from worker.runtime.deps import Deps
 from worker.runtime.handlers.approvals import content_hash as approval_content_hash
 from worker.runtime.handlers.approvals import create_request as create_approval
 from worker.runtime.models import CommandEnvelope, CommandResult
+from worker.runtime.publish.platforms import build_fill_package
 from worker.runtime.render.ffmpeg_runner import FFmpegRunner
 
 # 平台白名单（PRD-PUB-001 MVP）
@@ -313,6 +314,33 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
                 "variant_id": variant_id,
                 "files": meta["files"],
             },
+        )
+
+    if env.commandType == "BuildPlatformFillPackage":
+        # PRD-PUB-003「不点击最终发布即可完成填充」+ ADR-008 FILL_AND_PREVIEW。
+        # worker 只负责产出**内容与约束**；真正驱动浏览器 DOM 的是 publisher
+        # 插件（需要用户已登录的浏览器会话），不在 worker 内实现。
+        fill_variant_id = p.get("variantId") or p.get("variant_id")
+        if not fill_variant_id:
+            raise DispatchError("INVALID_ARGUMENT", "variantId required")
+        row = repos.conn.execute(
+            "SELECT * FROM platform_variants WHERE id=?", (str(fill_variant_id),)
+        ).fetchone()
+        if row is None:
+            raise DispatchError("NOT_FOUND", f"variant {fill_variant_id!r} not found")
+
+        variant = _row_to_variant(row)
+        video_path = _resolve_video_path(repos, variant.get("video_version_id"))
+        cover = p.get("coverPath") or p.get("cover_path")
+        package = build_fill_package(
+            variant=variant,
+            video_path=video_path,
+            cover_path=str(cover) if cover else None,
+        )
+        return CommandResult(
+            ok=True,
+            commandId=env.commandId,
+            detail={"fill_package": package},
         )
 
     if env.commandType == "RequestPublishAuthorization":

@@ -18,6 +18,7 @@ import { useViewStore } from "@/stores/useViewStore";
 import { useRenderStore } from "@/stores/useRenderStore";
 import { TagListInput } from "@/components/TagListInput";
 import type {
+  FillPackage,
   CreatePlatformVariantPayload,
   PlatformVariant,
   PublishPlatform,
@@ -71,6 +72,41 @@ export function PublishView() {
   // PRD-PUB-004：发布授权申请
   const [authorizingId, setAuthorizingId] = useState<string | null>(null);
   const [authNotice, setAuthNotice] = useState<Record<string, string>>({});
+  // PRD-PUB-003：填充包与平台预校验结果
+  const [fillingId, setFillingId] = useState<string | null>(null);
+  const [fillPackages, setFillPackages] = useState<Record<string, FillPackage>>(
+    {},
+  );
+
+  /**
+   * PRD-PUB-003「不点击最终发布即可完成填充」：生成填充包并做平台预校验
+   * （标题超长这类问题，等填到页面上才发现就晚了）。
+   * ADR-008：包里 auto_publish 恒为 false，插件据此不得点发布。
+   */
+  async function buildFillPackage(variantId: string) {
+    setFillingId(variantId);
+    try {
+      const env = buildEnvelope(
+        "BuildPlatformFillPackage",
+        getWorkspaceId(),
+        projectId,
+        { variantId },
+      );
+      const res = await dispatchCommand(env);
+      if (!res.ok) {
+        setAuthNotice((prev) => ({
+          ...prev,
+          [variantId]: res.error ?? "生成填充包失败",
+        }));
+        return;
+      }
+      const pkg = (res.detail as { fill_package?: FillPackage } | null)
+        ?.fill_package;
+      if (pkg) setFillPackages((prev) => ({ ...prev, [variantId]: pkg }));
+    } finally {
+      setFillingId(null);
+    }
+  }
 
   // 加载项目列表（进入发布页时）
   useEffect(() => {
@@ -416,7 +452,45 @@ export function PublishView() {
                         >
                           {authorizingId === v.id ? "申请中…" : "申请发布授权"}
                         </button>
+                        {/* PRD-PUB-003 / ADR-008：生成填充包并做平台预校验；
+                            只填写+预览，绝不自动点发布 */}
+                        <button
+                          className="btn small ghost"
+                          type="button"
+                          onClick={() => void buildFillPackage(v.id)}
+                          disabled={fillingId !== null}
+                        >
+                          {fillingId === v.id ? "检查中…" : "检查并生成填充包"}
+                        </button>
                       </div>
+                      {fillPackages[v.id] && (
+                        <div className="section-gap">
+                          <p className="panel-meta" style={{ margin: 0 }}>
+                            {fillPackages[v.id].ready
+                              ? "✅ 可交给发布插件填充"
+                              : "⚠️ 存在阻塞问题，请先修正"}
+                            {" · 仅自动填写并停在预览页，最终发布需你手动点击"}
+                          </p>
+                          {fillPackages[v.id].issues.length > 0 && (
+                            <ul className="report-list">
+                              {fillPackages[v.id].issues.map((iss, idx) => (
+                                <li
+                                  key={idx}
+                                  style={{
+                                    color:
+                                      iss.level === "error"
+                                        ? "var(--danger)"
+                                        : undefined,
+                                  }}
+                                >
+                                  {iss.level === "error" ? "错误" : "提示"}：
+                                  {iss.message}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      )}
                       {authNotice[v.id] && (
                         <p className="panel-meta" style={{ margin: "6px 0 0" }}>
                           {authNotice[v.id]}
