@@ -7,6 +7,7 @@ import { useTranscriptStore } from "@/stores/useTranscriptStore";
 import { useRenderStore } from "@/stores/useRenderStore";
 import { WorkbenchView } from "@/features/home/WorkbenchView";
 import { ProjectsView } from "@/features/projects/ProjectsView";
+import { ProjectDetailView } from "@/features/projects/ProjectDetailView";
 import { CreateView } from "@/features/create/CreateView";
 import { TasksView } from "@/features/tasks/TasksView";
 import { PublishView } from "@/features/publish/PublishView";
@@ -125,6 +126,7 @@ export default function App() {
   const startPolling = useHealthStore((s) => s.startPolling);
   const stopPolling = useHealthStore((s) => s.stopPolling);
   const currentView = useViewStore((s) => s.currentView);
+  const detailProjectId = useViewStore((s) => s.detailProjectId);
   const selectedProjectTitle = useViewStore((s) => s.selectedProjectTitle);
 
   // 订阅 worker-notification（job.progress → 各任务 store；非 Tauri 环境内部跳过）
@@ -161,7 +163,13 @@ export default function App() {
   let content: ReactNode;
   switch (currentView) {
     case "projects":
-      content = <ProjectsView />;
+      // PRD §7：项目内页签。选中某项目「查看详情」时渲染详情容器，
+      // 否则仍是列表（此前只有扁平列表，没有详情页与页签）。
+      content = detailProjectId ? (
+        <ProjectDetailView projectId={detailProjectId} />
+      ) : (
+        <ProjectsView />
+      );
       break;
     case "create":
       content = <CreateView />;

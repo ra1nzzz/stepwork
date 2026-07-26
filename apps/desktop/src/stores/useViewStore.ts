@@ -37,6 +37,9 @@ interface ViewStoreState {
   selectedProjectId: string | null;
   /** 当前选中的项目标题（顶栏面包屑用；可能为 null） */
   selectedProjectTitle: string | null;
+  /** PRD §7：项目详情页当前项目（null = 显示项目列表） */
+  detailProjectId: string | null;
+  openProjectDetail: (id: string | null) => void;
   setView: (v: ViewId) => void;
   setCreateSubView: (v: CreateSubView) => void;
   /** 写入选中项目；title 缺省时清空标题（避免残留上一个项目的标题） */
@@ -48,7 +51,10 @@ export const useViewStore = create<ViewStoreState>((set) => ({
   createSubView: "import",
   selectedProjectId: null,
   selectedProjectTitle: null,
-  setView: (v) => set({ currentView: v }),
+  detailProjectId: null,
+  openProjectDetail: (id) => set({ detailProjectId: id }),
+  // 切换一级导航时退出项目详情，避免离开又回来时停在旧详情页
+  setView: (v) => set({ currentView: v, detailProjectId: null }),
   setCreateSubView: (v) => set({ createSubView: v }),
   setSelectedProjectId: (id, title) =>
     set({ selectedProjectId: id, selectedProjectTitle: title ?? null }),

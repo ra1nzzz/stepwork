@@ -1114,3 +1114,8 @@ p { text-wrap: pretty; }
 .diff-insert { background: color-mix(in srgb, var(--success, #2e7d32) 18%, transparent); }
 .diff-delete { background: color-mix(in srgb, var(--danger, #c62828) 18%, transparent); text-decoration: line-through; opacity: 0.85; }
 .diff-equal { opacity: 0.7; }
+
+/* PRD §7 项目详情页签 */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border, rgba(255,255,255,0.12)); margin-bottom: 16px; }
+.tab { background: none; border: none; padding: 8px 14px; cursor: pointer; color: inherit; opacity: 0.65; border-bottom: 2px solid transparent; }
+.tab.active { opacity: 1; border-bottom-color: var(--accent, #4c8dff); }

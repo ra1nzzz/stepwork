@@ -43,6 +43,7 @@ function formatDate(iso: string): string {
 
 export function ProjectsView() {
   const setView = useViewStore((s) => s.setView);
+  const openProjectDetail = useViewStore((s) => s.openProjectDetail);
   const setCreateSubView = useViewStore((s) => s.setCreateSubView);
   const setSelectedProjectId = useViewStore((s) => s.setSelectedProjectId);
 
@@ -414,6 +415,18 @@ export function ProjectsView() {
                       }}
                     >
                       继续
+                    </button>
+                    {/* PRD §7：进入项目详情（概览/素材/版本/变体/溯源页签） */}
+                    <button
+                      className="btn small ghost"
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedProjectId(row.id, row.title);
+                        openProjectDetail(row.id);
+                      }}
+                    >
+                      详情
                     </button>
                   </td>
                 </tr>
