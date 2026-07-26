@@ -86,7 +86,8 @@ for line in sys.stdin:
                 decision = out.get("outcome")
                 oid = out.get("optionId")
                 # 真实 Agent 只认自己给出的 optionId；编的一律视为协议违规
-                if decision == "selected" and oid not in ("allow-once","allow-always","reject-once"):
+                known = ("allow-once","allow-always","reject-once")
+                if decision == "selected" and oid not in known:
                     decision = "PROTOCOL_VIOLATION:" + str(oid)
                 elif decision == "selected":
                     decision = decision + ":" + str(oid)
