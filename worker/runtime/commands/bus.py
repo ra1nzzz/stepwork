@@ -17,6 +17,7 @@ import importlib
 import logging
 from typing import Any
 
+from worker.runtime.commands import idempotency
 from worker.runtime.commands.envelope import EnvelopeError, parse_envelope
 from worker.runtime.models import CommandEnvelope, CommandResult
 
@@ -297,6 +298,13 @@ async def dispatch(raw: dict[str, Any], deps: Any) -> dict[str, Any]:
                 f"{_ALLOWED_CONFIG_ACTORS}, got {actor_type!r}",
             ).model_dump()
 
+    # PRD §13「重复任务幂等阻止重复输出」：同一 idempotencyKey 已成功执行过
+    # 就直接返回上次结果，不再重复产出内容版本、不再重复计费。
+    conn = getattr(getattr(deps, "repos", None), "conn", None)
+    cached = idempotency.lookup(conn, env)
+    if cached is not None:
+        return cached
+
     handler = importlib.import_module(module_path).handle
     try:
         result: CommandResult = await handler(env, deps)
@@ -330,13 +338,14 @@ async def dispatch(raw: dict[str, Any], deps: Any) -> dict[str, Any]:
 
     # PRD-AGT-003：外部 Agent 的产出必须带来源与信任等级。集中在此登记，
     # 避免逐个 handler 埋点漏掉；登记失败不影响业务结果。
-    if is_agent_caller(env):
-        conn = getattr(getattr(deps, "repos", None), "conn", None)
-        if conn is not None:
-            from worker.runtime.agent_record import record_agent_activity
+    if is_agent_caller(env) and conn is not None:
+        from worker.runtime.agent_record import record_agent_activity
 
-            record_agent_activity(
-                conn, env, artifact_ids=list(result.artifact_ids), ok=result.ok
-            )
+        record_agent_activity(
+            conn, env, artifact_ids=list(result.artifact_ids), ok=result.ok
+        )
 
-    return result.model_dump()
+    dumped: dict[str, Any] = result.model_dump()
+    # 只缓存成功结果：失败若被缓存，一次网络抖动就会把同一个 key 永久钉死
+    idempotency.remember(conn, env, dumped)
+    return dumped

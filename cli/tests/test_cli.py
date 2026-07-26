@@ -935,3 +935,20 @@ def test_job_cancel_command(monkeypatch: pytest.MonkeyPatch) -> None:
     assert rc == 0
     assert captured["env"]["commandType"] == "CancelJob"
     assert captured["env"]["payload"] == {"job_id": "job-1"}
+
+
+# ----- PRD §13：幂等键（--idempotency-key） -----
+
+
+def test_idempotency_key_defaults_to_null(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True, "detail": {}})
+    assert main(["project", "list"]) == 0
+    assert captured["env"]["idempotencyKey"] is None
+
+
+def test_idempotency_key_threads_into_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True, "detail": {}})
+    assert main(["--idempotency-key", "run-42", "analyze", "--text", "x"]) == 0
+    assert captured["env"]["idempotencyKey"] == "run-42"

@@ -45,6 +45,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="可选：目标项目 id（部分命令在 project 作用域生效）",
     )
     parser.add_argument(
+        "--idempotency-key",
+        dest="idempotency_key",
+        default=None,
+        help=(
+            "可选：幂等键（PRD §13）。同一 key 的命令成功后重复提交将直接"
+            "返回上次结果，不重复产出、不重复计费"
+        ),
+    )
+    parser.add_argument(
         "--workspace-id",
         dest="workspace_id",
         default=DEFAULT_WORKSPACE_ID,
@@ -786,7 +795,7 @@ def build_envelope_for(args: argparse.Namespace) -> dict[str, Any]:
         actor_type=ACTOR_TYPE,
         workspace_id=workspace_id,
         project_id=project_id,
-        idempotency_key=None,
+        idempotency_key=getattr(args, "idempotency_key", None),
         payload=payload,
     )
 

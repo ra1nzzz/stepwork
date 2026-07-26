@@ -210,6 +210,12 @@ export function buildEnvelope<T>(
   workspaceId: string,
   projectId: string | null,
   payload: T,
+  /**
+   * PRD §13 幂等键：同 key 的命令成功后重复提交将直接返回上次结果，
+   * 不重复产出内容版本、不重复计费。适合「重试按钮」「双击提交」这类
+   * 场景；不传则保持每次真执行的旧行为。
+   */
+  idempotencyKey?: string | null,
 ): CommandEnvelope {
   return {
     commandId: uuid(),
@@ -219,7 +225,7 @@ export function buildEnvelope<T>(
     source: "ui",
     workspaceId,
     projectId,
-    idempotencyKey: null,
+    idempotencyKey: idempotencyKey ?? null,
     payload: payload as unknown as Record<string, unknown>,
     requestedAt: new Date().toISOString(),
   };
