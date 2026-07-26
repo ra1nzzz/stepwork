@@ -1,6 +1,9 @@
 /**
  * 素材导入视图（W3 Batch3）
  * 拖放 / 文件选择 → 逐个 dispatch ImportSource，按内容哈希去重
+ *
+ * PRD-SRC-001「支持拖放和文件选择」+ PRD-SRC-004「重复导入时提示用户」的
+ * 前端落点（去重提示见 useImportStore 的 dedupNotice）。
  */
 
 import { useRef, useState, type DragEvent } from "react";

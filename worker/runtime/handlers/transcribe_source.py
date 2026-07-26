@@ -1,4 +1,7 @@
-"""``TranscribeSource`` 命令处理（W3，Batch 1）。
+"""``TranscribeSource`` 命令处理（W3 Batch 1；PRD-ANA-001 本地或云端 ASR）。
+
+PRD-ANA-001 的验收是「输出文本和时间戳」—— transcript 落库时带 segment
+级时间戳，Provider 可选本地（faster-whisper）或云端。
 
 职责：
 1. 解析素材（``asset_id`` 或 ``local_uri``）→ 解析目标 project

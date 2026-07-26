@@ -1,5 +1,8 @@
 """``RenderSource`` 命令处理（W6 + Tranche 2 渲染产物）。
 
+PRD-REN-004「RenderJob 进度、取消和重试」的落点；其验收「重启后任务状态
+可恢复」由 ``bootstrap.recover_orphan_jobs`` 配合租约完成。
+
 职责（对齐 transcribe_source）：
 1. 解析 RenderSpec（源 ContentVersion / 模板 / TTS 引擎）
 2. 创建 RenderJob（PENDING → RUNNING），获取租约（kill -9 恢复用）

@@ -1,5 +1,8 @@
 """``ImportSource`` 命令处理（W3 Batch 0 + Tranche 2 链接导入）。
 
+PRD-SRC-001「导入本地视频、音频、图片、文本」的后端落点；拖放与文件选择
+在 ``features/import/ImportView.tsx``。PRD-SRC-004 的哈希去重见 ``_insert_asset``。
+
 两条导入路径（payload 二选一）：
 
 1. 本地文件 ``{local_uri}``：解析 payload → hash/去重写入 ``source_assets``。

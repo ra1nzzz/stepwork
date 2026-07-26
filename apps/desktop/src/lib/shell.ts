@@ -1,5 +1,8 @@
 /**
  * 本地路径打开辅助（Tranche 2）
+ *
+ * PRD-PUB-002 的「可一键打开导出目录」就落在这里（导出的视频/封面/标题/
+ * 正文/标签由 BuildPlatformFillPackage 产出）。
  * - Tauri 环境：@tauri-apps/plugin-opener 的 openPath()（capability: opener:allow-open-path）
  * - 浏览器环境：无法打开本地路径，回退为复制到剪贴板并抛出提示性错误
  */

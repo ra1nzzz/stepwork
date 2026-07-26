@@ -1,4 +1,7 @@
-"""STEPWORK 命令行入口（W7 Phase 3）。
+"""STEPWORK 命令行入口（W7 Phase 3；PRD-AGT-001 稳定 CLI）。
+
+PRD-AGT-001 的验收是「JSON 输出、退出码和 Job ID」：所有子命令统一把
+CommandResult 原样打印为 JSON（含 ``job_id``），失败以非 0 退出码返回。
 
 ``python -m cli`` —— 通过 Command Bus 与 worker 后端交互。
 
