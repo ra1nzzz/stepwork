@@ -1,11 +1,13 @@
-"""cli 包测试（W7 Phase 3，Tranche 1 扩展）。
+"""cli 包测试（W7 Phase 3，Tranche 1/2 扩展）。
 
 验证 CLI → Command Bus 的接线（无需真实 DB）：
 - ``config get`` 构造正确的 ``GetConfig`` 信封（source=cli / actor.type=desktop）。
 - ``config set`` 解析器只暴露 ``--file`` / ``--stdin``，**绝不**接收明文密钥参数。
 - 进程退出码反映 ``result.ok``（0 成功 / 1 失败 / 2 用法错误）。
-- 新增子命令（import / transcribe / render / job / project）构造与
+- Tranche 1 子命令（import / transcribe / render / job / project）构造与
   worker handler / 契约一致的 payload。
+- Tranche 2 子命令（brand / workspace / versions / publish / analysis）
+  构造契约定义的 camelCase payload，可选键缺省不写入。
 """
 
 from __future__ import annotations
@@ -278,3 +280,332 @@ def test_project_list_and_get_build_query_envelopes(
     env = captured["env"]
     assert env["commandType"] == "GetProject"
     assert env["payload"] == {"project_id": "proj-7"}
+
+
+# ----- Tranche 2：brand / workspace / versions / publish / analysis -----
+
+
+def test_brand_list_builds_listbrandprofiles_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True, "detail": {}})
+    rc = main(["brand", "list"])
+
+    assert rc == 0
+    env = captured["env"]
+    assert env["commandType"] == "ListBrandProfiles"
+    assert env["source"] == "cli"
+    assert env["payload"] == {}
+
+
+def test_brand_create_builds_full_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    rc = main(
+        [
+            "brand",
+            "create",
+            "--name",
+            "极简厨房",
+            "--tone",
+            "轻松专业",
+            "--positioning",
+            "家庭快手菜",
+            "--audience",
+            "上班族",
+            "--pillar",
+            "10分钟晚餐",
+            "--pillar",
+            "厨具测评",
+            "--banned",
+            "绝绝子",
+            "--banned",
+            "家人们",
+        ]
+    )
+
+    assert rc == 0
+    env = captured["env"]
+    assert env["commandType"] == "CreateBrandProfile"
+    assert env["payload"] == {
+        "name": "极简厨房",
+        "positioning": "家庭快手菜",
+        "audience": "上班族",
+        "tone": "轻松专业",
+        "contentPillars": ["10分钟晚餐", "厨具测评"],
+        "bannedExpressions": ["绝绝子", "家人们"],
+    }
+
+
+def test_brand_create_omits_absent_optional_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    rc = main(["brand", "create", "--name", "只有名字"])
+
+    assert rc == 0
+    # 契约：可选字段缺省不写入 payload
+    assert captured["env"]["payload"] == {"name": "只有名字"}
+
+
+def test_brand_create_requires_name() -> None:
+    with pytest.raises(SystemExit) as ei:
+        main(["brand", "create", "--tone", "轻松"])
+    assert ei.value.code == 2
+
+
+def test_brand_set_project_builds_payload_and_allows_null_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+
+    rc = main(["brand", "set-project", "--project", "proj-1", "--profile", "bp-1"])
+    assert rc == 0
+    env = captured["env"]
+    assert env["commandType"] == "SetProjectBrandProfile"
+    assert env["projectId"] == "proj-1"
+    assert env["payload"] == {"projectId": "proj-1", "profileId": "bp-1"}
+
+    # 缺省 --profile → profileId 显式为 null（解除关联）
+    rc = main(["brand", "set-project", "--project", "proj-1"])
+    assert rc == 0
+    assert captured["env"]["payload"] == {"projectId": "proj-1", "profileId": None}
+
+
+def test_workspace_commands_build_contract_payloads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+
+    rc = main(["workspace", "list"])
+    assert rc == 0
+    assert captured["env"]["commandType"] == "ListWorkspaces"
+    # 契约：includeArchived 可选，缺省不写入
+    assert captured["env"]["payload"] == {}
+
+    rc = main(["workspace", "list", "--include-archived"])
+    assert rc == 0
+    assert captured["env"]["payload"] == {"includeArchived": True}
+
+    rc = main(["workspace", "create", "我的工作区"])
+    assert rc == 0
+    assert captured["env"]["commandType"] == "CreateWorkspace"
+    assert captured["env"]["payload"] == {"name": "我的工作区"}
+
+    rc = main(["workspace", "rename", "ws-2", "--name", "新名字"])
+    assert rc == 0
+    assert captured["env"]["commandType"] == "RenameWorkspace"
+    assert captured["env"]["payload"] == {"workspaceId": "ws-2", "name": "新名字"}
+
+    rc = main(["workspace", "archive", "ws-2"])
+    assert rc == 0
+    assert captured["env"]["commandType"] == "ArchiveWorkspace"
+    assert captured["env"]["payload"] == {"workspaceId": "ws-2"}
+
+
+def test_versions_list_builds_listcontentversions_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    rc = main(
+        [
+            "versions",
+            "list",
+            "--project",
+            "proj-1",
+            "--content-type",
+            "script",
+            "--limit",
+            "5",
+        ]
+    )
+
+    assert rc == 0
+    env = captured["env"]
+    assert env["commandType"] == "ListContentVersions"
+    assert env["projectId"] == "proj-1"
+    assert env["payload"] == {
+        "projectId": "proj-1",
+        "contentType": "script",
+        "limit": 5,
+    }
+
+    # 契约：contentType / limit 均可选，缺省不写入 payload
+    main(["versions", "list", "--project", "proj-1"])
+    assert captured["env"]["payload"] == {"projectId": "proj-1"}
+
+
+def test_versions_get_builds_getcontentversion_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    rc = main(["versions", "get", "cv-42"])
+
+    assert rc == 0
+    env = captured["env"]
+    assert env["commandType"] == "GetContentVersion"
+    assert env["payload"] == {"versionId": "cv-42"}
+
+
+def test_publish_variant_create_builds_contract_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    rc = main(
+        [
+            "publish",
+            "variant-create",
+            "--project",
+            "proj-1",
+            "--platform",
+            "douyin",
+            "--title",
+            "三分钟学会",
+            "--body",
+            "正文内容",
+            "--tag",
+            "美食",
+            "--tag",
+            "教程",
+        ]
+    )
+
+    assert rc == 0
+    env = captured["env"]
+    assert env["commandType"] == "CreatePlatformVariant"
+    assert env["projectId"] == "proj-1"
+    assert env["payload"] == {
+        "projectId": "proj-1",
+        "platform": "douyin",
+        "title": "三分钟学会",
+        "body": "正文内容",
+        "tags": ["美食", "教程"],
+    }
+
+
+def test_publish_variant_create_defaults_tags_to_empty_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    rc = main(
+        [
+            "publish",
+            "variant-create",
+            "--project",
+            "proj-1",
+            "--platform",
+            "generic",
+            "--title",
+            "t",
+            "--body",
+            "b",
+            "--video-version-id",
+            "cv-7",
+        ]
+    )
+
+    assert rc == 0
+    payload = captured["env"]["payload"]
+    # tags 契约为必填数组：无 --tag 时为空数组；videoVersionId 可选
+    assert payload["tags"] == []
+    assert payload["videoVersionId"] == "cv-7"
+
+
+def test_publish_variant_create_rejects_unknown_platform() -> None:
+    with pytest.raises(SystemExit) as ei:
+        main(
+            [
+                "publish",
+                "variant-create",
+                "--project",
+                "proj-1",
+                "--platform",
+                "bilibili",
+                "--title",
+                "t",
+                "--body",
+                "b",
+            ]
+        )
+    assert ei.value.code == 2
+
+
+def test_publish_variant_list_and_export_bundle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+
+    rc = main(["publish", "variant-list", "--project", "proj-1"])
+    assert rc == 0
+    assert captured["env"]["commandType"] == "ListPlatformVariants"
+    assert captured["env"]["payload"] == {"projectId": "proj-1"}
+
+    rc = main(["publish", "export-bundle", "pv-3"])
+    assert rc == 0
+    assert captured["env"]["commandType"] == "ExportBundle"
+    assert captured["env"]["payload"] == {"variantId": "pv-3"}
+
+
+def test_analysis_save_builds_saveanalysis_envelope(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    report = {"summary": "概要", "hook": "开头钩子", "structure": [], "risks": []}
+    raw = json.dumps(report, ensure_ascii=False)
+    f = tmp_path / "report.json"
+    f.write_text(raw, encoding="utf-8")
+
+    captured = _capture_run_command(monkeypatch, {"ok": True, "detail": {}})
+    rc = main(
+        [
+            "analysis",
+            "save",
+            "--project",
+            "proj-1",
+            "--file",
+            str(f),
+            "--parent",
+            "cv-1",
+        ]
+    )
+
+    assert rc == 0
+    env = captured["env"]
+    assert env["commandType"] == "SaveAnalysis"
+    assert env["projectId"] == "proj-1"
+    # content 为报告 JSON 的原文字符串
+    assert env["payload"] == {
+        "content": raw,
+        "projectId": "proj-1",
+        "parentVersionId": "cv-1",
+    }
+
+
+def test_analysis_save_omits_absent_optional_fields(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    f = tmp_path / "report.json"
+    f.write_text('{"summary": "s"}', encoding="utf-8")
+
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    rc = main(["analysis", "save", "--file", str(f)])
+
+    assert rc == 0
+    assert captured["env"]["payload"] == {"content": '{"summary": "s"}'}
+
+
+def test_analysis_save_rejects_bad_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _capture_run_command(monkeypatch, {"ok": True})
+
+    # 文件不存在 → 用法错误（退出码 2）
+    assert main(["analysis", "save", "--file", str(tmp_path / "nope.json")]) == 2
+
+    # JSON 非法 → 用法错误
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json", encoding="utf-8")
+    assert main(["analysis", "save", "--file", str(bad)]) == 2
+
+    # 顶层不是对象 → 用法错误
+    arr = tmp_path / "arr.json"
+    arr.write_text("[1, 2]", encoding="utf-8")
+    assert main(["analysis", "save", "--file", str(arr)]) == 2

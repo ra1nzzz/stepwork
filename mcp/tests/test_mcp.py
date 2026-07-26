@@ -1,8 +1,8 @@
-"""Tests for the STEPWORK MCP server (W7 Phase 3, extended in Tranche 1).
+"""Tests for the STEPWORK MCP server (W7 Phase 3, extended in Tranche 1/2).
 
 Guarantees verified:
 
-1. ``tools/list`` exposes exactly the 6 read-only tools and **never**
+1. ``tools/list`` exposes exactly the 9 read-only tools and **never**
    ``update_config`` (the root authorization guarantee).
 2. ``tools/call`` for ``get_config`` builds a Command Bus envelope with
    ``source == "mcp"`` and ``actor.type == "agent"`` and returns the
@@ -14,6 +14,9 @@ Guarantees verified:
    result content (agents must be able to act on failures).
 5. ``list_jobs`` builds the ListJobs payload per the Tranche 1 contract
    (``states`` / ``limit`` both optional, omitted when absent).
+6. The Tranche 2 read-only tools (``list_content_versions`` /
+   ``get_content_version`` / ``list_brand_profiles``) build the camelCase
+   payloads the contract defines, omitting optional keys when absent.
 
 ``run_command`` is monkeypatched so the tests exercise the MCP layer in
 isolation (no real worker / DB needed). The real ``build_envelope`` is used
@@ -38,13 +41,14 @@ FAKE_MASKED_DETAIL: dict[str, object] = {
 }
 
 
-def test_tools_list_has_exactly_six_read_only_tools() -> None:
+def test_tools_list_has_exactly_nine_read_only_tools() -> None:
     tools = server.list_tools()
     names = [t["name"] for t in tools]
 
-    # Deliberate count bump (Tranche 1): the read-only ``list_jobs`` tool
-    # (ListJobs) joined the catalogue. ``update_config`` stays unreachable.
-    assert len(tools) == 6
+    # Deliberate count bump (Tranche 2): the read-only content-version /
+    # brand-profile query tools joined the catalogue.
+    # ``update_config`` stays unreachable.
+    assert len(tools) == 9
     assert names == [
         "get_config",
         "list_projects",
@@ -52,6 +56,9 @@ def test_tools_list_has_exactly_six_read_only_tools() -> None:
         "get_job_status",
         "list_jobs",
         "analyze_source",
+        "list_content_versions",
+        "get_content_version",
+        "list_brand_profiles",
     ]
     assert "update_config" not in names
 
@@ -128,6 +135,55 @@ def test_list_jobs_payload_follows_contract() -> None:
         "list_jobs", {"states": ["running", "failed"], "limit": 10}
     ) == {"states": ["running", "failed"], "limit": 10}
     assert server._TOOL_COMMANDS["list_jobs"] == "ListJobs"
+
+
+def test_content_version_tool_payloads_follow_contract() -> None:
+    """Tranche 2 只读工具 payload：契约为 camelCase，可选键缺省不写入。"""
+    assert server._build_payload(
+        "list_content_versions", {"project_id": "proj-1"}
+    ) == {"projectId": "proj-1"}
+    assert server._build_payload(
+        "list_content_versions",
+        {"project_id": "proj-1", "content_type": "script", "limit": 5},
+    ) == {"projectId": "proj-1", "contentType": "script", "limit": 5}
+    assert server._build_payload(
+        "get_content_version", {"version_id": "cv-9"}
+    ) == {"versionId": "cv-9"}
+    assert server._build_payload("list_brand_profiles", {}) == {}
+
+    assert server._TOOL_COMMANDS["list_content_versions"] == "ListContentVersions"
+    assert server._TOOL_COMMANDS["get_content_version"] == "GetContentVersion"
+    assert server._TOOL_COMMANDS["list_brand_profiles"] == "ListBrandProfiles"
+
+
+def test_tools_call_list_content_versions_builds_agent_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """list_content_versions 走完整 _call_tool 链路：mcp/agent 信封 + camelCase payload。"""
+    captured: dict[str, Any] = {}
+
+    async def fake_run_command(
+        raw: dict[str, Any], *, db_path: str | None = None
+    ) -> dict[str, Any]:
+        captured["raw"] = raw
+        return {"ok": True, "detail": {"versions": []}}
+
+    monkeypatch.setattr(server, "run_command", fake_run_command)
+
+    result = asyncio.run(
+        server._call_tool(
+            "list_content_versions",
+            {"project_id": "proj-1", "content_type": "transcript"},
+        )
+    )
+
+    env = captured["raw"]
+    assert env["source"] == "mcp"
+    assert env["actor"]["type"] == "agent"
+    assert env["commandType"] == "ListContentVersions"
+    assert env["payload"] == {"projectId": "proj-1", "contentType": "transcript"}
+    assert result["isError"] is False
+    assert json.loads(result["content"][0]["text"]) == {"versions": []}
 
 
 def test_tools_call_error_includes_command_result_error(

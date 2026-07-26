@@ -182,6 +182,155 @@ def build_parser() -> argparse.ArgumentParser:
     pg.set_defaults(command_type="GetProject")
     pg.add_argument("project_id", help="项目 id")
 
+    # ----- brand（Tranche 2：BrandProfile） -----
+    brand = sub.add_parser("brand", help="品牌档（BrandProfile）命令")
+    brand_sub = brand.add_subparsers(dest="brand_action", required=True)
+
+    bl = brand_sub.add_parser("list", help="列出品牌档（ListBrandProfiles）")
+    bl.set_defaults(command_type="ListBrandProfiles")
+
+    bc = brand_sub.add_parser("create", help="新建品牌档（CreateBrandProfile）")
+    bc.set_defaults(command_type="CreateBrandProfile")
+    bc.add_argument("--name", required=True, help="品牌档名称")
+    bc.add_argument("--tone", help="可选：语气")
+    bc.add_argument("--positioning", help="可选：定位")
+    bc.add_argument("--audience", help="可选：受众")
+    bc.add_argument(
+        "--pillar",
+        dest="pillars",
+        action="append",
+        metavar="PILLAR",
+        help="可选：内容支柱（可重复）→ payload.contentPillars",
+    )
+    bc.add_argument(
+        "--banned",
+        dest="banned",
+        action="append",
+        metavar="EXPR",
+        help="可选：禁用表达（可重复）→ payload.bannedExpressions",
+    )
+
+    bp = brand_sub.add_parser(
+        "set-project", help="项目关联品牌档（SetProjectBrandProfile）"
+    )
+    bp.set_defaults(command_type="SetProjectBrandProfile")
+    bp.add_argument("--project", required=True, help="项目 id → payload.projectId")
+    bp.add_argument(
+        "--profile",
+        default=None,
+        help="品牌档 id；缺省表示解除关联（payload.profileId = null）",
+    )
+
+    # ----- workspace（Tranche 2：PRD-WS-001） -----
+    ws = sub.add_parser("workspace", help="工作区（Workspace）命令")
+    ws_sub = ws.add_subparsers(dest="workspace_action", required=True)
+
+    wl = ws_sub.add_parser(
+        "list", help="列出工作区（ListWorkspaces，缺省不含已归档）"
+    )
+    wl.set_defaults(command_type="ListWorkspaces")
+    wl.add_argument(
+        "--include-archived",
+        dest="include_archived",
+        action="store_true",
+        help="包含已归档的工作区 → payload.includeArchived",
+    )
+
+    wc = ws_sub.add_parser("create", help="新建工作区（CreateWorkspace）")
+    wc.set_defaults(command_type="CreateWorkspace")
+    wc.add_argument("name", help="工作区名称")
+
+    wr = ws_sub.add_parser("rename", help="重命名工作区（RenameWorkspace）")
+    wr.set_defaults(command_type="RenameWorkspace")
+    wr.add_argument("workspace_id", help="工作区 id")
+    wr.add_argument("--name", required=True, help="新名称")
+
+    wa = ws_sub.add_parser("archive", help="归档工作区（ArchiveWorkspace）")
+    wa.set_defaults(command_type="ArchiveWorkspace")
+    wa.add_argument("workspace_id", help="工作区 id")
+
+    # ----- versions（Tranche 2：内容版本查询） -----
+    ver = sub.add_parser("versions", help="内容版本查询命令")
+    ver_sub = ver.add_subparsers(dest="versions_action", required=True)
+
+    vl = ver_sub.add_parser("list", help="列出内容版本（ListContentVersions）")
+    vl.set_defaults(command_type="ListContentVersions")
+    vl.add_argument("--project", required=True, help="项目 id → payload.projectId")
+    vl.add_argument(
+        "--content-type",
+        dest="content_type",
+        help="可选：按内容类型过滤（如 script / transcript / analysis）",
+    )
+    vl.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="可选：最多返回条数（缺省由 worker 决定，默认 20）",
+    )
+
+    vg = ver_sub.add_parser("get", help="取单个内容版本全文（GetContentVersion）")
+    vg.set_defaults(command_type="GetContentVersion")
+    vg.add_argument("version_id", help="content_version id")
+
+    # ----- publish（Tranche 2：PRD-PUB-001/002） -----
+    pub = sub.add_parser("publish", help="发布（平台变体 / 导出）命令")
+    pub_sub = pub.add_subparsers(dest="publish_action", required=True)
+
+    pvc = pub_sub.add_parser(
+        "variant-create", help="创建平台变体（CreatePlatformVariant）"
+    )
+    pvc.set_defaults(command_type="CreatePlatformVariant")
+    pvc.add_argument("--project", required=True, help="项目 id → payload.projectId")
+    pvc.add_argument(
+        "--platform",
+        required=True,
+        choices=["douyin", "generic"],
+        help="目标平台",
+    )
+    pvc.add_argument("--title", required=True, help="变体标题")
+    pvc.add_argument("--body", required=True, help="变体正文")
+    pvc.add_argument(
+        "--tag",
+        dest="tags",
+        action="append",
+        metavar="TAG",
+        help="标签（可重复）→ payload.tags",
+    )
+    pvc.add_argument(
+        "--video-version-id",
+        dest="video_version_id",
+        help="可选：视频 content_version id → payload.videoVersionId",
+    )
+
+    pvl = pub_sub.add_parser(
+        "variant-list", help="列出平台变体（ListPlatformVariants）"
+    )
+    pvl.set_defaults(command_type="ListPlatformVariants")
+    pvl.add_argument("--project", required=True, help="项目 id → payload.projectId")
+
+    pe = pub_sub.add_parser("export-bundle", help="导出发布包（ExportBundle）")
+    pe.set_defaults(command_type="ExportBundle")
+    pe.add_argument("variant_id", help="平台变体 id")
+
+    # ----- analysis（Tranche 2：PRD-ANA-004） -----
+    ana = sub.add_parser("analysis", help="分析报告命令")
+    ana_sub = ana.add_subparsers(dest="analysis_action", required=True)
+
+    asv = ana_sub.add_parser("save", help="保存分析报告为新版本（SaveAnalysis）")
+    asv.set_defaults(command_type="SaveAnalysis")
+    asv.add_argument("--project", help="可选：项目 id → payload.projectId")
+    asv.add_argument(
+        "--file",
+        metavar="PATH",
+        required=True,
+        help="分析报告 JSON 文件路径（原文作为 payload.content）",
+    )
+    asv.add_argument(
+        "--parent",
+        dest="parent_version_id",
+        help="可选：父版本 id → payload.parentVersionId",
+    )
+
     return parser
 
 
@@ -226,6 +375,35 @@ def _import_payload(file_path: str) -> dict[str, Any]:
             "mime_type": mime,
         },
     }
+
+
+def _analysis_save_payload(args: argparse.Namespace) -> dict[str, Any]:
+    """构造 ``SaveAnalysis`` payload：报告从 ``--file`` 读入。
+
+    契约：``content`` 为报告的 JSON 字符串（原文透传），读取时校验其为
+    合法 JSON 对象，避免把坏文件写进版本链。
+
+    Raises:
+        ValueError: 文件缺失 / JSON 非法 / 顶层不是对象。
+    """
+    path = args.file
+    if not os.path.isfile(path):
+        raise ValueError(f"analysis report file not found: {path}")
+    with open(path, encoding="utf-8") as f:
+        raw = f.read()
+    try:
+        data: Any = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"invalid analysis report JSON: {e}") from e
+    if not isinstance(data, dict):
+        raise ValueError("analysis report must be a JSON object")
+
+    payload: dict[str, Any] = {"content": raw}
+    if getattr(args, "project", None):
+        payload["projectId"] = args.project
+    if getattr(args, "parent_version_id", None):
+        payload["parentVersionId"] = args.parent_version_id
+    return payload
 
 
 def build_payload(args: argparse.Namespace) -> dict[str, Any]:
@@ -321,6 +499,85 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
         if action == "get":
             return {"project_id": args.project_id}
         raise ValueError(f"unknown project action: {action!r}")
+
+    if command == "brand":
+        action = getattr(args, "brand_action", None)
+        if action == "list":
+            return {}
+        if action == "create":
+            # 契约（Tranche 2）：CreateBrandProfile 可选字段缺省不写入 payload
+            payload = {"name": args.name}
+            for key in ("positioning", "audience", "tone"):
+                value = getattr(args, key, None)
+                if value:
+                    payload[key] = value
+            if getattr(args, "pillars", None):
+                payload["contentPillars"] = args.pillars
+            if getattr(args, "banned", None):
+                payload["bannedExpressions"] = args.banned
+            return payload
+        if action == "set-project":
+            # profileId 允许为 null（解除项目与品牌档的关联）
+            return {
+                "projectId": args.project,
+                "profileId": getattr(args, "profile", None),
+            }
+        raise ValueError(f"unknown brand action: {action!r}")
+
+    if command == "workspace":
+        action = getattr(args, "workspace_action", None)
+        if action == "list":
+            # includeArchived 可选，缺省不写入 payload
+            if getattr(args, "include_archived", False):
+                return {"includeArchived": True}
+            return {}
+        if action == "create":
+            return {"name": args.name}
+        if action == "rename":
+            return {"workspaceId": args.workspace_id, "name": args.name}
+        if action == "archive":
+            return {"workspaceId": args.workspace_id}
+        raise ValueError(f"unknown workspace action: {action!r}")
+
+    if command == "versions":
+        action = getattr(args, "versions_action", None)
+        if action == "list":
+            # 契约：contentType / limit 均可选，缺省不写入 payload
+            payload = {"projectId": args.project}
+            if getattr(args, "content_type", None):
+                payload["contentType"] = args.content_type
+            if getattr(args, "limit", None) is not None:
+                payload["limit"] = args.limit
+            return payload
+        if action == "get":
+            return {"versionId": args.version_id}
+        raise ValueError(f"unknown versions action: {action!r}")
+
+    if command == "publish":
+        action = getattr(args, "publish_action", None)
+        if action == "variant-create":
+            payload = {
+                "projectId": args.project,
+                "platform": args.platform,
+                "title": args.title,
+                "body": args.body,
+                # tags 契约为必填数组：无 --tag 时发送空数组
+                "tags": getattr(args, "tags", None) or [],
+            }
+            if getattr(args, "video_version_id", None):
+                payload["videoVersionId"] = args.video_version_id
+            return payload
+        if action == "variant-list":
+            return {"projectId": args.project}
+        if action == "export-bundle":
+            return {"variantId": args.variant_id}
+        raise ValueError(f"unknown publish action: {action!r}")
+
+    if command == "analysis":
+        action = getattr(args, "analysis_action", None)
+        if action == "save":
+            return _analysis_save_payload(args)
+        raise ValueError(f"unknown analysis action: {action!r}")
 
     raise ValueError(f"unknown command: {command!r}")
 

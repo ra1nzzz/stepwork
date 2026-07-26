@@ -8,7 +8,8 @@ Command Bus (``worker.runtime.app.run_command``). The MCP surface is
 deliberately a strict subset of the bus:
 
 * Only read-only commands are reachable (``GetConfig`` / ``ListProjects`` /
-  ``GetProject`` / ``GetJobStatus`` / ``ListJobs`` / ``AnalyzeSource``).
+  ``GetProject`` / ``GetJobStatus`` / ``ListJobs`` / ``AnalyzeSource`` /
+  ``ListContentVersions`` / ``GetContentVersion`` / ``ListBrandProfiles``).
 * ``update_config`` / ``UpdateConfig`` is **never** registered. This is the
   root authorization guarantee: secrets can never be written through the MCP
   surface, and ``get_config`` only ever returns the worker-masked view
@@ -39,6 +40,9 @@ _TOOL_COMMANDS: dict[str, str] = {
     "get_job_status": "GetJobStatus",
     "list_jobs": "ListJobs",
     "analyze_source": "AnalyzeSource",
+    "list_content_versions": "ListContentVersions",
+    "get_content_version": "GetContentVersion",
+    "list_brand_profiles": "ListBrandProfiles",
 }
 
 # Fixed tool catalogue. NEVER add ``update_config`` / ``UpdateConfig`` here.
@@ -125,6 +129,56 @@ TOOLS: list[dict[str, Any]] = [
             ],
         },
     },
+    {
+        "name": "list_content_versions",
+        "description": (
+            "List content versions of a project (newest first). Optionally "
+            "filter by content type (e.g. `script`, `transcript`, "
+            "`analysis`) and cap the result count (worker default 20). Each "
+            "item carries a 200-char content preview."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "project_id": {
+                    "type": "string",
+                    "description": "Content project id.",
+                },
+                "content_type": {
+                    "type": "string",
+                    "description": (
+                        "Optional content type filter (e.g. 'script')."
+                    ),
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": (
+                        "Optional maximum number of versions to return."
+                    ),
+                },
+            },
+            "required": ["project_id"],
+        },
+    },
+    {
+        "name": "get_content_version",
+        "description": (
+            "Get a single content version (full content, parent link, "
+            "producer metadata) by its id."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"version_id": {"type": "string"}},
+            "required": ["version_id"],
+        },
+    },
+    {
+        "name": "list_brand_profiles",
+        "description": (
+            "List brand profiles in the current workspace (newest first)."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
 ]
 
 
@@ -138,7 +192,7 @@ class McpError(Exception):
 
 
 def list_tools() -> list[dict[str, Any]]:
-    """Return the fixed, read-only tool catalogue (exactly 6 tools)."""
+    """Return the fixed, read-only tool catalogue (exactly 9 tools)."""
     return TOOLS
 
 
@@ -169,6 +223,18 @@ def _build_payload(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
             if arguments.get(key) is not None:
                 payload[key] = arguments[key]
         return payload
+    if tool_name == "list_content_versions":
+        # Tranche 2 contract: the payload keys are camelCase; contentType and
+        # limit are both optional and omitted when absent.
+        payload = {"projectId": arguments.get("project_id")}
+        if arguments.get("content_type"):
+            payload["contentType"] = arguments["content_type"]
+        if arguments.get("limit") is not None:
+            payload["limit"] = arguments["limit"]
+        return payload
+    if tool_name == "get_content_version":
+        return {"versionId": arguments.get("version_id")}
+    # list_brand_profiles (and get_config / list_projects) take no arguments.
     return {}
 
 
