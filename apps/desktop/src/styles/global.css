@@ -1102,3 +1102,6 @@ p { text-wrap: pretty; }
   font-size: 13px;
   opacity: 0.85;
 }
+
+/* PRD-AGT-008 审批中心列表 */
+.approval-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 12px; }

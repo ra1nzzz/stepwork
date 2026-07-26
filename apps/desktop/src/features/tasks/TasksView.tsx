@@ -16,14 +16,16 @@ import { buildEnvelope, dispatchCommand, getWorkspaceId } from "@/lib/tauri";
 import { useJobEventsStore } from "@/stores/useJobEventsStore";
 import { useRenderStore, type RenderStatus } from "@/stores/useRenderStore";
 import { AgentView } from "@/features/agent/AgentView";
+import { ApprovalsView } from "@/features/approvals/ApprovalsView";
 import { ProvenanceView } from "@/features/provenance/ProvenanceView";
 import type { JobState, PersistedJob } from "@/lib/types";
 
-type TaskTab = "jobs" | "agent" | "provenance";
+type TaskTab = "jobs" | "agent" | "approvals" | "provenance";
 
 const TABS: { id: TaskTab; label: string }[] = [
   { id: "jobs", label: "任务" },
   { id: "agent", label: "Agent 活动" },
+  { id: "approvals", label: "审批中心" },
   { id: "provenance", label: "溯源" },
 ];
 
@@ -307,6 +309,7 @@ export function TasksView() {
       </nav>
 
       {tab === "agent" && <AgentView />}
+      {tab === "approvals" && <ApprovalsView />}
       {tab === "provenance" && <ProvenanceView />}
 
       {tab === "jobs" && (

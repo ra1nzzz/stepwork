@@ -14,10 +14,13 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import logging
 from typing import Any
 
 from worker.runtime.commands.envelope import EnvelopeError, parse_envelope
 from worker.runtime.models import CommandEnvelope, CommandResult
+
+logger = logging.getLogger("worker.runtime")
 
 # commandType -> handler 模块路径（参数名 ``handle(env, deps)``）
 _ROUTES: dict[str, str] = {
@@ -82,6 +85,10 @@ _ROUTES: dict[str, str] = {
     "CreatePlatformVariant": "worker.runtime.handlers.publish",
     "ListPlatformVariants": "worker.runtime.handlers.publish",
     "ExportBundle": "worker.runtime.handlers.publish",
+    # PRD-AGT-008 / §9.1 §9.2：审批中心
+    "CreateApprovalRequest": "worker.runtime.handlers.approvals",
+    "ListApprovalRequests": "worker.runtime.handlers.approvals",
+    "DecideApprovalRequest": "worker.runtime.handlers.approvals",
 }
 
 # 写配置（UpdateConfig）仅允许来自「用户态 / 桌面壳」的 actor（三角色 P0 安全模型）；
@@ -136,6 +143,10 @@ _AGENT_ALLOWED_COMMANDS: frozenset[str] = frozenset(
         "GetConfig",
         # 发起分析：PRD-AGT-002 唯一显式豁免的写命令（费用由 audit 记录）
         "AnalyzeSource",
+        # 允许外部 Agent **申请**审批（§9.1 的降级路径），
+        # 但 DecideApprovalRequest 不在清单内——绝不能自批自用
+        "CreateApprovalRequest",
+        "ListApprovalRequests",
     }
 )
 
@@ -149,6 +160,34 @@ def is_agent_caller(env: CommandEnvelope) -> bool:
     """判断信封是否来自外部 Agent（PRD §9.1 的约束对象）。"""
     actor_type = (env.actor or {}).get("type")
     return actor_type in _AGENT_ACTOR_TYPES or env.source in _AGENT_SOURCES
+
+
+def _create_preparation_task(env: CommandEnvelope, deps: Any) -> str | None:
+    """把被拒的 agent 请求降级为待审批准备任务（§9.1）；失败返回 None。
+
+    登记失败绝不改变「拒绝」这个结果本身 —— 安全语义不依赖审批表可写。
+    """
+    conn = getattr(getattr(deps, "repos", None), "conn", None)
+    if conn is None:
+        return None
+    try:
+        from worker.runtime.handlers.approvals import create_request
+
+        actor = env.actor or {}
+        return create_request(
+            conn,
+            actor=f"{actor.get('type', 'agent')}:{actor.get('id', 'unknown')}",
+            action_type=env.commandType,
+            target=env.projectId or env.workspaceId,
+            risk_summary=(
+                f"外部 {env.source} 调用方请求执行 {env.commandType}，"
+                f"该操作按 PRD §9.1 需用户确认"
+            ),
+            payload=dict(env.payload or {}),
+        )
+    except Exception:  # noqa: BLE001 - 准备任务登记失败不影响拒绝语义
+        logger.exception("preparation task creation failed for %s", env.commandType)
+        return None
 
 
 class DispatchError(Exception):
@@ -185,12 +224,17 @@ async def dispatch(raw: dict[str, Any], deps: Any) -> dict[str, Any]:
     # PRD §9.1：外部 Agent 默认禁止直接执行，只放行允许清单内的命令。
     # 与 MCP 工具集边界互为冗余——即便某天工具被误注册，这里仍然拒绝。
     if is_agent_caller(env) and env.commandType not in _AGENT_ALLOWED_COMMANDS:
+        # §9.1 原文是「以下操作默认**只能创建准备任务**」——只拒绝等于
+        # 「无路可走」，不符合 PRD。这里把被拒的请求降级成一条待审批的
+        # 准备任务，用户可在审批中心批准后自行发起。
+        approval_id = _create_preparation_task(env, deps)
         return CommandResult(
             ok=False, commandId=env.commandId,
             error=(
                 f"FORBIDDEN_ACTOR: {env.commandType} 不在外部 Agent 允许清单内"
-                f"（PRD §9.1 默认禁止直接执行），需由用户在桌面端确认后发起"
+                f"（PRD §9.1 默认禁止直接执行），已创建待审批的准备任务"
             ),
+            detail={"approval_id": approval_id} if approval_id else {},
         ).model_dump()
 
     # 写配置（UpdateConfig）受 actor 白名单限制（user / desktop）；

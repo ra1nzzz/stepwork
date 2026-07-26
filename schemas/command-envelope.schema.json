@@ -76,7 +76,10 @@
         "EditParagraph",
         "PreviewPluginManifest",
         "UninstallPlugin",
-        "CheckPluginHealth"
+        "CheckPluginHealth",
+        "CreateApprovalRequest",
+        "ListApprovalRequests",
+        "DecideApprovalRequest"
       ],
       "description": "Command type identifier. See SYSTEM_SPEC §7.2 for the canonical list."
     },

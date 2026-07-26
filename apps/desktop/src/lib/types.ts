@@ -146,7 +146,10 @@ export interface CommandEnvelope {
     | "EditParagraph"
     | "PreviewPluginManifest"
     | "UninstallPlugin"
-    | "CheckPluginHealth";
+    | "CheckPluginHealth"
+    | "CreateApprovalRequest"
+    | "ListApprovalRequests"
+    | "DecideApprovalRequest";
   schemaVersion: string;
   actor: { type: "user" | "agent" | "plugin" | "system" | "desktop"; id: string };
   source: string;
@@ -452,6 +455,32 @@ export interface InstalledPlugin {
   last_loaded_at: string | null;
   last_checked_at: string | null;
   last_check_result: string | null;
+}
+
+/**
+ * 审批请求（PRD-AGT-008 / §9.2）。字段与 approval_requests 表对齐，
+ * 覆盖 §9.2 要求展示的七要素。
+ */
+export interface ApprovalRequest {
+  id: string;
+  /** §9.2 请求者（协议或插件） */
+  actor: string;
+  /** §9.2 将执行的动作 */
+  action_type: string;
+  /** §9.2 目标 Workspace/Project */
+  target: string;
+  /** §9.2 一次性或持久授权范围 */
+  requested_scope: string | null;
+  /** §9.2 费用或风险 */
+  risk_summary: string | null;
+  /** §9.2 将读取、修改或上传的数据 */
+  payload: Record<string, unknown>;
+  /** §9.2 有效期 */
+  expires_at: string | null;
+  status: "pending" | "approved" | "rejected" | "expired" | "consumed";
+  decision_actor: string | null;
+  decision_at: string | null;
+  created_at: string;
 }
 
 /** worker → Rust → 前端的 job.progress 通知 params */

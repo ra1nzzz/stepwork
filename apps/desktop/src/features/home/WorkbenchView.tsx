@@ -14,6 +14,8 @@ import { useViewStore } from "@/stores/useViewStore";
 import { useTranscriptStore } from "@/stores/useTranscriptStore";
 import { useRenderStore } from "@/stores/useRenderStore";
 import { useImportStore } from "@/stores/useImportStore";
+import { useJobEventsStore } from "@/stores/useJobEventsStore";
+import { getWorkspaceId } from "@/lib/tauri";
 
 interface ProjectRow {
   id: string;
@@ -81,13 +83,44 @@ export function WorkbenchView() {
 
   // 真实 metric 计算
   const activeProjectCount = projects.length;
+  // 持久化任务（含应用重启前的历史）
+  const persistedJobs = useJobEventsStore((s) => s.jobs);
+
+  // PRD §7 Home 要求含「待审批任务」
+  const [pendingApprovals, setPendingApprovals] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const env = buildEnvelope(
+          "ListApprovalRequests",
+          getWorkspaceId(),
+          null,
+          { status: "pending" },
+        );
+        const res = await dispatchCommand(env);
+        if (cancelled || !res.ok) return;
+        const detail = (res.detail ?? {}) as { pending_count?: number };
+        setPendingApprovals(detail.pending_count ?? 0);
+      } catch {
+        /* 后端未连接：保持 0，不阻塞首页 */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const runningTaskCount =
     transcriptJobs.filter((j) => j.status === "running" || j.status === "pending").length +
     (renderStatus === "running" ? 1 : 0);
   const pendingConfirmCount =
     transcriptJobs.filter((j) => j.status === "succeeded").length +
     (renderStatus === "succeeded" ? 1 : 0);
+  // PRD §7 Home 要求含「失败任务」：此前只统计本次会话的 store，
+  // 重启后恢复出来的历史失败任务恒为 0。改为并入持久化任务列表。
   const failedTaskCount =
+    persistedJobs.filter((j) => j.state === "failed").length +
     transcriptJobs.filter((j) => j.status === "failed").length +
     (renderStatus === "failed" ? 1 : 0);
 
@@ -170,6 +203,17 @@ export function WorkbenchView() {
           <div className="metric-label">已完成可继续</div>
           <div className="metric-value num">{formatMetric(pendingConfirmCount)}</div>
           <div className="metric-delta">转写 · 渲染产物</div>
+        </article>
+        {/* PRD §7 Home 要求含「待审批任务」 */}
+        <article
+          className={`metric${pendingApprovals > 0 ? " metric-danger" : ""}`}
+          data-od-id="metric-approvals"
+        >
+          <div className="metric-label">待审批</div>
+          <div className="metric-value num">{formatMetric(pendingApprovals)}</div>
+          <div className="metric-delta">
+            {pendingApprovals > 0 ? "Agent / 插件请求" : "无待办"}
+          </div>
         </article>
         <article className={`metric${failedTaskCount > 0 ? " metric-danger" : ""}`} data-od-id="metric-failed">
           <div className="metric-label">需要处理</div>
