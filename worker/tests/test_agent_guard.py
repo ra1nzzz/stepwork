@@ -105,3 +105,81 @@ async def test_agent_can_still_read_and_analyze() -> None:
         _deps(),
     )
     assert "FORBIDDEN_ACTOR" not in (res2.get("error") or "")
+
+
+# ----- PRD-AGT-003：外部 Agent 产出须带来源与信任等级 -----
+
+
+class _FakeAI:
+    name = "fake-ai"
+    model = "fake-1"
+    estimated_cost_per_1k = 0.0
+
+    async def complete(
+        self, prompt: str, schema: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        return {
+            "summary": "摘要", "topics": ["a"], "sentiment": "neutral",
+            "suggested_title": None, "suggested_tags": [], "key_points": [],
+            "target_audience": None, "hook": "钩子", "structure": [], "risks": [],
+            "provider": "fake-ai", "model": "fake-1", "confidence": 0.9,
+        }
+
+
+async def test_agent_analysis_recorded_with_trust_level() -> None:
+    """MCP 发起的分析：登记 AgentTask + AgentArtifact，带信任等级。"""
+    from worker.runtime.db.connection import in_memory
+    from worker.runtime.db.migrations import run_migrations
+    from worker.runtime.models import ContentProject, Workspace
+
+    c = in_memory()
+    run_migrations(c, _MIG_DIR)
+    repos = Repos(c)
+    ws = repos.workspaces.insert(Workspace(name="ws-a", root_path="/tmp/a"))
+    prj = repos.projects.insert(ContentProject(workspace_id=ws, title="p"))
+    deps = Deps(repos=repos, ingest=ingest, ai=_FakeAI())
+
+    env = _env("AnalyzeSource", actor_type="agent", source="mcp",
+               payload={"text": "外部 Agent 请求分析"})
+    env["workspaceId"] = ws
+    env["projectId"] = prj
+    res = await dispatch(env, deps)
+    assert res["ok"] is True, res.get("error")
+
+    task = c.execute("SELECT * FROM agent_tasks").fetchone()
+    assert task is not None, "外部 Agent 调用必须登记 AgentTask"
+    assert task["task_type"] == "AnalyzeSource"
+    assert task["initiator"].startswith("agent:")
+    assert task["state"] == "succeeded"
+
+    art = c.execute("SELECT * FROM agent_artifacts").fetchone()
+    assert art is not None, "外部产出必须登记 AgentArtifact"
+    # 验收标准的核心：来源 + 信任等级
+    assert art["trust_level"] == "external-unverified"
+    assert art["review_state"] == "pending_review"
+    assert art["agent_task_id"] == task["id"]
+    assert art["producer_agent_id"] == "conn_mcp"
+
+
+async def test_user_command_not_recorded_as_agent_activity() -> None:
+    """桌面用户自己的操作不应被记成外部 Agent 活动。"""
+    from worker.runtime.db.connection import in_memory
+    from worker.runtime.db.migrations import run_migrations
+    from worker.runtime.models import ContentProject, Workspace
+
+    c = in_memory()
+    run_migrations(c, _MIG_DIR)
+    repos = Repos(c)
+    ws = repos.workspaces.insert(Workspace(name="ws-u", root_path="/tmp/u"))
+    prj = repos.projects.insert(ContentProject(workspace_id=ws, title="p"))
+    deps = Deps(repos=repos, ingest=ingest, ai=_FakeAI())
+
+    env = _env("AnalyzeSource", actor_type="user", source="ui",
+               payload={"text": "用户自己分析"})
+    env["workspaceId"] = ws
+    env["projectId"] = prj
+    res = await dispatch(env, deps)
+    assert res["ok"] is True
+
+    assert c.execute("SELECT COUNT(*) n FROM agent_tasks").fetchone()["n"] == 0
+    assert c.execute("SELECT COUNT(*) n FROM agent_artifacts").fetchone()["n"] == 0

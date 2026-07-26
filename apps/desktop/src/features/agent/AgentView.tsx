@@ -15,8 +15,34 @@ interface AgentTask {
   created_at: string;
 }
 
+/**
+ * 信任等级中文名（PRD §10.4「分析和外部 Agent 结果显示来源及信任等级」）。
+ * 取值见 schemas/artifact-envelope.schema.json。
+ */
+const TRUST_LABELS: Record<string, string> = {
+  "trusted-local": "本地可信",
+  "trusted-remote": "远端可信",
+  "verified-external": "外部已验证",
+  "external-unverified": "外部未验证",
+  "generated-unverified": "生成未验证",
+  "human-reviewed": "人工已复核",
+};
+
+/** 未复核的外部产物用警示色，提醒用户先核对再采用 */
+function trustClass(level: string | null | undefined): string {
+  if (!level) return "warning";
+  if (level === "human-reviewed" || level.startsWith("trusted")) return "success";
+  if (level === "verified-external") return "ai";
+  return "warning";
+}
+
 interface AgentArtifact {
   id: string;
+  /** 信任等级（PRD-AGT-003 / §10.4） */
+  trust_level?: string | null;
+  review_state?: string | null;
+  producer_agent_id?: string | null;
+  artifact_type?: string | null;
   kind: string;
   produced_at: string;
 }
@@ -108,7 +134,19 @@ export function AgentView() {
           <ul className="agent-list">
             {artifacts.map((a) => (
               <li key={a.id} className="agent-item">
-                <span className="agent-kind">{a.kind}</span>
+                <span className="agent-kind">{a.artifact_type ?? a.kind}</span>
+                {/* PRD §10.4：外部产物必须显示来源与信任等级 */}
+                <span className={`status ${trustClass(a.trust_level)}`}>
+                  {TRUST_LABELS[a.trust_level ?? ""] ?? a.trust_level ?? "未知信任等级"}
+                </span>
+                {a.review_state && (
+                  <span className="agent-meta">
+                    {a.review_state === "pending_review" ? "待复核" : a.review_state}
+                  </span>
+                )}
+                {a.producer_agent_id && (
+                  <span className="agent-meta">来源 {a.producer_agent_id}</span>
+                )}
                 <span className="agent-meta">{a.id.slice(0, 8)}</span>
               </li>
             ))}

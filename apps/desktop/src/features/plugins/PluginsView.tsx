@@ -20,6 +20,14 @@ export function PluginsView() {
   const [error, setError] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [installing, setInstalling] = useState(false);
+  // PRD-PLG-002：待确认的安装（读到 manifest 权限后、真正安装前）
+  const [pendingInstall, setPendingInstall] = useState<{
+    path: string;
+    name: string;
+    version: string;
+    permissions: string[];
+    alreadyInstalled: boolean;
+  } | null>(null);
   const inTauri = isTauri();
 
   async function load() {
@@ -71,10 +79,13 @@ export function PluginsView() {
     }
   }
 
-  /** 选择含 manifest.json 的插件目录 → InstallPlugin → 刷新列表 */
-  async function installPlugin() {
+  /**
+   * PRD-PLG-002「安装前显示所有权限」：选目录 → PreviewPluginManifest
+   * 读取权限 → 展示确认卡 → 用户明确同意后才 InstallPlugin。
+   * 此前是选目录直接安装，权限在装完之后才显示。
+   */
+  async function pickPluginForInstall() {
     if (!inTauri || installing) return;
-    setInstalling(true);
     setError(null);
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
@@ -84,13 +95,45 @@ export function PluginsView() {
         title: "选择包含 manifest.json 的插件目录",
       });
       if (!dir || typeof dir !== "string") return;
-      const payload: InstallPluginPayload = { path: dir };
+      const env = buildEnvelope("PreviewPluginManifest", getWorkspaceId(), null, {
+        path: dir,
+      });
+      const res: CommandResult = await dispatchCommand(env);
+      if (!res.ok) {
+        setError(res.error ?? "读取插件 manifest 失败");
+        return;
+      }
+      const detail = (res.detail ?? {}) as {
+        manifest?: { id?: string; name?: string; version?: string };
+        permissions?: string[];
+        already_installed?: boolean;
+      };
+      setPendingInstall({
+        path: dir,
+        name: detail.manifest?.name ?? detail.manifest?.id ?? "未知插件",
+        version: detail.manifest?.version ?? "-",
+        permissions: detail.permissions ?? [],
+        alreadyInstalled: Boolean(detail.already_installed),
+      });
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  /** 用户在权限确认卡上点「同意并安装」后才真正落库 */
+  async function confirmInstall() {
+    if (!pendingInstall || installing) return;
+    setInstalling(true);
+    setError(null);
+    try {
+      const payload: InstallPluginPayload = { path: pendingInstall.path };
       const env = buildEnvelope("InstallPlugin", getWorkspaceId(), null, payload);
       const res: CommandResult = await dispatchCommand(env);
       if (!res.ok) {
         setError(res.error ?? "安装插件失败");
         return;
       }
+      setPendingInstall(null);
       await load();
     } catch (e) {
       setError(String(e));
@@ -114,7 +157,7 @@ export function PluginsView() {
           className="btn primary"
           disabled={!inTauri || installing}
           title={inTauri ? undefined : "安装插件需要在桌面应用中使用"}
-          onClick={() => void installPlugin()}
+          onClick={() => void pickPluginForInstall()}
           data-od-id="install-plugin"
         >
           {installing ? "安装中…" : "安装插件"}
@@ -128,6 +171,58 @@ export function PluginsView() {
           刷新
         </button>
       </div>
+
+      {/* PRD-PLG-002：安装前权限确认卡 —— 用户看到全部权限并明确同意后才安装 */}
+      {pendingInstall && (
+        <article className="panel" data-od-id="plugin-install-confirm">
+          <div className="panel-head">
+            <div>
+              <h2 className="panel-title">确认安装插件</h2>
+              <div className="panel-meta">
+                {pendingInstall.name} · v{pendingInstall.version}
+                {pendingInstall.alreadyInstalled && " · 将覆盖已安装的同 id 插件"}
+              </div>
+            </div>
+          </div>
+          <div className="panel-body">
+            <p className="panel-meta" style={{ marginTop: 0 }}>
+              该插件将获得以下权限：
+            </p>
+            {pendingInstall.permissions.length > 0 ? (
+              <ul className="plugin-permissions">
+                {pendingInstall.permissions.map((perm) => (
+                  <li key={perm} className="permission-badge">
+                    {perm}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="panel-meta">该插件未声明任何权限。</p>
+            )}
+            <p className="panel-meta mono" style={{ fontSize: 11 }}>
+              {pendingInstall.path}
+            </p>
+            <div className="inline-actions">
+              <button
+                type="button"
+                className="btn small primary"
+                disabled={installing}
+                onClick={() => void confirmInstall()}
+              >
+                {installing ? "安装中…" : "同意并安装"}
+              </button>
+              <button
+                type="button"
+                className="btn small ghost"
+                disabled={installing}
+                onClick={() => setPendingInstall(null)}
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </article>
+      )}
 
       {isBusy && <p className="feature-sub">加载中…</p>}
 

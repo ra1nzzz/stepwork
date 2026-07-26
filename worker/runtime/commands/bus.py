@@ -42,6 +42,8 @@ _ROUTES: dict[str, str] = {
     # W8: 插件 / Provenance / Agent / 诊断包（Layer 0 路由先行，handler 由各支线补齐）
     "ListPlugins": "worker.runtime.handlers.plugins",
     "GetPluginManifest": "worker.runtime.handlers.plugins",
+    # PRD-PLG-002：安装前预览权限（只读，不写库）
+    "PreviewPluginManifest": "worker.runtime.handlers.plugins",
     "InstallPlugin": "worker.runtime.handlers.plugins",
     "EnablePlugin": "worker.runtime.handlers.plugins",
     "DisablePlugin": "worker.runtime.handlers.plugins",
@@ -204,4 +206,16 @@ async def dispatch(raw: dict[str, Any], deps: Any) -> dict[str, Any]:
         return CommandResult(
             ok=False, commandId=env.commandId, error=f"internal: {exc}"
         ).model_dump()
+
+    # PRD-AGT-003：外部 Agent 的产出必须带来源与信任等级。集中在此登记，
+    # 避免逐个 handler 埋点漏掉；登记失败不影响业务结果。
+    if is_agent_caller(env):
+        conn = getattr(getattr(deps, "repos", None), "conn", None)
+        if conn is not None:
+            from worker.runtime.agent_record import record_agent_activity
+
+            record_agent_activity(
+                conn, env, artifact_ids=list(result.artifact_ids), ok=result.ok
+            )
+
     return result.model_dump()

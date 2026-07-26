@@ -294,3 +294,97 @@ def test_disable_plugin_then_core_command_still_works(tmp_path: Path) -> None:
         assert isinstance(res["detail"]["projects"], list)
     finally:
         conn.close()
+
+
+# ----- PRD-PLG-002：安装前显示所有权限 -----
+
+
+def test_preview_manifest_shows_permissions_without_installing(
+    tmp_path: Path,
+) -> None:
+    """预览只读取校验、不写库 —— 这是「安装前授权」环节的前提。
+
+    此前安装流是「选目录 → 直接 InstallPlugin → 刷新」，权限列表在**装完
+    之后**才展示，等于没有安装前确认。
+    """
+    conn, repos = _new_db(tmp_path)
+    try:
+        plugin_dir = tmp_path / "preview-plugin"
+        plugin_dir.mkdir()
+        (plugin_dir / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "id": "preview-plugin",
+                    "name": "预览插件",
+                    "version": "1.0.0",
+                    "apiVersion": "1.0",
+                    "permissions": ["read:project", "write:export"],
+                }
+            ),
+            encoding="utf-8",
+        )
+        deps = Deps(repos=repos)
+        res = _run(_env("PreviewPluginManifest", {"path": str(plugin_dir)}), deps)
+        assert res["ok"] is True, res.get("error")
+        assert res["detail"]["permissions"] == ["read:project", "write:export"]
+        assert res["detail"]["manifest"]["id"] == "preview-plugin"
+        assert res["detail"]["already_installed"] is False
+        # 关键：预览绝不写库
+        n = conn.execute("SELECT COUNT(*) n FROM installed_plugins").fetchone()["n"]
+        assert n == 0
+    finally:
+        conn.close()
+
+
+def test_preview_manifest_reports_already_installed(tmp_path: Path) -> None:
+    conn, repos = _new_db(tmp_path)
+    try:
+        plugin_dir = tmp_path / "installed-plugin"
+        plugin_dir.mkdir()
+        (plugin_dir / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "id": "installed-plugin",
+                    "name": "已装",
+                    "version": "1.0.0",
+                    "apiVersion": "1.0",
+                    "permissions": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        deps = Deps(repos=repos)
+        _run(_env("InstallPlugin", {"path": str(plugin_dir)}), deps)
+        res = _run(_env("PreviewPluginManifest", {"path": str(plugin_dir)}), deps)
+        assert res["ok"] is True
+        assert res["detail"]["already_installed"] is True
+    finally:
+        conn.close()
+
+
+def test_preview_manifest_rejects_incompatible_before_install(
+    tmp_path: Path,
+) -> None:
+    """不兼容插件在预览阶段就被拒，用户根本走不到安装。"""
+    conn, repos = _new_db(tmp_path)
+    try:
+        plugin_dir = tmp_path / "bad-preview"
+        plugin_dir.mkdir()
+        (plugin_dir / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "id": "bad-preview",
+                    "name": "不兼容",
+                    "version": "1.0.0",
+                    "apiVersion": "9.0",
+                    "permissions": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        deps = Deps(repos=repos)
+        res = _run(_env("PreviewPluginManifest", {"path": str(plugin_dir)}), deps)
+        assert res["ok"] is False
+        assert "INCOMPATIBLE_API_VERSION" in res["error"]
+    finally:
+        conn.close()

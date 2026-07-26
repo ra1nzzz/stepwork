@@ -165,6 +165,30 @@ def _load_manifest_from_dir(plugin_dir_str: str) -> dict[str, Any]:
 async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     """路由 ``ListPlugins`` / ``GetPluginManifest`` / ``InstallPlugin`` /
     ``EnablePlugin`` / ``DisablePlugin``。"""
+    if env.commandType == "PreviewPluginManifest":
+        # PRD-PLG-002「安装前显示所有权限」：只读取校验 manifest，不写库、
+        # 不安装。此前安装流是「选目录 → 直接 InstallPlugin」，权限列表在
+        # **装完之后**才显示，等于没有安装前授权环节。
+        payload = env.payload or {}
+        preview_dir = payload.get("path")
+        if not preview_dir or not isinstance(preview_dir, str):
+            raise DispatchError("INVALID_ARGUMENT", "missing path")
+        manifest = _load_manifest_from_dir(preview_dir)
+        permissions = manifest.get("permissions") or []
+        return CommandResult(
+            ok=True,
+            commandId=env.commandId,
+            detail={
+                "manifest": manifest,
+                "permissions": permissions,
+                "already_installed": deps.repos.conn.execute(
+                    "SELECT 1 FROM installed_plugins WHERE id=?",
+                    (str(manifest["id"]),),
+                ).fetchone()
+                is not None,
+            },
+        )
+
     if env.commandType == "InstallPlugin":
         payload = env.payload or {}
         plugin_dir = payload.get("path")
