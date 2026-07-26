@@ -7,7 +7,7 @@
  */
 
 import { create } from "zustand";
-import { buildEnvelope, dispatchCommand } from "@/lib/tauri";
+import { buildEnvelope, dispatchCommand, getWorkspaceId } from "@/lib/tauri";
 import type {
   JobProgressParams,
   JobStage,
@@ -15,7 +15,7 @@ import type {
   PersistedJob,
 } from "@/lib/types";
 
-const WORKSPACE = "ws-local";
+// 当前工作区由 getWorkspaceId() 解析（用户可在设置页切换）
 const DEFAULT_LIMIT = 50;
 
 interface JobEventsStoreState {
@@ -39,7 +39,7 @@ export const useJobEventsStore = create<JobEventsStoreState>((set, get) => ({
     if (get().isLoading) return;
     set({ isLoading: true });
     try {
-      const env = buildEnvelope("ListJobs", WORKSPACE, null, {
+      const env = buildEnvelope("ListJobs", getWorkspaceId(), null, {
         limit: DEFAULT_LIMIT,
         ...(payload ?? {}),
       });

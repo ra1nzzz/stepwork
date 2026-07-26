@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { buildEnvelope, dispatchCommand, isTauri } from "@/lib/tauri";
+import { buildEnvelope, dispatchCommand, getWorkspaceId, isTauri } from "@/lib/tauri";
 import { useViewStore } from "@/stores/useViewStore";
 import type { BrandProfile, SetProjectBrandProfilePayload } from "@/lib/types";
 
@@ -71,7 +71,7 @@ export function ProjectsView() {
     setIsLoading(true);
     setError(null);
     try {
-      const env = buildEnvelope("ListProjects", "ws-local", null, {});
+      const env = buildEnvelope("ListProjects", getWorkspaceId(), null, {});
       const res = await dispatchCommand(env);
       if (!res.ok) throw new Error(res.error ?? "LIST_PROJECTS_FAILED");
       const detail = (res.detail ?? {}) as { projects?: ProjectRow[] };
@@ -88,7 +88,7 @@ export function ProjectsView() {
     // 品牌档案列表（关联 select 的选项；后端未连接时静默保持空）
     void (async () => {
       try {
-        const env = buildEnvelope("ListBrandProfiles", "ws-local", null, {});
+        const env = buildEnvelope("ListBrandProfiles", getWorkspaceId(), null, {});
         const res = await dispatchCommand(env);
         if (!res.ok) return;
         const detail = (res.detail ?? {}) as { profiles?: BrandProfile[] };
@@ -108,7 +108,7 @@ export function ProjectsView() {
         projectId,
         profileId: profileId || null,
       };
-      const env = buildEnvelope("SetProjectBrandProfile", "ws-local", projectId, payload);
+      const env = buildEnvelope("SetProjectBrandProfile", getWorkspaceId(), projectId, payload);
       const res = await dispatchCommand(env);
       if (!res.ok) throw new Error(res.error ?? "SET_BRAND_PROFILE_FAILED");
       setRows((prev) =>
@@ -128,7 +128,7 @@ export function ProjectsView() {
     setExporting(true);
     setNotice(null);
     try {
-      const env = buildEnvelope("ExportProject", "ws-local", null, {
+      const env = buildEnvelope("ExportProject", getWorkspaceId(), null, {
         projectId: selectedId,
       });
       const res = await dispatchCommand(env);
@@ -154,7 +154,7 @@ export function ProjectsView() {
         filters: [{ name: "项目包", extensions: ["zip"] }],
       });
       if (!bundlePath || typeof bundlePath !== "string") return;
-      const env = buildEnvelope("ImportProject", "ws-local", null, {
+      const env = buildEnvelope("ImportProject", getWorkspaceId(), null, {
         bundlePath,
       });
       const res = await dispatchCommand(env);
@@ -181,7 +181,7 @@ export function ProjectsView() {
     setError(null);
     try {
       const title = `未命名项目 ${new Date().toLocaleString("zh-CN")}`;
-      const env = buildEnvelope("CreateProject", "ws-local", null, { title });
+      const env = buildEnvelope("CreateProject", getWorkspaceId(), null, { title });
       const res = await dispatchCommand(env);
       if (!res.ok) throw new Error(res.error ?? "CREATE_PROJECT_FAILED");
       const detail = (res.detail ?? {}) as { project?: { id?: string; title?: string } };

@@ -20,7 +20,7 @@
  */
 
 import { create } from "zustand";
-import { buildEnvelope, dispatchCommand } from "@/lib/tauri";
+import { buildEnvelope, dispatchCommand, getWorkspaceId } from "@/lib/tauri";
 import type {
   ImportSourcePayload,
   ImportStatus,
@@ -29,7 +29,7 @@ import type {
 } from "@/lib/types";
 import { useViewStore } from "@/stores/useViewStore";
 
-const WORKSPACE = "ws-local";
+// 当前工作区由 getWorkspaceId() 解析（用户可在设置页切换）
 
 function kindFromMime(mime: string): string {
   if (mime.startsWith("audio/")) return "audio";
@@ -79,7 +79,7 @@ async function ensureProjectId(): Promise<string> {
   const existing = useViewStore.getState().selectedProjectId;
   if (existing) return existing;
   const title = `草稿项目 ${new Date().toLocaleString("zh-CN")}`;
-  const env = buildEnvelope("CreateProject", WORKSPACE, null, { title });
+  const env = buildEnvelope("CreateProject", getWorkspaceId(), null, { title });
   const res = await dispatchCommand(env);
   if (!res.ok) throw new Error(res.error ?? "CREATE_PROJECT_FAILED");
   const detail = (res.detail ?? {}) as Record<string, unknown>;
@@ -129,7 +129,7 @@ export const useImportStore = create<ImportStoreState>((set, get) => ({
           },
           meta,
         );
-        const env = buildEnvelope("ImportSource", WORKSPACE, projectId, payload);
+        const env = buildEnvelope("ImportSource", getWorkspaceId(), projectId, payload);
         const res = await dispatchCommand(env);
         if (!res.ok) {
           throw new Error(res.error ?? "IMPORT_FAILED");
@@ -175,7 +175,7 @@ export const useImportStore = create<ImportStoreState>((set, get) => ({
       const payload = applySourceMeta({ url: trimmed }, meta);
       // 来源链接缺省时以下载链接本身作为来源记录
       if (!payload.original_url) payload.original_url = trimmed;
-      const env = buildEnvelope("ImportSource", WORKSPACE, projectId, payload);
+      const env = buildEnvelope("ImportSource", getWorkspaceId(), projectId, payload);
       const res = await dispatchCommand(env);
       if (!res.ok) {
         const err = res.error ?? "DOWNLOAD_FAILED";
@@ -221,7 +221,7 @@ export const useImportStore = create<ImportStoreState>((set, get) => ({
     // 通知后端删除 source_assets 记录（失败静默忽略，前端仍清空）
     for (const a of assets) {
       try {
-        const env = buildEnvelope("DeleteAsset", WORKSPACE, a.project_id, {
+        const env = buildEnvelope("DeleteAsset", getWorkspaceId(), a.project_id, {
           assetId: a.id,
         });
         await dispatchCommand(env);

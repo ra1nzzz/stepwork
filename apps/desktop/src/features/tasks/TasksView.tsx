@@ -252,7 +252,7 @@ export function TasksView() {
     setBusyDiag(true);
     setError(null);
     try {
-      const env = buildEnvelope("ExportDiagnosticsBundle", "ws-local", null, {
+      const env = buildEnvelope("ExportDiagnosticsBundle", getWorkspaceId(), null, {
         desensitize: true,
       });
       const res = await dispatchCommand(env);

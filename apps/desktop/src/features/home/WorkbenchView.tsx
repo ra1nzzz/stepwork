@@ -9,13 +9,12 @@
  */
 
 import { useEffect, useState } from "react";
-import { buildEnvelope, dispatchCommand } from "@/lib/tauri";
+import { buildEnvelope, dispatchCommand, getWorkspaceId } from "@/lib/tauri";
 import { useViewStore } from "@/stores/useViewStore";
 import { useTranscriptStore } from "@/stores/useTranscriptStore";
 import { useRenderStore } from "@/stores/useRenderStore";
 import { useImportStore } from "@/stores/useImportStore";
 import { useJobEventsStore } from "@/stores/useJobEventsStore";
-import { getWorkspaceId } from "@/lib/tauri";
 
 interface ProjectRow {
   id: string;
@@ -63,7 +62,7 @@ export function WorkbenchView() {
   useEffect(() => {
     void (async () => {
       try {
-        const env = buildEnvelope("ListProjects", "ws-local", null, {});
+        const env = buildEnvelope("ListProjects", getWorkspaceId(), null, {});
         const res = await dispatchCommand(env);
         if (!res.ok) return;
         const detail = (res.detail ?? {}) as { projects?: ProjectRow[] };
@@ -128,7 +127,7 @@ export function WorkbenchView() {
     setLoadingProjects(true);
     void (async () => {
       try {
-        const env = buildEnvelope("ListProjects", "ws-local", null, {});
+        const env = buildEnvelope("ListProjects", getWorkspaceId(), null, {});
         const res = await dispatchCommand(env);
         if (!res.ok) return;
         const detail = (res.detail ?? {}) as { projects?: ProjectRow[] };

@@ -13,7 +13,7 @@
  */
 
 import { create } from "zustand";
-import { buildEnvelope, dispatchCommand } from "@/lib/tauri";
+import { buildEnvelope, dispatchCommand, getWorkspaceId } from "@/lib/tauri";
 import { useViewStore } from "@/stores/useViewStore";
 import type {
   SimilarityWarning,
@@ -26,7 +26,7 @@ import type {
   ContentVersionDetail,
 } from "@/lib/types";
 
-const WORKSPACE = "ws-local";
+// 当前工作区由 getWorkspaceId() 解析（用户可在设置页切换）
 
 /** 当前选中项目 id（envelope.projectId）；确实没有时才回落 null */
 const currentProjectId = (): string | null =>
@@ -147,7 +147,7 @@ export const useScriptStore = create<ScriptStoreState>((set, get) => ({
       };
       const env = buildEnvelope(
         "GenerateTopic",
-        WORKSPACE,
+        getWorkspaceId(),
         currentProjectId(),
         payload,
       );
@@ -189,7 +189,7 @@ export const useScriptStore = create<ScriptStoreState>((set, get) => ({
       };
       const env = buildEnvelope(
         "GenerateScript",
-        WORKSPACE,
+        getWorkspaceId(),
         currentProjectId(),
         payload,
       );
@@ -226,7 +226,7 @@ export const useScriptStore = create<ScriptStoreState>((set, get) => ({
     };
     const env = buildEnvelope(
       "SaveScript",
-      WORKSPACE,
+      getWorkspaceId(),
       currentProjectId(),
       payload,
     );
@@ -257,7 +257,7 @@ export const useScriptStore = create<ScriptStoreState>((set, get) => ({
     }
     set({ isBusy: true, error: null });
     try {
-      const env = buildEnvelope("EditParagraph", WORKSPACE, currentProjectId(), {
+      const env = buildEnvelope("EditParagraph", getWorkspaceId(), currentProjectId(), {
         version_id: versionId,
         paragraph_index: index,
         operation,
@@ -290,7 +290,7 @@ export const useScriptStore = create<ScriptStoreState>((set, get) => ({
     const projectId = currentProjectId();
     if (!projectId) return;
     try {
-      const env = buildEnvelope("ListContentVersions", WORKSPACE, projectId, {
+      const env = buildEnvelope("ListContentVersions", getWorkspaceId(), projectId, {
         projectId,
         contentType: "script",
         limit: 20,
@@ -326,7 +326,7 @@ export const useScriptStore = create<ScriptStoreState>((set, get) => ({
 
   loadVersionContent: async (versionId) => {
     try {
-      const env = buildEnvelope("GetContentVersion", WORKSPACE, currentProjectId(), {
+      const env = buildEnvelope("GetContentVersion", getWorkspaceId(), currentProjectId(), {
         versionId,
       });
       const res = await dispatchCommand(env);

@@ -13,7 +13,7 @@
  */
 
 import { create } from "zustand";
-import { buildEnvelope, dispatchCommand } from "@/lib/tauri";
+import { buildEnvelope, dispatchCommand, getWorkspaceId } from "@/lib/tauri";
 import { useSettingsStore } from "@/stores/useSettingsStore";
 import { useViewStore } from "@/stores/useViewStore";
 import type {
@@ -26,7 +26,7 @@ import type {
   SaveAnalysisPayload,
 } from "@/lib/types";
 
-const WORKSPACE = "ws-local";
+// 当前工作区由 getWorkspaceId() 解析（用户可在设置页切换）
 
 /** 当前选中项目 id（envelope.projectId）；确实没有时才回落 null */
 const currentProjectId = (): string | null =>
@@ -103,7 +103,7 @@ export function parseReportData(raw: string): AnalysisReportData | null {
 /** 经 GetContentVersion 拉取版本全文（失败返回 null，不阻塞主流程） */
 async function fetchVersionContent(versionId: string): Promise<string | null> {
   try {
-    const env = buildEnvelope("GetContentVersion", WORKSPACE, currentProjectId(), {
+    const env = buildEnvelope("GetContentVersion", getWorkspaceId(), currentProjectId(), {
       versionId,
     });
     const res = await dispatchCommand(env);
@@ -179,7 +179,7 @@ export const useAnalysisStore = create<AnalysisStoreState>((set, get) => ({
       }
       const env = buildEnvelope(
         "AnalyzeSource",
-        WORKSPACE,
+        getWorkspaceId(),
         currentProjectId(),
         payload,
       );
@@ -232,7 +232,7 @@ export const useAnalysisStore = create<AnalysisStoreState>((set, get) => ({
         parentVersionId: latest.versionId,
       };
       if (projectId) payload.projectId = projectId;
-      const env = buildEnvelope("SaveAnalysis", WORKSPACE, projectId, payload);
+      const env = buildEnvelope("SaveAnalysis", getWorkspaceId(), projectId, payload);
       const res = await dispatchCommand(env);
       if (!res.ok) throw new Error(res.error ?? "SAVE_ANALYSIS_FAILED");
       const detail = (res.detail ?? {}) as { version_id?: string };

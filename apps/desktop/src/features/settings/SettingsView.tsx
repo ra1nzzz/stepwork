@@ -18,6 +18,7 @@ import {
   dispatchCommand,
   getConfig,
   getWorkspaceId,
+  setWorkspaceId,
   updateConfig,
 } from "@/lib/tauri";
 import { TagListInput } from "@/components/TagListInput";
@@ -154,7 +155,7 @@ export default function SettingsView() {
     <div className="settings-view">
       <section className="page-head">
         <div>
-          <p className="eyebrow">WORKSPACE SETTINGS</p>
+          <p className="eyebrow">getWorkspaceId() SETTINGS</p>
           <h1>品牌、模型与数据边界</h1>
           <p className="page-subtitle">
             BrandProfile 会约束角度和脚本生成；Provider 与数据保留策略在任务开始前始终可见。
@@ -618,6 +619,15 @@ function WorkspacesPanel() {
   const [newName, setNewName] = useState("");
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  // PRD-WS-001：当前工作区（持久化在本地，切换后全局信封随之改变）
+  const [currentWs, setCurrentWs] = useState(getWorkspaceId());
+
+  function handleSwitch(workspaceId: string) {
+    setWorkspaceId(workspaceId);
+    setCurrentWs(workspaceId);
+    // 切换工作区等于换了整个数据上下文，直接重载以清空各 store 的旧数据
+    globalThis.location?.reload();
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -695,6 +705,11 @@ function WorkspacesPanel() {
         </p>
       )}
 
+      <p className="form-help">
+        当前工作区：<span className="mono">{currentWs}</span>
+        （切换后新建的项目、任务与配置都归属该工作区）
+      </p>
+
       {loading && <p className="panel-meta">加载工作区…</p>}
       {!loading && rows.length === 0 && (
         <p className="panel-meta">尚无工作区记录（已归档的工作区不在列表中）。</p>
@@ -754,11 +769,24 @@ function WorkspacesPanel() {
                     >
                       重命名
                     </button>
+                    {/* PRD-WS-001：此前能建能改名，却无法把新工作区设为当前
+                        上下文（getWorkspaceId 恒返回 ws-local）——功能是死的 */}
+                    <button
+                      className={`btn small ${currentWs === w.id ? "" : "primary"}`}
+                      type="button"
+                      onClick={() => handleSwitch(w.id)}
+                      disabled={busy || currentWs === w.id}
+                    >
+                      {currentWs === w.id ? "当前工作区" : "切换到此工作区"}
+                    </button>
                     <button
                       className="btn small ghost"
                       type="button"
                       onClick={() => handleArchive(w.id)}
-                      disabled={busy}
+                      disabled={busy || currentWs === w.id}
+                      title={
+                        currentWs === w.id ? "不能归档当前工作区" : undefined
+                      }
                     >
                       归档
                     </button>

@@ -14,6 +14,15 @@
     # lib/tauri.ts 会把 dispatchCommand / getWorkerHealth 改为请求本服务
 
 仅用于本地开发/演示，不要用于生产。
+
+安全（与 PRD §9.1 威胁模型对齐）：本服务暴露的是**完整 Command Bus**
+（含 DeleteAsset / InstallPlugin / UpdateConfig 等）。CORS 只挡浏览器，
+挡不住本机任何进程或本地 Agent —— 而「本机运行的外部 Agent」正是 §9.1
+的威胁模型。故要求 ``Authorization: Bearer <token>``：
+
+- token 每次启动随机生成并打印，前端用 ``VITE_DEV_BRIDGE_TOKEN`` 传入；
+- 也可用 ``STEPWORK_DEV_BRIDGE_TOKEN`` 固定，便于脚本复用；
+- 显式设 ``STEPWORK_DEV_BRIDGE_NO_AUTH=1`` 才放行匿名（仅限确知安全的场景）。
 """
 
 from __future__ import annotations
@@ -22,6 +31,7 @@ import asyncio
 import json
 import os
 import platform
+import secrets
 import sqlite3
 import tempfile
 import threading
@@ -34,6 +44,25 @@ from worker.runtime.bootstrap import MIGRATIONS_DIR
 from worker.runtime.db.migrations import run_migrations
 from worker.runtime.handlers import commands
 from worker.runtime.state import WorkerState
+
+# 访问令牌：优先取环境变量（便于脚本/前端复用），否则每次启动随机生成。
+# 空值不视为「关闭鉴权」——关闭必须显式设 STEPWORK_DEV_BRIDGE_NO_AUTH=1。
+AUTH_TOKEN: str = os.environ.get("STEPWORK_DEV_BRIDGE_TOKEN") or secrets.token_urlsafe(
+    24
+)
+AUTH_DISABLED: bool = os.environ.get("STEPWORK_DEV_BRIDGE_NO_AUTH") == "1"
+
+
+def _authorized(handler: Any) -> bool:
+    """校验 ``Authorization: Bearer <token>``（常数时间比较，防时序侧信道）。"""
+    if AUTH_DISABLED:
+        return True
+    header = handler.headers.get("Authorization", "") or ""
+    prefix = "Bearer "
+    if not header.startswith(prefix):
+        return False
+    return secrets.compare_digest(header[len(prefix) :].strip(), AUTH_TOKEN)
+
 
 # 单一 WorkerState（含已初始化的 db_conn），全程复用。
 STATE = WorkerState()
@@ -119,7 +148,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Access-Control-Allow-Origin", _cors_origin(self))
         self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         # 反射具体 Origin（非 ``*``）时必须带 Vary: Origin，避免代理误缓存。
         self.send_header("Vary", "Origin")
         self.send_header("Content-Length", str(len(body)))
@@ -142,6 +171,10 @@ class _Handler(BaseHTTPRequestHandler):
         if urlparse(self.path).path != "/dispatch":
             self._send(404, {"error": "not found"})
             return
+        # 本桥直通完整 Command Bus，必须鉴权（见模块 docstring 的安全说明）
+        if not _authorized(self):
+            self._send(401, {"ok": False, "error": "unauthorized: missing/invalid token"})
+            return
         try:
             length = int(self.headers.get("Content-Length", "0") or "0")
             raw = self.rfile.read(length) if length else b"{}"
@@ -162,6 +195,11 @@ def main() -> None:
     port = int(os.environ.get("STEPWORK_DEV_BRIDGE_PORT", "8787"))
     server = ThreadingHTTPServer(("127.0.0.1", port), _Handler)
     print(f"[dev_bridge] listening on http://127.0.0.1:{port}  (db={_DB_PATH})")
+    if AUTH_DISABLED:
+        print("[dev_bridge] !! AUTH DISABLED (STEPWORK_DEV_BRIDGE_NO_AUTH=1)")
+    else:
+        print(f"[dev_bridge] token: {AUTH_TOKEN}")
+        print("[dev_bridge] 前端：VITE_DEV_BRIDGE_TOKEN=<token> npm run dev")
     print("[dev_bridge] POST /dispatch  {CommandEnvelope} -> CommandResult")
     print("[dev_bridge] GET  /health")
     try:

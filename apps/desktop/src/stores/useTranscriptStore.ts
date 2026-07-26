@@ -9,11 +9,11 @@
  */
 
 import { create } from "zustand";
-import { buildEnvelope, dispatchCommand } from "@/lib/tauri";
+import { buildEnvelope, dispatchCommand, getWorkspaceId } from "@/lib/tauri";
 import { useViewStore } from "@/stores/useViewStore";
 import type { JobProgressParams, TranscriptSegment } from "@/lib/types";
 
-const WORKSPACE = "ws-local";
+// 当前工作区由 getWorkspaceId() 解析（用户可在设置页切换）
 
 /** 当前选中项目 id（envelope.projectId）；确实没有时才回落 null */
 const currentProjectId = (): string | null =>
@@ -79,7 +79,7 @@ export const useTranscriptStore = create<TranscriptStoreState>((set, get) => ({
     set({ jobs: [...get().jobs, job], isBusy: true, error: null });
     try {
       set({ jobs: patch(get().jobs, job.id, { status: "running", progress: 0.1 }) });
-      const env = buildEnvelope("TranscribeSource", WORKSPACE, currentProjectId(), {
+      const env = buildEnvelope("TranscribeSource", getWorkspaceId(), currentProjectId(), {
         asset_id: assetId,
         opts: opts ?? {},
       });
@@ -117,7 +117,7 @@ export const useTranscriptStore = create<TranscriptStoreState>((set, get) => ({
     // 通知后端 CancelJob（如果有 jobId）
     if (job.jobId) {
       try {
-        const env = buildEnvelope("CancelJob", WORKSPACE, currentProjectId(), {
+        const env = buildEnvelope("CancelJob", getWorkspaceId(), currentProjectId(), {
           job_id: job.jobId,
         });
         await dispatchCommand(env);

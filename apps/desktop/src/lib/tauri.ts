@@ -22,6 +22,24 @@ export const isTauri = (): boolean =>
 /* ===== Dev Bridge 自动探测 ===== */
 
 const DEV_BRIDGE_EXPLICIT = import.meta.env.VITE_DEV_BRIDGE === "1";
+
+/**
+ * dev_bridge 访问令牌（VITE_DEV_BRIDGE_TOKEN）。
+ *
+ * 桥直通完整 Command Bus，仅靠 CORS 挡不住本机进程/本地 Agent
+ * （正是 PRD §9.1 的威胁模型），故服务端要求 Bearer 鉴权。
+ * 令牌由 `python worker/dev_bridge.py` 启动时打印。
+ */
+const DEV_BRIDGE_TOKEN =
+  (import.meta.env.VITE_DEV_BRIDGE_TOKEN as string | undefined) ?? "";
+
+/** 带上令牌的请求头（未配置令牌时退化为普通请求，由服务端拒绝） */
+function bridgeHeaders(extra?: Record<string, string>): Record<string, string> {
+  return {
+    ...(extra ?? {}),
+    ...(DEV_BRIDGE_TOKEN ? { Authorization: `Bearer ${DEV_BRIDGE_TOKEN}` } : {}),
+  };
+}
 const DEV_BRIDGE_URL =
   (import.meta.env.VITE_DEV_BRIDGE_URL as string | undefined) ??
   "http://127.0.0.1:8787";
@@ -145,11 +163,39 @@ export async function getAppInfo(): Promise<AppInfo> {
 
 /* ===== Command Bus 桥接 ===== */
 
-/** 浏览器环境的默认工作区 id */
+/** 默认工作区 id（首次启动、或本地未选择时使用） */
 export const DEFAULT_WORKSPACE_ID = "ws-local";
 
+/** 当前工作区持久化键（localStorage，跨重启保留用户选择） */
+const WORKSPACE_STORAGE_KEY = "stepwork.currentWorkspaceId";
+
+/**
+ * 当前工作区 id。
+ *
+ * 此前这里恒返回 "ws-local"，导致设置页能创建/改名/归档工作区，
+ * 但新建的工作区**永远无法成为当前上下文** —— 后端 Workspace 命令齐备，
+ * 产品语义上却是死功能。现改为读取用户选择（持久化到 localStorage），
+ * 缺省仍回落 ws-local，保持既有行为兼容。
+ */
 export function getWorkspaceId(): string {
-  return DEFAULT_WORKSPACE_ID;
+  try {
+    return (
+      globalThis.localStorage?.getItem(WORKSPACE_STORAGE_KEY) ||
+      DEFAULT_WORKSPACE_ID
+    );
+  } catch {
+    // 无 localStorage（如某些沙箱环境）：回落默认
+    return DEFAULT_WORKSPACE_ID;
+  }
+}
+
+/** 切换当前工作区（写入本地，供后续所有信封使用） */
+export function setWorkspaceId(workspaceId: string): void {
+  try {
+    globalThis.localStorage?.setItem(WORKSPACE_STORAGE_KEY, workspaceId);
+  } catch {
+    /* 无 localStorage 时静默降级：本次会话内仍可用（调用方自行持有状态） */
+  }
 }
 
 function uuid(): string {
@@ -205,7 +251,7 @@ export async function dispatchCommand(
     try {
       const res = await fetch(`${DEV_BRIDGE_URL}/dispatch`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: bridgeHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(envelope),
       });
       if (!res.ok) {

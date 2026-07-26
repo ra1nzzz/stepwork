@@ -11,7 +11,7 @@
  */
 
 import { create } from "zustand";
-import { buildEnvelope, dispatchCommand } from "@/lib/tauri";
+import { buildEnvelope, dispatchCommand, getWorkspaceId } from "@/lib/tauri";
 import { useViewStore } from "@/stores/useViewStore";
 import type {
   VideoDraftMeta,
@@ -22,7 +22,7 @@ import type {
   ProviderInvocation,
 } from "@/lib/types";
 
-const WORKSPACE = "ws-local";
+// 当前工作区由 getWorkspaceId() 解析（用户可在设置页切换）
 
 /** 当前选中项目 id（envelope.projectId）；确实没有时才回落 null */
 const currentProjectId = (): string | null =>
@@ -137,7 +137,7 @@ export const useRenderStore = create<RenderStoreState>((set, get) => ({
       };
       const env = buildEnvelope(
         "CreateRenderJob",
-        WORKSPACE,
+        getWorkspaceId(),
         currentProjectId(),
         payload,
       );
@@ -195,7 +195,7 @@ export const useRenderStore = create<RenderStoreState>((set, get) => ({
     const payload: CancelJobPayload = { job_id: id };
     const env = buildEnvelope(
       "CancelJob",
-      WORKSPACE,
+      getWorkspaceId(),
       currentProjectId(),
       payload,
     );
