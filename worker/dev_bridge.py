@@ -162,6 +162,10 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(204, {})
 
     def do_GET(self) -> None:
+        # /health 有意**不鉴权**：它是存活探针，前端要在拿到 token 之前用它
+        # 判断桥是否在跑（否则未配 token 时会静默回落 mock，难以排查）。
+        # 返回内容仅存活信息（pid / 运行时版本），不含任何项目数据或密钥；
+        # 真正的能力面 /dispatch 才是鉴权边界。
         if urlparse(self.path).path == "/health":
             self._send(200, _health())
             return
