@@ -20,10 +20,7 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import uuid
-from datetime import UTC, datetime
 from typing import Any
 
 from worker.runtime.agents.acp_client import (
@@ -31,8 +28,18 @@ from worker.runtime.agents.acp_client import (
     AcpSession,
     summarize_updates,
 )
+from worker.runtime.agents.channel import (
+    MAX_RESULT_CHARS,
+    REVIEW_STATE,
+    TRUST_LEVEL,
+    insert_connection,
+    load_connection,
+    record_call,
+    require,
+)
 from worker.runtime.cleanup import assets_root
 from worker.runtime.commands.bus import DispatchError
+from worker.runtime.db.rows import now_iso, row_to_dict
 from worker.runtime.deps import Deps
 from worker.runtime.handlers import approvals
 from worker.runtime.models import CommandEnvelope, CommandResult
@@ -40,50 +47,10 @@ from worker.runtime.models import CommandEnvelope, CommandResult
 #: 本地 ACP Agent 的 protocol 值
 PROTOCOL = "acp-client"
 
-TRUST_LEVEL = "external-unverified"
-REVIEW_STATE = "pending_review"
-
-_MAX_RESULT_CHARS = 20000
 
 #: 活跃会话：session_id → AcpSession。会话是有状态的长连接，必须常驻
 #: （与 MCP 的短连接相反）—— 每次 prompt 重开进程等于每次从零开始。
 _SESSIONS: dict[str, AcpSession] = {}
-
-
-def _now() -> str:
-    return datetime.now(UTC).isoformat()
-
-
-def _row_to_dict(row: Any) -> dict[str, Any]:
-    return {key: row[key] for key in row.keys()}
-
-
-def _require(payload: dict[str, Any], *names: str) -> str:
-    for name in names:
-        value = payload.get(name)
-        if value not in (None, ""):
-            return str(value)
-    raise DispatchError("INVALID_ARGUMENT", f"{names[0]} required")
-
-
-def _load_connection(deps: Deps, conn_id: str) -> dict[str, Any]:
-    row = deps.repos.conn.execute(
-        "SELECT * FROM agent_connections WHERE id=?", (conn_id,)
-    ).fetchone()
-    if row is None:
-        raise DispatchError("NOT_FOUND", f"connection {conn_id!r} not found")
-    record = _row_to_dict(row)
-    if record.get("protocol") != PROTOCOL:
-        raise DispatchError(
-            "INVALID_ARGUMENT",
-            f"connection {conn_id!r} 不是本地 ACP Agent"
-            f"（protocol={record.get('protocol')!r}）",
-        )
-    if record.get("status") != "active":
-        raise DispatchError(
-            "CONNECTION_DISABLED", f"connection {conn_id!r} 已停用，请先在连接页启用"
-        )
-    return record
 
 
 def _project_root(project_id: str) -> str:
@@ -146,73 +113,10 @@ def _record_session(
         "INSERT INTO agent_sessions "
         "(id, agent_connection_id, project_id, external_session_id, status, started_at, ended_at) "
         "VALUES (?,?,?,?,?,?,NULL)",
-        (session_row_id, conn_id, project_id, external_id, "active", _now()),
+        (session_row_id, conn_id, project_id, external_id, "active", now_iso()),
     )
     deps.repos.conn.commit()
     return session_row_id
-
-
-def _record_prompt(
-    deps: Deps,
-    env: CommandEnvelope,
-    *,
-    conn_id: str,
-    project_id: str | None,
-    text: str,
-    ok: bool,
-) -> str:
-    """一轮 prompt → AgentTask（+ Artifact），信任等级同其它外部来源。"""
-    db = deps.repos.conn
-    now = _now()
-    task_id = f"atask_{uuid.uuid4().hex}"
-    actor = env.actor or {}
-    db.execute(
-        "INSERT INTO agent_tasks "
-        "(id, initiator, target_agent_id, session_id, project_id, task_type, "
-        "input_artifact_ids, state, progress, cost, timeout_at, "
-        "correlation_id, created_at, updated_at) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (
-            task_id,
-            f"{actor.get('type', 'desktop')}:{actor.get('id', 'ui')}",
-            conn_id,
-            None,
-            project_id,
-            "acp:prompt",
-            "[]",
-            "succeeded" if ok else "failed",
-            1.0 if ok else 0.0,
-            None,
-            None,
-            env.commandId,
-            now,
-            now,
-        ),
-    )
-    if ok and project_id:
-        db.execute(
-            "INSERT INTO agent_artifacts "
-            "(id, project_id, agent_task_id, artifact_type, schema_version, "
-            "producer_agent_id, content_uri_or_json, source_refs, "
-            "trust_level, content_hash, review_state, created_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            (
-                f"aart_{uuid.uuid4().hex}",
-                project_id,
-                task_id,
-                "acp:prompt",
-                "1",
-                conn_id,
-                json.dumps({"text": text}, ensure_ascii=False),
-                json.dumps([conn_id]),
-                TRUST_LEVEL,
-                hashlib.sha256(text.encode("utf-8")).hexdigest(),
-                REVIEW_STATE,
-                now,
-            ),
-        )
-    db.commit()
-    return task_id
 
 
 def _argv(command: str) -> list[str]:
@@ -225,7 +129,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     payload = env.payload or {}
 
     if env.commandType == "AddAcpAgent":
-        command = _require(payload, "command")
+        command = require(payload, "command")
         # 登记即探测：握手不通就不落库（与 AddMcpServer 同一取舍）
         probe = AcpSession(_argv(command))
         try:
@@ -236,24 +140,13 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             await probe.close()
 
         conn_id = f"acpc_{uuid.uuid4().hex[:12]}"
-        now = _now()
-        deps.repos.conn.execute(
-            "INSERT INTO agent_connections "
-            "(id, protocol, endpoint_or_command, local_or_remote, trust_level, "
-            "auth_ref, status, capabilities, created_at, updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (
-                conn_id,
-                PROTOCOL,
-                command,
-                "local",
-                TRUST_LEVEL,
-                None,
-                "active",
-                json.dumps(info.get("agentCapabilities") or {}, ensure_ascii=False),
-                now,
-                now,
-            ),
+        insert_connection(
+            deps,
+            conn_id=conn_id,
+            protocol=PROTOCOL,
+            endpoint=command,
+            local_or_remote="local",
+            capabilities=info.get("agentCapabilities") or {},
         )
         deps.repos.conn.commit()
         return CommandResult(
@@ -263,9 +156,9 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         )
 
     if env.commandType == "StartAcpSession":
-        conn_id = _require(payload, "connectionId", "connection_id")
-        project_id = _require(payload, "projectId", "project_id")
-        record = _load_connection(deps, conn_id)
+        conn_id = require(payload, "connectionId", "connection_id")
+        project_id = require(payload, "projectId", "project_id")
+        record = load_connection(deps, conn_id, protocol=PROTOCOL, label="本地 ACP Agent")
 
         root = _project_root(project_id)
         session_row_id = f"asess_{uuid.uuid4().hex}"
@@ -299,8 +192,8 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         )
 
     if env.commandType == "SendAcpPrompt":
-        session_id = _require(payload, "sessionId", "session_id")
-        text = _require(payload, "text")
+        session_id = require(payload, "sessionId", "session_id")
+        text = require(payload, "text")
         live = _SESSIONS.get(session_id)
         if live is None:
             raise DispatchError(
@@ -316,15 +209,17 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         try:
             result = await live.prompt(text)
         except AcpClientError as e:
-            _record_prompt(
-                deps, env, conn_id=conn_id, project_id=prompt_project_id, text="", ok=False
+            record_call(
+                deps, env, conn_id=conn_id, task_type="acp:prompt",
+                text="", ok=False, project_id=prompt_project_id,
             )
             raise DispatchError(e.code, e.message) from e
 
         new_updates = live.updates[before:]
-        streamed = summarize_updates(new_updates)[:_MAX_RESULT_CHARS]
-        task_id = _record_prompt(
-            deps, env, conn_id=conn_id, project_id=prompt_project_id, text=streamed, ok=True
+        streamed = summarize_updates(new_updates)[:MAX_RESULT_CHARS]
+        task_id = record_call(
+            deps, env, conn_id=conn_id, task_type="acp:prompt",
+            text=streamed, ok=True, project_id=prompt_project_id,
         )
         pending = deps.repos.conn.execute(
             "SELECT COUNT(*) n FROM approval_requests WHERE status='pending' AND actor=?",
@@ -346,13 +241,13 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         )
 
     if env.commandType == "EndAcpSession":
-        session_id = _require(payload, "sessionId", "session_id")
+        session_id = require(payload, "sessionId", "session_id")
         ending = _SESSIONS.pop(session_id, None)
         if ending is not None:
             await ending.close()
         deps.repos.conn.execute(
             "UPDATE agent_sessions SET status=?, ended_at=? WHERE id=?",
-            ("ended", _now(), session_id),
+            ("ended", now_iso(), session_id),
         )
         deps.repos.conn.commit()
         return CommandResult(
@@ -363,7 +258,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         rows = deps.repos.conn.execute(
             "SELECT * FROM agent_sessions ORDER BY started_at DESC"
         ).fetchall()
-        sessions = [_row_to_dict(r) for r in rows]
+        sessions = [row_to_dict(r) for r in rows]
         for item in sessions:
             # 库里 active 但进程已没了（worker 重启过）要如实标出
             item["live"] = item["id"] in _SESSIONS

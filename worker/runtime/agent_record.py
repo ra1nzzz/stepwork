@@ -28,15 +28,15 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from worker.runtime.agents.channel import REVIEW_STATE, TRUST_LEVEL
 from worker.runtime.models import CommandEnvelope
 
 logger = logging.getLogger("worker.runtime")
 
-#: 外部 Agent 产出的默认信任等级（未经人工复核）
-DEFAULT_TRUST_LEVEL = "external-unverified"
-
-#: 复核状态初值（UI 复核后可升级为 human-reviewed）
-DEFAULT_REVIEW_STATE = "pending_review"
+#: 信任等级与复核状态与出站通道共用同一处定义（agents/channel）——
+#: 此前两边各写一份，改了一边另一边不会有任何反应，而 UI 的复核入口是同一个。
+DEFAULT_TRUST_LEVEL = TRUST_LEVEL
+DEFAULT_REVIEW_STATE = REVIEW_STATE
 
 
 def _now() -> str:

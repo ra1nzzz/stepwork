@@ -432,9 +432,11 @@ def test_call_skill_roundtrip_records_artifact(tmp_path: Path) -> None:
         ).fetchone()
         assert art["trust_level"] == "external-unverified"
         assert art["review_state"] == "pending_review"
-        # 远端返回的内容不自动进正文
+        # 远端返回的内容不自动进正文。artifact 的 JSON 形状三协议统一为
+        # {text, task_type}（见 agents/channel.record_call）—— 之前 MCP 用
+        # "tool"、A2A 用 "skill"、ACP 什么都不带，复核端要按协议分支解析。
         stored = json.loads(art["content_uri_or_json"])
-        assert stored["skill"] == "content-reference-analysis"
+        assert stored["task_type"] == "a2a:content-reference-analysis"
     finally:
         conn.close()
 
