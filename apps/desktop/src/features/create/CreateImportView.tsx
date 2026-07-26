@@ -266,10 +266,10 @@ export function CreateImportView() {
                   const v = urlStatusView(urlStatus);
                   if (!v) return null;
                   return (
-                    <p className="panel-meta" style={{ marginTop: 8 }}>
+                    <p className="panel-meta gap-top-sm">
                       <span className={`status ${v.cls}`}>{v.text}</span>
                       {urlStatus === "need_login" && (
-                        <span style={{ marginLeft: 8 }}>
+                        <span className="gap-left-sm">
                           该链接需要登录才能访问，请先在浏览器下载到本地后再导入。
                         </span>
                       )}
@@ -289,9 +289,8 @@ export function CreateImportView() {
                   <label htmlFor="sourceOriginalUrl">来源链接</label>
                   <input
                     id="sourceOriginalUrl"
-                    className="field"
-                    type="url"
-                    style={{ width: "100%" }}
+                    className="field w-full"
+                    type="url" 
                     placeholder="素材的原始出处链接（可选）"
                     value={originalUrl}
                     onChange={(e) => setOriginalUrl(e.target.value)}
@@ -301,8 +300,7 @@ export function CreateImportView() {
                   <label htmlFor="sourceAuthor">作者</label>
                   <input
                     id="sourceAuthor"
-                    className="field"
-                    style={{ width: "100%" }}
+                    className="field w-full" 
                     placeholder="原作者/创作者（可选）"
                     value={author}
                     onChange={(e) => setAuthor(e.target.value)}
@@ -339,7 +337,7 @@ export function CreateImportView() {
               )}
 
               {error && (
-                <p className="error-text section-gap" style={{ color: "var(--danger)" }}>
+                <p className="error-text section-gap text-danger">
                   {error}
                 </p>
               )}

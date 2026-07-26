@@ -209,7 +209,7 @@ export function PluginsView() {
         <p className="feature-sub">查看与管理已注册插件</p>
       </header>
 
-      <div className="inline-actions" style={{ marginBottom: 16 }}>
+      <div className="inline-actions stack-lg">
         <button
           type="button"
           className="btn primary"
@@ -243,7 +243,7 @@ export function PluginsView() {
             </div>
           </div>
           <div className="panel-body">
-            <p className="panel-meta" style={{ marginTop: 0 }}>
+            <p className="panel-meta flush-top">
               该插件将获得以下权限：
             </p>
             {pendingInstall.permissions.length > 0 ? (
@@ -332,7 +332,7 @@ export function PluginsView() {
                   )}
                 </p>
                 {p.error_message && (
-                  <p className="error-text" style={{ color: "var(--danger)" }}>
+                  <p className="error-text text-danger">
                     {p.error_message}
                   </p>
                 )}

@@ -396,7 +396,7 @@ export function PublishView() {
             </div>
           </div>
           <div className="panel-body">
-            <div className="form-group" style={{ marginBottom: 12 }}>
+            <div className="form-group stack-md">
               <label htmlFor="publishProject">项目</label>
               <select
                 id="publishProject"
@@ -412,7 +412,7 @@ export function PublishView() {
                 ))}
               </select>
             </div>
-            <div className="form-group" style={{ marginBottom: 12 }}>
+            <div className="form-group stack-md">
               <label htmlFor="variantPlatform">平台</label>
               <select
                 id="variantPlatform"
@@ -427,30 +427,28 @@ export function PublishView() {
                 ))}
               </select>
             </div>
-            <div className="form-group" style={{ marginBottom: 12 }}>
+            <div className="form-group stack-md">
               <label htmlFor="variantTitle">标题</label>
               <input
                 id="variantTitle"
-                className="field"
-                style={{ width: "100%" }}
+                className="field w-full" 
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="平台发布标题"
               />
             </div>
-            <div className="form-group" style={{ marginBottom: 12 }}>
+            <div className="form-group stack-md">
               <label htmlFor="variantBody">正文</label>
               <textarea
                 id="variantBody"
-                className="field"
+                className="field field-textarea"
                 rows={6}
-                style={{ width: "100%", resize: "vertical", fontFamily: "inherit" }}
                 value={body}
                 onChange={(e) => setBody(e.target.value)}
                 placeholder="发布文案正文"
               />
             </div>
-            <div className="form-group" style={{ marginBottom: 12 }}>
+            <div className="form-group stack-md">
               <label htmlFor="variantTags">标签</label>
               <TagListInput
                 id="variantTags"
@@ -460,9 +458,8 @@ export function PublishView() {
               />
             </div>
             <button
-              className="btn primary"
-              type="button"
-              style={{ width: "100%" }}
+              className="btn primary w-full"
+              type="button" 
               onClick={() => void handleCreate()}
               disabled={!projectId || creating}
             >
@@ -525,7 +522,7 @@ export function PublishView() {
               )}
             </div>
             {error && (
-              <p className="error-text section-gap" style={{ color: "var(--danger)" }}>
+              <p className="error-text section-gap text-danger">
                 {error}
               </p>
             )}
@@ -535,7 +532,7 @@ export function PublishView() {
               </p>
             )}
             {variants.length === 0 && !isLoading ? (
-              <p className="panel-meta" style={{ margin: 0 }}>
+              <p className="panel-meta flush">
                 {projectId
                   ? "尚无变体。填写左侧表单创建第一个平台变体。"
                   : "选择项目后加载该项目的发布变体。"}
@@ -561,7 +558,7 @@ export function PublishView() {
                         <span className="status">{platformLabel(v.platform)}</span>
                       </div>
                       {v.body && (
-                        <p className="panel-meta" style={{ margin: "6px 0 0" }}>
+                        <p className="panel-meta hint-inline">
                           {v.body.slice(0, 120)}
                           {v.body.length > 120 ? "…" : ""}
                         </p>
@@ -606,7 +603,7 @@ export function PublishView() {
                         </button>
                       </div>
                       {/* 定时发布：优先用平台自带的定时能力 */}
-                      <div className="task-actions" style={{ marginTop: 6 }}>
+                      <div className="task-actions gap-top-sm">
                         <input
                           type="datetime-local"
                           className="text-input"
@@ -633,8 +630,7 @@ export function PublishView() {
                         .map((sp) => (
                           <div
                             key={sp.id}
-                            className="panel-meta"
-                            style={{ marginTop: 6 }}
+                            className="panel-meta gap-top-sm" 
                             data-od-id={`schedule-row-${sp.id}`}
                           >
                             <span
@@ -651,9 +647,8 @@ export function PublishView() {
                             )}
                             {sp.status === "pending" && (
                               <button
-                                className="btn small ghost"
-                                type="button"
-                                style={{ marginLeft: 8 }}
+                                className="btn small ghost gap-left-sm"
+                                type="button" 
                                 onClick={() => void cancelSchedule(sp.id)}
                               >
                                 取消排期
@@ -663,7 +658,7 @@ export function PublishView() {
                         ))}
                       {fillPackages[v.id] && (
                         <div className="section-gap">
-                          <p className="panel-meta" style={{ margin: 0 }}>
+                          <p className="panel-meta flush">
                             {fillPackages[v.id].ready
                               ? "✅ 可交给发布插件填充"
                               : "⚠️ 存在阻塞问题，请先修正"}
@@ -690,7 +685,7 @@ export function PublishView() {
                         </div>
                       )}
                       {authNotice[v.id] && (
-                        <p className="panel-meta" style={{ margin: "6px 0 0" }}>
+                        <p className="panel-meta hint-inline">
                           {authNotice[v.id]}
                         </p>
                       )}

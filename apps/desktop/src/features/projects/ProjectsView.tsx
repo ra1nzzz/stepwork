@@ -241,7 +241,7 @@ export function ProjectsView() {
           {/* PRD-WS-003：标签筛选（点选切换，多选为 AND 语义） */}
           {availableTags.length > 0 && (
             <div className="inline-actions" data-od-id="project-tag-filter">
-              <span className="panel-meta" style={{ alignSelf: "center" }}>
+              <span className="panel-meta self-center">
                 标签：
               </span>
               {availableTags.map((tag) => (
@@ -436,7 +436,7 @@ export function ProjectsView() {
         </div>
       </section>
 
-      <div className="inline-actions" style={{ marginTop: 18 }}>
+      <div className="inline-actions gap-top-lg">
         <button
           type="button"
           className="btn primary"

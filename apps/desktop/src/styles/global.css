@@ -1119,3 +1119,58 @@ p { text-wrap: pretty; }
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border, rgba(255,255,255,0.12)); margin-bottom: 16px; }
 .tab { background: none; border: none; padding: 8px 14px; cursor: pointer; color: inherit; opacity: 0.65; border-bottom: 2px solid transparent; }
 .tab.active { opacity: 1; border-bottom-color: var(--accent, #4c8dff); }
+
+/* ---------------------------------------------------------------------------
+ * 工具类
+ *
+ * 此前全仓 154 处内联 style={{ marginBottom: 10 }} 之类硬写数字：取值互不
+ * 一致（8/10/12/16 混用无规律），改一次视觉要全仓翻，且 CSS 无法命中它们
+ * （做不了主题、做不了响应式）。这里只收敛**真的重复出现**的那几种。
+ *
+ * 规矩：内联 style 仅保留给动态计算值（如进度条宽度），其余一律走类。
+ * ------------------------------------------------------------------------ */
+
+/* 纵向节奏 */
+.stack-xs { margin-bottom: var(--space-2); }
+.stack-sm { margin-bottom: var(--space-3); }
+.stack-md { margin-bottom: var(--space-4); }
+.stack-lg { margin-bottom: var(--space-5); }
+.gap-top-sm { margin-top: var(--space-3); }
+.gap-top-md { margin-top: var(--space-4); }
+.flush { margin: 0; }
+
+/* 语义色。用类而不是内联 color: var(--danger)，这样主题可整体替换 */
+.text-danger { color: var(--danger); }
+.text-muted { color: var(--muted); }
+
+/* 宽度 */
+.w-full { width: 100%; }
+
+/* 可纵向拉伸的多行输入：字体继承自容器，否则中文会掉回等宽字体 */
+.field-textarea {
+  width: 100%;
+  resize: vertical;
+  font-family: inherit;
+}
+
+/* 正文段落：预留换行、放宽行距，长文本才读得下去 */
+.prose-block {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.8;
+}
+
+/* 次一级的重复形态 */
+.gap-top-lg { margin-top: var(--space-6); }
+.flush-top { margin-top: 0; }
+.gap-left-sm { margin-left: var(--space-3); }
+.hint-inline { margin: var(--space-2) 0 0; }
+.self-center { align-self: center; }
+.clickable { cursor: pointer; }
+.pad-md { padding: var(--space-5); }
+.field-textarea-loose {
+  width: 100%;
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.7;
+}

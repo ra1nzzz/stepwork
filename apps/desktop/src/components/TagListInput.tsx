@@ -61,8 +61,7 @@ export function TagListInput({
       )}
       <input
         id={id}
-        className="field"
-        style={{ width: "100%" }}
+        className="field w-full" 
         value={draft}
         placeholder={placeholder ?? "输入后回车添加"}
         disabled={disabled}

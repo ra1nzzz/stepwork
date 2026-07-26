@@ -261,7 +261,7 @@ export function ProjectDetailView({ projectId }: { projectId: string }) {
                       </div>
                     </div>
                     {v.preview && (
-                      <p className="panel-meta" style={{ margin: "6px 0 0" }}>
+                      <p className="panel-meta hint-inline">
                         {v.preview}
                       </p>
                     )}

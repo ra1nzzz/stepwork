@@ -61,7 +61,7 @@ export function CreateAngleView() {
         <section className="section-gap" data-od-id="duplicate-warnings">
           <div className="panel" style={{ borderColor: "var(--warning)" }}>
             <div className="panel-body">
-              <p className="panel-meta" style={{ marginTop: 0 }}>
+              <p className="panel-meta flush-top">
                 ⚠️ 发现与历史选题相似的角度（仅提醒，可继续使用）：
               </p>
               <ul className="report-list">
@@ -213,7 +213,7 @@ export function CreateAngleView() {
         </aside>
       </section>
 
-      <div className="inline-actions" style={{ marginTop: 18 }}>
+      <div className="inline-actions gap-top-lg">
         <button
           type="button"
           className="btn ghost"

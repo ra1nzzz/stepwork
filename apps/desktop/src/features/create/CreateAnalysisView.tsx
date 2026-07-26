@@ -130,7 +130,7 @@ function ReportSection({
 }) {
   if ((items == null || items.length === 0) && !text) return null;
   return (
-    <div className="report-section" style={{ marginBottom: 12 }}>
+    <div className="report-section stack-md">
       <h3>{title}</h3>
       {text && <p>{text}</p>}
       {items && items.length > 0 && (
@@ -377,7 +377,7 @@ export function CreateAnalysisView() {
             <div className="panel-body">
               {/* 素材选择器 */}
               {assets.length > 0 && (
-                <div className="form-group" style={{ marginBottom: 16 }}>
+                <div className="form-group stack-lg">
                   <label htmlFor="assetSelect">选择素材</label>
                   <select
                     id="assetSelect"
@@ -396,7 +396,7 @@ export function CreateAnalysisView() {
 
               {/* 转写任务列表 */}
               {jobs.length === 0 ? (
-                <p className="panel-meta" style={{ margin: 0 }}>
+                <p className="panel-meta flush">
                   尚无转写任务。选择素材后点击「开始转写」。
                 </p>
               ) : (
@@ -426,7 +426,7 @@ export function CreateAnalysisView() {
                         </div>
                       )}
                       {job.error && (
-                        <p className="panel-meta section-gap" style={{ color: "var(--danger)" }}>
+                        <p className="panel-meta section-gap text-danger">
                           {job.error}
                         </p>
                       )}
@@ -456,7 +456,7 @@ export function CreateAnalysisView() {
               )}
 
               {transcribeError && (
-                <p className="error-text section-gap" style={{ color: "var(--danger)" }}>
+                <p className="error-text section-gap text-danger">
                   {transcribeError}
                 </p>
               )}
@@ -487,15 +487,14 @@ export function CreateAnalysisView() {
             <div className="panel-body">
               {transcriptText ? (
                 <p
-                  className="transcript"
-                  style={{ margin: 0, whiteSpace: "pre-wrap", lineHeight: 1.8 }}
+                  className="transcript prose-block"
                 >
                   {transcriptExpanded || transcriptText.length <= 600
                     ? transcriptText
                     : `${transcriptText.slice(0, 600)}…`}
                 </p>
               ) : (
-                <p className="panel-meta" style={{ margin: 0 }}>
+                <p className="panel-meta flush">
                   尚无逐字稿。完成转写后此处展示全文。
                 </p>
               )}
@@ -551,7 +550,7 @@ export function CreateAnalysisView() {
                 精确分析
               </button>
             </div>
-            <p className="panel-meta" style={{ marginTop: 8 }}>
+            <p className="panel-meta gap-top-sm">
               {analysisMode === "precise"
                 ? "精确模式：结合转写稿与视频场景切分/关键帧时间线（需 ffmpeg）。"
                 : "快速模式：仅基于转写文本分析。"}
@@ -598,7 +597,7 @@ export function CreateAnalysisView() {
 
           <div className="panel-body">
             {!latestReport && !isAnalyzing && (
-              <p className="panel-meta" style={{ margin: 0 }}>
+              <p className="panel-meta flush">
                 {latestTranscriptVersion
                   ? "点击「生成分析」开始结构化分析。"
                   : "请先完成转写任务。"}
@@ -606,19 +605,19 @@ export function CreateAnalysisView() {
             )}
 
             {(isAnalyzing || latestReport?.status === "pending") && (
-              <p className="panel-meta" style={{ margin: 0 }}>
+              <p className="panel-meta flush">
                 正在生成分析报告…
               </p>
             )}
 
             {latestReport?.status === "failed" && (
-              <p className="error-text" style={{ color: "var(--danger)" }}>
+              <p className="error-text text-danger">
                 {latestReport.error ?? analysisError ?? "分析失败"}
               </p>
             )}
 
             {latestReport?.status === "succeeded" && !reportData && (
-              <p className="panel-meta" style={{ margin: 0 }}>
+              <p className="panel-meta flush">
                 分析完成，但报告全文拉取失败。版本
                 {latestReport.versionId ? ` ${latestReport.versionId.slice(0, 8)}` : ""}
                 已落库。
@@ -636,7 +635,7 @@ export function CreateAnalysisView() {
                 <ReportSection title="风险点" items={reportData.risks} />
                 {/* PRD-ANA-005：关键结论可跳转来源（时间戳 / 逐字稿片段） */}
                 {(reportData.citations?.length ?? 0) > 0 && (
-                  <div className="report-section" style={{ marginBottom: 12 }}>
+                  <div className="report-section stack-md">
                     <h3>结论来源</h3>
                     <ul className="report-list">
                       {reportData.citations!.map((c, i) => (
@@ -645,8 +644,7 @@ export function CreateAnalysisView() {
                           {(c.start_sec != null || c.quote) && (
                             <button
                               type="button"
-                              className="btn small ghost"
-                              style={{ marginLeft: 8 }}
+                              className="btn small ghost gap-left-sm" 
                               onClick={() => jumpToSource(c)}
                               title="定位到逐字稿来源"
                             >
@@ -669,7 +667,7 @@ export function CreateAnalysisView() {
                 />
                 <ReportSection title="建议标题" text={reportData.suggested_title} />
                 {reportData.suggested_tags.length > 0 && (
-                  <div className="report-section" style={{ marginBottom: 12 }}>
+                  <div className="report-section stack-md">
                     <h3>建议标签</h3>
                     <div className="filters" style={{ flexWrap: "wrap" }}>
                       {reportData.suggested_tags.map((t) => (
@@ -681,7 +679,7 @@ export function CreateAnalysisView() {
                   </div>
                 )}
                 {reportData.confidence != null && (
-                  <p className="panel-meta" style={{ marginTop: 8 }}>
+                  <p className="panel-meta gap-top-sm">
                     置信度 {(reportData.confidence * 100).toFixed(1)}%
                     {latestReport.versionId
                       ? ` · 版本 ${latestReport.versionId.slice(0, 8)}`
@@ -699,81 +697,75 @@ export function CreateAnalysisView() {
             {/* 编辑模式：字段编辑 → SaveAnalysis 生成新版本 */}
             {editModel && reportData && (
               <>
-                <div className="form-group" style={{ marginBottom: 10 }}>
+                <div className="form-group stack-sm">
                   <label htmlFor="editSummary">核心判断</label>
                   <textarea
                     id="editSummary"
-                    className="field"
+                    className="field field-textarea"
                     rows={3}
-                    style={{ width: "100%", resize: "vertical", fontFamily: "inherit" }}
                     value={editModel.summary}
                     onChange={(e) => patchEdit({ summary: e.target.value })}
                   />
                 </div>
-                <div className="form-group" style={{ marginBottom: 10 }}>
+                <div className="form-group stack-sm">
                   <label htmlFor="editHook">开头钩子</label>
                   <textarea
                     id="editHook"
-                    className="field"
+                    className="field field-textarea"
                     rows={2}
-                    style={{ width: "100%", resize: "vertical", fontFamily: "inherit" }}
                     value={editModel.hook}
                     onChange={(e) => patchEdit({ hook: e.target.value })}
                   />
                 </div>
-                <div className="form-group" style={{ marginBottom: 10 }}>
+                <div className="form-group stack-sm">
                   <label htmlFor="editStructure">内容结构（每行一条）</label>
                   <textarea
                     id="editStructure"
-                    className="field"
+                    className="field field-textarea"
                     rows={4}
-                    style={{ width: "100%", resize: "vertical", fontFamily: "inherit" }}
                     value={editModel.structureText}
                     onChange={(e) =>
                       patchEdit({ structureText: e.target.value })
                     }
                   />
                 </div>
-                <div className="form-group" style={{ marginBottom: 10 }}>
+                <div className="form-group stack-sm">
                   <label htmlFor="editTopics">话题点（每行一条）</label>
                   <textarea
                     id="editTopics"
-                    className="field"
+                    className="field field-textarea"
                     rows={4}
-                    style={{ width: "100%", resize: "vertical", fontFamily: "inherit" }}
                     value={editModel.topicsText}
                     onChange={(e) =>
                       patchEdit({ topicsText: e.target.value })
                     }
                   />
                 </div>
-                <div className="form-group" style={{ marginBottom: 10 }}>
+                <div className="form-group stack-sm">
                   <label htmlFor="editKeyPoints">关键要点（每行一条）</label>
                   <textarea
                     id="editKeyPoints"
-                    className="field"
+                    className="field field-textarea"
                     rows={4}
-                    style={{ width: "100%", resize: "vertical", fontFamily: "inherit" }}
                     value={editModel.keyPointsText}
                     onChange={(e) =>
                       patchEdit({ keyPointsText: e.target.value })
                     }
                   />
                 </div>
-                <div className="form-group" style={{ marginBottom: 10 }}>
+                <div className="form-group stack-sm">
                   <label htmlFor="editRisks">风险点（每行一条）</label>
                   <textarea
                     id="editRisks"
-                    className="field"
+                    className="field field-textarea"
                     rows={3}
-                    style={{ width: "100%", resize: "vertical", fontFamily: "inherit" }}
                     value={editModel.risksText}
                     onChange={(e) =>
                       patchEdit({ risksText: e.target.value })
                     }
                   />
                 </div>
-                <div className="form-group" style={{ marginBottom: 10 }}>
+                <div className="form-group stack-sm">
                   <label htmlFor="editSentiment">情感倾向</label>
                   <select
                     id="editSentiment"
@@ -788,25 +780,23 @@ export function CreateAnalysisView() {
                     <option value="negative">负面</option>
                   </select>
                 </div>
-                <div className="form-group" style={{ marginBottom: 10 }}>
+                <div className="form-group stack-sm">
                   <label htmlFor="editTitle">建议标题</label>
                   <input
                     id="editTitle"
-                    className="field"
-                    style={{ width: "100%" }}
+                    className="field w-full" 
                     value={editModel.suggestedTitle}
                     onChange={(e) =>
                       patchEdit({ suggestedTitle: e.target.value })
                     }
                   />
                 </div>
-                <div className="form-group" style={{ marginBottom: 10 }}>
+                <div className="form-group stack-sm">
                   <label htmlFor="editTags">建议标签（每行一条）</label>
                   <textarea
                     id="editTags"
-                    className="field"
+                    className="field field-textarea"
                     rows={3}
-                    style={{ width: "100%", resize: "vertical", fontFamily: "inherit" }}
                     value={editModel.suggestedTagsText}
                     onChange={(e) =>
                       patchEdit({ suggestedTagsText: e.target.value })
@@ -832,7 +822,7 @@ export function CreateAnalysisView() {
                   </button>
                   {/* PRD-WS-005：自动保存状态可见，用户知道内容不会丢 */}
                   {autoSaveLabel && (
-                    <span className="panel-meta" style={{ alignSelf: "center" }}>
+                    <span className="panel-meta self-center">
                       {autoSaveLabel}（编辑后 0.8 秒自动保存）
                     </span>
                   )}
@@ -842,8 +832,7 @@ export function CreateAnalysisView() {
           </div>
           <div className="panel-body" style={{ paddingTop: 0 }}>
             <button
-              className="btn primary"
-              style={{ width: "100%" }}
+              className="btn primary w-full" 
               type="button"
               onClick={() => setCreateSubView("angle")}
               disabled={!latestTranscriptVersion}

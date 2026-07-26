@@ -19,6 +19,36 @@
   --radius-lg: 20px;
   --sidebar: 232px;
   --topbar: 72px;
+
+  /* 间距阶。此前全靠 154 处内联 style={{ marginBottom: 12 }} 之类硬写数字，
+     改一次视觉要全仓翻；且各处取值互不一致（6/8/12/16 混用无规律）。 */
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 24px;
+  --space-7: 32px;
+
+  /* 层级：z-index 此前散在各组件里，谁盖谁全靠试 */
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-overlay: 100;
+  --z-toast: 1000;
+
+  /* 动效时长。统一后可在一处响应「减少动态效果」的系统偏好 */
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-slow: 320ms;
+}
+
+/* 尊重系统的「减少动态效果」偏好 —— 前庭功能障碍用户会因动效不适 */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-base: 0ms;
+    --dur-slow: 0ms;
+  }
 }
 
 /* P1-UX-17：oklch 不支持时的 sRGB 回退（数值经 oklch→sRGB 换算） */

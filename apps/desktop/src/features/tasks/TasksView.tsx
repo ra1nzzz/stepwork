@@ -174,7 +174,7 @@ function JobRow({ job, onRefresh }: { job: PersistedJob; onRefresh: () => void }
         <div>
           <div className="task-name">
             {job.job_type}
-            <span className="mono row-sub" style={{ marginLeft: 8 }}>
+            <span className="mono row-sub gap-left-sm">
               {job.id.slice(0, 8)}
             </span>
           </div>
@@ -199,7 +199,7 @@ function JobRow({ job, onRefresh }: { job: PersistedJob; onRefresh: () => void }
       )}
 
       {job.error_code && (
-        <p className="panel-meta section-gap" style={{ color: "var(--danger)" }}>
+        <p className="panel-meta section-gap text-danger">
           {failureHint(job.error_code)}
         </p>
       )}
@@ -332,7 +332,7 @@ export function TasksView() {
                 </p>
               )}
               {!jobsError && jobs.length === 0 ? (
-                <p className="panel-meta" style={{ margin: 0 }}>
+                <p className="panel-meta flush">
                   {lastRefreshAt
                     ? "尚无任务。进入「创作」开始转写或渲染。"
                     : "正在加载任务列表…"}
@@ -372,12 +372,12 @@ export function TasksView() {
                   </div>
                 )}
                 {renderError && (
-                  <p className="panel-meta section-gap" style={{ color: "var(--danger)" }}>
+                  <p className="panel-meta section-gap text-danger">
                     {renderError}
                   </p>
                 )}
                 {renderStatus === "idle" && (
-                  <p className="panel-meta" style={{ margin: 0 }}>
+                  <p className="panel-meta flush">
                     尚无渲染任务。进入「创作 · 视频草稿」开始。
                   </p>
                 )}
@@ -402,11 +402,11 @@ export function TasksView() {
                   {busyDiag ? "导出中…" : "下载诊断包"}
                 </button>
                 {diagnostics && (
-                  <div style={{ marginTop: 12 }}>
-                    <p className="panel-meta" style={{ margin: 0 }}>
+                  <div className="gap-top-md">
+                    <p className="panel-meta flush">
                       路径：{diagnostics.bundle_path}
                     </p>
-                    <p className="panel-meta" style={{ margin: 0 }}>
+                    <p className="panel-meta flush">
                       大小：{(diagnostics.size_bytes / 1024).toFixed(1)} KB ·{" "}
                       {diagnostics.desensitized ? "已脱敏" : "未脱敏"}
                     </p>

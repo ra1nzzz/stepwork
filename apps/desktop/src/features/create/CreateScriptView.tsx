@@ -244,7 +244,7 @@ export function CreateScriptView() {
         <section className="section-gap" data-od-id="similarity-warnings">
           <div className="panel" style={{ borderColor: "var(--warning)" }}>
             <div className="panel-body">
-              <p className="panel-meta" style={{ marginTop: 0 }}>
+              <p className="panel-meta flush-top">
                 ⚠️ 与历史脚本存在相似内容（仅提醒，请自行判断是否调整）：
               </p>
               <ul className="report-list">
@@ -339,7 +339,7 @@ export function CreateScriptView() {
             {preview ? (
               <>
                 {/* 历史版本只读预览 + 回滚（回滚生成新版本，不覆盖历史） */}
-                <div className="form-group" style={{ marginBottom: 12 }}>
+                <div className="form-group stack-md">
                   <label htmlFor="previewTitle">
                     历史版本标题（只读 · {preview.id.slice(0, 8)}…）
                   </label>
@@ -356,17 +356,16 @@ export function CreateScriptView() {
                   <label htmlFor="previewBody">历史版本正文（只读）</label>
                   <textarea
                     id="previewBody"
-                    className="field"
+                    className="field field-textarea-loose"
                     value={preview.body}
                     readOnly
                     rows={16}
-                    style={{ width: "100%", resize: "vertical", fontFamily: "inherit", lineHeight: 1.7 }}
                   />
                 </div>
               </>
             ) : (
               <>
-                <div className="form-group" style={{ marginBottom: 12 }}>
+                <div className="form-group stack-md">
                   <label htmlFor="scriptTitle">标题</label>
                   <input
                     id="scriptTitle"
@@ -382,12 +381,11 @@ export function CreateScriptView() {
                   <label htmlFor="scriptBody">正文</label>
                   <textarea
                     id="scriptBody"
-                    className="field"
+                    className="field field-textarea-loose"
                     value={body}
                     onChange={(e) => handleBodyChange(e.target.value)}
                     placeholder="点击「AI 生成新版本」生成脚本正文，或直接粘贴/编辑内容。"
                     rows={16}
-                    style={{ width: "100%", resize: "vertical", fontFamily: "inherit", lineHeight: 1.7 }}
                   />
                 </div>
 
@@ -396,7 +394,7 @@ export function CreateScriptView() {
                 {paragraphs.length > 0 && (
                   <div className="form-group">
                     <label>段落操作</label>
-                    <p className="panel-meta" style={{ marginTop: 0 }}>
+                    <p className="panel-meta flush-top">
                       共 {paragraphs.length} 段（按空行切分）。每次操作生成新版本，
                       可在「版本历史」回滚撤销。
                       {!scriptVersionId && " 请先保存脚本后再操作。"}
@@ -468,7 +466,7 @@ export function CreateScriptView() {
         </p>
       )}
 
-      <div className="inline-actions" style={{ marginTop: 18 }}>
+      <div className="inline-actions gap-top-lg">
         <button
           type="button"
           className="btn ghost"

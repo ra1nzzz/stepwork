@@ -240,12 +240,12 @@ export function WorkbenchView() {
           </div>
           <div className="data-list project-overview">
             {loadingProjects && (
-              <p className="panel-meta" style={{ padding: 16 }}>
+              <p className="panel-meta pad-md">
                 正在加载项目列表…
               </p>
             )}
             {!loadingProjects && projects.length === 0 && (
-              <p className="panel-meta" style={{ padding: 16 }}>
+              <p className="panel-meta pad-md">
                 尚无项目，点击下方「新建项目」开始。
               </p>
             )}
@@ -258,7 +258,6 @@ export function WorkbenchView() {
                   goCreate("import");
                 }}
                 data-od-id={`project-${p.id}`}
-                style={{ cursor: "pointer" }}
               >
                 <div>
                   <div className="row-title">{p.title}</div>
@@ -287,7 +286,7 @@ export function WorkbenchView() {
                 </p>
               ) : (
                 importAssets.slice(0, 5).map((a) => (
-                  <a key={a.id} onClick={() => goCreate("analysis")} style={{ cursor: "pointer" }}>
+                  <a key={a.id} onClick={() => goCreate("analysis")} className="clickable">
                     <strong>{a.local_uri.split(/[\\/]/).pop() ?? a.local_uri}</strong>
                     <span>{a.kind}</span>
                   </a>
@@ -332,7 +331,7 @@ export function WorkbenchView() {
         </aside>
       </section>
 
-      <div className="inline-actions" style={{ marginTop: 18 }}>
+      <div className="inline-actions gap-top-lg">
         <button
           type="button"
           className="btn primary"

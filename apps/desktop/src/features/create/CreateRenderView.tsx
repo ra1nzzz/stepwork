@@ -267,7 +267,7 @@ export function CreateRenderView() {
                     >
                       {userAudioUri ? "重新选择" : "选择音频文件"}
                     </button>
-                    <span className="panel-meta mono" style={{ alignSelf: "center" }}>
+                    <span className="panel-meta mono self-center">
                       {userAudioUri ? basename(userAudioUri) : "未选择"}
                     </span>
                   </div>
@@ -439,9 +439,8 @@ export function CreateRenderView() {
                   </button>
                 )}
                 <a
-                  className="btn small ghost"
+                  className="btn small ghost clickable"
                   onClick={() => setView("tasks")}
-                  style={{ cursor: "pointer" }}
                 >
                   查看任务
                 </a>
@@ -541,7 +540,7 @@ export function CreateRenderView() {
         </p>
       )}
 
-      <div className="inline-actions" style={{ marginTop: 18 }}>
+      <div className="inline-actions gap-top-lg">
         <button
           type="button"
           className="btn ghost"
