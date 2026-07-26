@@ -280,6 +280,9 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
 
     if env.commandType == "StartA2aServer":
         port = payload.get("port")
+        # 把线程连接的清理挂到 Server 停机上：stop() 有多条调用路径，
+        # 只在 StopA2aServer 分支里清会漏掉其它路径
+        a2a_server.set_stop_hook(reset_thread_deps)
         state = a2a_server.start(_make_executor(deps, env), int(port or 0))
         return CommandResult(
             ok=True,
@@ -295,7 +298,6 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
 
     if env.commandType == "StopA2aServer":
         stopped = await a2a_server.stop_async()
-        reset_thread_deps()
         return CommandResult(
             ok=True, commandId=env.commandId, detail={"stopped": stopped, "running": False}
         )

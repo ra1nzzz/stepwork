@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -94,9 +95,34 @@ def _run(raw: dict[str, Any], deps: Deps) -> dict[str, Any]:
     return asyncio.run(dispatch(raw, deps))
 
 
+def _wait_ready(card_url: str, timeout: float = 5.0) -> None:
+    """等 Server 真的能应答再断言。
+
+    ``ThreadingHTTPServer`` 在构造时就 bind+listen，理论上返回即可连；但
+    Windows 上全量跑时偶发过一次瞬时连接失败（端口 TIME_WAIT 复用等），
+    表现为随机红。这里等的是「能应答」而不是 sleep 固定时长，所以不会
+    掩盖真正的启动失败 —— 起不来照样在 5s 后报错。
+    """
+    deadline = time.monotonic() + timeout
+    last: Exception | None = None
+    while time.monotonic() < deadline:
+        try:
+            httpx.get(card_url, timeout=2).raise_for_status()
+            return
+        except Exception as e:  # noqa: BLE001 - 就绪前的失败是预期的
+            last = e
+            time.sleep(0.05)
+    raise AssertionError(f"A2A Server 在 {timeout}s 内未就绪：{last}")
+
+
 @pytest.fixture(autouse=True)
 def _always_stop_server() -> Any:
-    """每个用例后都停掉 Server —— 它是进程级单例，泄漏会污染后续用例。"""
+    """每个用例后都停掉 Server —— 它是进程级单例，泄漏会污染后续用例。
+
+    停机会经 stop hook 一并释放 handler 侧的线程级 DB 连接（见
+    ``handlers.a2a.reset_thread_deps``），否则下个用例的 Server 线程会
+    复用指向**已关闭库**的连接。
+    """
     yield
     a2a_server.stop()
 
@@ -181,6 +207,7 @@ def test_server_serves_card_without_auth(tmp_path: Path) -> None:
         res = _run(_env("StartA2aServer"), deps)
         assert res["ok"] is True, res
         url = res["detail"]["card_url"]
+        _wait_ready(url)
         card = httpx.get(url, timeout=10).json()
         assert card["name"] == "STEPWORK"
         assert len(card["skills"]) == 6
@@ -195,6 +222,7 @@ def test_server_rejects_unauthenticated_post(tmp_path: Path) -> None:
         deps = Deps(repos=repos)
         res = _run(_env("StartA2aServer"), deps)
         url = res["detail"]["url"]
+        _wait_ready(res["detail"]["card_url"])
         r = httpx.post(url, json={"jsonrpc": "2.0", "id": 1, "method": "message/send"}, timeout=10)
         assert r.status_code == 401
     finally:
@@ -208,6 +236,7 @@ def test_server_rejects_unknown_skill(tmp_path: Path) -> None:
         deps = Deps(repos=repos)
         res = _run(_env("StartA2aServer"), deps)
         url, token = res["detail"]["url"], res["detail"]["token"]
+        _wait_ready(res["detail"]["card_url"])
         r = httpx.post(
             url,
             json={
@@ -235,6 +264,7 @@ def test_server_rejects_unknown_method(tmp_path: Path) -> None:
         deps = Deps(repos=repos)
         res = _run(_env("StartA2aServer"), deps)
         url, token = res["detail"]["url"], res["detail"]["token"]
+        _wait_ready(res["detail"]["card_url"])
         r = httpx.post(
             url,
             json={"jsonrpc": "2.0", "id": 1, "method": "tasks/cancel", "params": {}},
@@ -258,6 +288,7 @@ def test_server_routes_skill_through_command_bus(tmp_path: Path) -> None:
         deps = Deps(repos=repos)
         res = _run(_env("StartA2aServer"), deps)
         url, token = res["detail"]["url"], res["detail"]["token"]
+        _wait_ready(res["detail"]["card_url"])
         r = httpx.post(
             url,
             json={
@@ -319,7 +350,9 @@ def test_client_discovers_own_server_card(tmp_path: Path) -> None:
     conn, repos = _new_db(tmp_path)
     try:
         deps = Deps(repos=repos)
-        url = _run(_env("StartA2aServer"), deps)["detail"]["url"]
+        started = _run(_env("StartA2aServer"), deps)["detail"]
+        url = started["url"]
+        _wait_ready(started["card_url"])
 
         res = _run(_env("AddA2aAgent", {"url": url}), deps)
         assert res["ok"] is True, res
@@ -367,6 +400,7 @@ def test_call_skill_roundtrip_records_artifact(tmp_path: Path) -> None:
         deps = Deps(repos=repos, ai=_FakeAI())
         started = _run(_env("StartA2aServer"), deps)["detail"]
         url, token = started["url"], started["token"]
+        _wait_ready(started["card_url"])
         cid = _run(_env("AddA2aAgent", {"url": url, "token": token}), deps)["detail"][
             "connection_id"
         ]
@@ -409,7 +443,9 @@ def test_disabled_a2a_connection_is_rejected(tmp_path: Path) -> None:
     conn, repos = _new_db(tmp_path)
     try:
         deps = Deps(repos=repos)
-        url = _run(_env("StartA2aServer"), deps)["detail"]["url"]
+        started = _run(_env("StartA2aServer"), deps)["detail"]
+        url = started["url"]
+        _wait_ready(started["card_url"])
         cid = _run(_env("AddA2aAgent", {"url": url}), deps)["detail"]["connection_id"]
         _run(
             _env("SetAgentConnectionStatus", {"connectionId": cid, "status": "inactive"}),
@@ -472,6 +508,7 @@ def test_remote_token_is_never_persisted(tmp_path: Path) -> None:
     try:
         deps = Deps(repos=repos)
         started = _run(_env("StartA2aServer"), deps)["detail"]
+        _wait_ready(started["card_url"])
         res = _run(
             _env("AddA2aAgent", {"url": started["url"], "token": started["token"]}), deps
         )
@@ -498,7 +535,9 @@ def test_call_without_token_surfaces_auth_error(tmp_path: Path) -> None:
     conn, repos = _new_db(tmp_path)
     try:
         deps = Deps(repos=repos)
-        url = _run(_env("StartA2aServer"), deps)["detail"]["url"]
+        started = _run(_env("StartA2aServer"), deps)["detail"]
+        url = started["url"]
+        _wait_ready(started["card_url"])
         # 不传 token 注册（Card 本就不鉴权，注册会成功）
         cid = _run(_env("AddA2aAgent", {"url": url}), deps)["detail"]["connection_id"]
         res = _run(
@@ -506,5 +545,43 @@ def test_call_without_token_surfaces_auth_error(tmp_path: Path) -> None:
         )
         assert res["ok"] is False
         assert "401" in str(res["error"])
+    finally:
+        conn.close()
+
+
+def test_stop_releases_thread_connections(tmp_path: Path) -> None:
+    """停机必须释放线程级 DB 连接。
+
+    这些连接由 Server 线程按线程缓存；只在 StopA2aServer 命令分支里清会
+    漏掉其它停机路径（进程退出、测试收尾），重启后就会复用指向旧库的连接
+    —— 而那个库可能已被换掉（RestoreWorkspace 会整体替换 DB）。
+    """
+    from worker.runtime.handlers import a2a as a2a_handler
+
+    conn, repos = _new_db(tmp_path)
+    try:
+        deps = Deps(repos=repos)
+        started = _run(_env("StartA2aServer"), deps)["detail"]
+        _wait_ready(started["card_url"])
+        # 打一次能力面，逼 Server 线程建出线程级连接
+        httpx.post(
+            started["url"],
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "message/send",
+                "params": {
+                    "message": {"role": "user", "parts": [{"kind": "text", "text": "x"}]},
+                    "metadata": {"skillId": "content-reference-analysis"},
+                },
+            },
+            headers={"Authorization": f"Bearer {started['token']}"},
+            timeout=15,
+        )
+        assert a2a_handler._THREAD_DEPS, "Server 线程应已建立自己的连接"
+
+        # 直接调 stop()（不走命令），验证 hook 生效
+        a2a_server.stop()
+        assert not a2a_handler._THREAD_DEPS, "停机后线程连接应已释放"
     finally:
         conn.close()

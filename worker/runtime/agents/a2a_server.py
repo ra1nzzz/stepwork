@@ -67,6 +67,18 @@ STATE = A2aServerState()
 _Executor = Any
 _executor: _Executor = None
 
+#: 停机清理回调。handler 侧缓存了「每线程一条 DB 连接」，必须随停机一起
+#: 释放 —— 否则重启后仍复用旧连接，而那个库可能已经被换掉（如
+#: RestoreWorkspace 会整体替换 DB）。挂在这里而不是只在命令分支里调，
+#: 是因为 stop() 有多条调用路径（命令、进程退出、测试收尾）。
+_on_stop: Any = None
+
+
+def set_stop_hook(callback: Any) -> None:
+    """注册停机清理回调（幂等，后注册的覆盖先注册的）。"""
+    global _on_stop
+    _on_stop = callback
+
 
 def _make_handler() -> type[BaseHTTPRequestHandler]:
     class _Handler(BaseHTTPRequestHandler):
@@ -232,6 +244,11 @@ def stop() -> bool:
     STATE.port = 0
     STATE.token = ""
     _executor = None
+    if _on_stop is not None:
+        try:
+            _on_stop()
+        except Exception:  # noqa: BLE001 - 清理失败不影响停机结果
+            logger.exception("a2a stop hook failed")
     return True
 
 
