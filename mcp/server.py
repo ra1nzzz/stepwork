@@ -8,7 +8,7 @@ Command Bus (``worker.runtime.app.run_command``). The MCP surface is
 deliberately a strict subset of the bus:
 
 * Only read-only commands are reachable (``GetConfig`` / ``ListProjects`` /
-  ``GetProject`` / ``GetJobStatus`` / ``AnalyzeSource``).
+  ``GetProject`` / ``GetJobStatus`` / ``ListJobs`` / ``AnalyzeSource``).
 * ``update_config`` / ``UpdateConfig`` is **never** registered. This is the
   root authorization guarantee: secrets can never be written through the MCP
   surface, and ``get_config`` only ever returns the worker-masked view
@@ -37,6 +37,7 @@ _TOOL_COMMANDS: dict[str, str] = {
     "list_projects": "ListProjects",
     "get_project": "GetProject",
     "get_job_status": "GetJobStatus",
+    "list_jobs": "ListJobs",
     "analyze_source": "AnalyzeSource",
 }
 
@@ -75,12 +76,53 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
-        "name": "analyze_source",
-        "description": "Analyze a source by id (read-only metadata / insights).",
+        "name": "list_jobs",
+        "description": (
+            "List recent jobs (newest first). Optionally filter by lowercase "
+            "job states (e.g. `running`, `failed`) and cap the result count."
+        ),
         "inputSchema": {
             "type": "object",
-            "properties": {"source_id": {"type": "string"}},
-            "required": ["source_id"],
+            "properties": {
+                "states": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional lowercase JobState filter values.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Optional maximum number of jobs to return.",
+                },
+            },
+        },
+    },
+    {
+        "name": "analyze_source",
+        "description": (
+            "Analyze source material: pass `transcript_version_id` (a "
+            "transcript content_version id) or raw `text`. Optional `brand` "
+            "is a brand profile id used as prompt context."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "transcript_version_id": {
+                    "type": "string",
+                    "description": "content_version id of type 'transcript'.",
+                },
+                "text": {
+                    "type": "string",
+                    "description": "Raw text to analyze (alternative input).",
+                },
+                "brand": {
+                    "type": "string",
+                    "description": "Optional brand profile id.",
+                },
+            },
+            "anyOf": [
+                {"required": ["transcript_version_id"]},
+                {"required": ["text"]},
+            ],
         },
     },
 ]
@@ -96,7 +138,7 @@ class McpError(Exception):
 
 
 def list_tools() -> list[dict[str, Any]]:
-    """Return the fixed, read-only tool catalogue (exactly 5 tools)."""
+    """Return the fixed, read-only tool catalogue (exactly 6 tools)."""
     return TOOLS
 
 
@@ -111,8 +153,22 @@ def _build_payload(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return {"project_id": arguments.get("project_id")}
     if tool_name == "get_job_status":
         return {"job_id": arguments.get("job_id")}
+    if tool_name == "list_jobs":
+        # ListJobs contract: states / limit are both optional; omit when absent.
+        payload: dict[str, Any] = {}
+        if arguments.get("states"):
+            payload["states"] = arguments["states"]
+        if arguments.get("limit") is not None:
+            payload["limit"] = arguments["limit"]
+        return payload
     if tool_name == "analyze_source":
-        return {"source_id": arguments.get("source_id")}
+        # Mirror worker/runtime/handlers/analyze_source.py: it accepts
+        # transcript_version_id or text (plus optional brand); omit absent keys.
+        payload = {}
+        for key in ("transcript_version_id", "text", "brand"):
+            if arguments.get(key) is not None:
+                payload[key] = arguments[key]
+        return payload
     return {}
 
 
@@ -135,11 +191,22 @@ async def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
 
     result = await run_command(env)
 
-    detail = result.get("detail")
-    text = json.dumps(detail, ensure_ascii=False)
+    ok = bool(result.get("ok", True))
+    if ok:
+        text = json.dumps(result.get("detail"), ensure_ascii=False)
+    else:
+        # Failures must carry the CommandResult error (plus any detail) so a
+        # calling agent can act on the message instead of an empty object.
+        text = json.dumps(
+            {
+                "error": result.get("error") or "UNKNOWN_ERROR",
+                "detail": result.get("detail") or {},
+            },
+            ensure_ascii=False,
+        )
     return {
         "content": [{"type": "text", "text": text}],
-        "isError": not bool(result.get("ok", True)),
+        "isError": not ok,
     }
 
 

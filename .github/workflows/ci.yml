@@ -6,7 +6,9 @@
 # 三个独立 job：
 #   - rust-check  ：apps/desktop/src-tauri 的 cargo check/clippy/fmt/test
 #   - frontend-check：apps/desktop 的 tsc --noEmit + 生产构建
-#   - python-check ：worker 的 ruff / mypy / pytest（从仓库根 pyproject.toml 安装 -e .[dev]）
+#   - python-check ：worker 的 ruff / mypy / pytest（从仓库根 pyproject.toml 安装 -e .[dev]），
+#                    外加仓库根的 cli/tests + mcp/tests；worker pytest 跳过 perf 标记
+#                    （性能基线仅手动跑，见 docs/PERF_BASELINE.md）
 #
 # 注：cargo *不* 执行 `tauri build`，仅 check/test，故无需 WebView2 运行时，
 # 在 windows-latest 上可直接通过。
@@ -120,6 +122,11 @@ jobs:
         working-directory: worker
         run: mypy .
 
-      - name: Pytest
+      # perf 标记的性能基线测试默认不进 CI（docs/PERF_BASELINE.md）
+      - name: Pytest (worker)
         working-directory: worker
-        run: pytest tests -q
+        run: pytest tests -q -m "not perf"
+
+      # cli / mcp 测试从仓库根运行（import cli / mcp 依赖仓库根在 sys.path）
+      - name: Pytest (cli + mcp)
+        run: pytest cli/tests mcp/tests -q

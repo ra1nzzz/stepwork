@@ -14,6 +14,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import mimetypes
+import os
 import sys
 from typing import Any
 
@@ -102,6 +104,84 @@ def build_parser() -> argparse.ArgumentParser:
     src.add_argument("--file", metavar="PATH", help="从文件读取脚本正文")
     src.add_argument("--stdin", action="store_true", help="从标准输入读取脚本正文")
 
+    # ----- import -----
+    # 对齐桌面端 useImportStore：payload = {local_uri, kind, metadata}，
+    # kind 由 MIME 推断（audio/* → audio、video/* → video、其余 document）。
+    imp = sub.add_parser("import", help="导入源素材（ImportSource）")
+    imp.set_defaults(command_type="ImportSource")
+    imp.add_argument(
+        "--project",
+        dest="project",
+        default=None,
+        help="可选：目标项目 id（缺省回退到全局 --project-id 或默认项目）",
+    )
+    imp.add_argument(
+        "--file",
+        metavar="PATH",
+        required=True,
+        help="素材文件路径（写入 payload.local_uri，绝对路径）",
+    )
+
+    # ----- transcribe -----
+    tr = sub.add_parser("transcribe", help="转写素材（TranscribeSource）")
+    tr.set_defaults(command_type="TranscribeSource")
+    tr.add_argument(
+        "--asset-id",
+        dest="asset_id",
+        required=True,
+        help="source_assets id → payload.asset_id",
+    )
+
+    # ----- render -----
+    rd = sub.add_parser("render", help="渲染视频草稿（CreateRenderJob）")
+    rd.set_defaults(command_type="CreateRenderJob")
+    rd.add_argument(
+        "--version-id",
+        dest="version_id",
+        required=True,
+        help="源 content_version id → payload.source_version_id",
+    )
+    rd.add_argument(
+        "--template",
+        default="vertical-caption-v1",
+        help="渲染模板（默认 vertical-caption-v1，与 worker RenderSpec 缺省一致）",
+    )
+
+    # ----- job -----
+    job = sub.add_parser("job", help="任务查询命令")
+    job_sub = job.add_subparsers(dest="job_action", required=True)
+
+    js = job_sub.add_parser("status", help="查询任务状态（GetJobStatus）")
+    js.set_defaults(command_type="GetJobStatus")
+    js.add_argument("job_id", help="任务 id")
+
+    jl = job_sub.add_parser("list", help="列出任务（ListJobs）")
+    jl.set_defaults(command_type="ListJobs")
+    jl.add_argument(
+        "--state",
+        dest="states",
+        action="append",
+        metavar="STATE",
+        help="可选：按状态过滤（可重复；小写 JobState 值，如 running / failed）",
+    )
+    jl.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="可选：最多返回条数（缺省由 worker 决定）",
+    )
+
+    # ----- project -----
+    proj = sub.add_parser("project", help="项目查询命令")
+    proj_sub = proj.add_subparsers(dest="project_action", required=True)
+
+    pl = proj_sub.add_parser("list", help="列出当前工作区项目（ListProjects）")
+    pl.set_defaults(command_type="ListProjects")
+
+    pg = proj_sub.add_parser("get", help="按 id 取单个项目（GetProject）")
+    pg.set_defaults(command_type="GetProject")
+    pg.add_argument("project_id", help="项目 id")
+
     return parser
 
 
@@ -116,6 +196,36 @@ def _parse_provider(value: str | None) -> dict[str, Any] | None:
     if not isinstance(data, dict):
         raise ValueError("--provider must be a JSON object")
     return data
+
+
+def _kind_from_mime(mime: str) -> str:
+    """由 MIME 类型推断素材 kind（对齐桌面端 ``kindFromMime``）。"""
+    if mime.startswith("audio/"):
+        return "audio"
+    if mime.startswith("video/"):
+        return "video"
+    return "document"
+
+
+def _import_payload(file_path: str) -> dict[str, Any]:
+    """构造 ``ImportSource`` payload（对齐 useImportStore 发送的形状）。
+
+    Raises:
+        ValueError: 文件不存在。
+    """
+    if not os.path.isfile(file_path):
+        raise ValueError(f"import file not found: {file_path}")
+    abs_path = os.path.abspath(file_path)
+    mime = mimetypes.guess_type(abs_path)[0] or "application/octet-stream"
+    return {
+        "local_uri": abs_path,
+        "kind": _kind_from_mime(mime),
+        "metadata": {
+            "name": os.path.basename(abs_path),
+            "size_bytes": os.path.getsize(abs_path),
+            "mime_type": mime,
+        },
+    }
 
 
 def build_payload(args: argparse.Namespace) -> dict[str, Any]:
@@ -176,6 +286,42 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
             }
         raise ValueError(f"unknown script action: {action!r}")
 
+    if command == "import":
+        return _import_payload(args.file)
+
+    if command == "transcribe":
+        # 对齐桌面端 useTranscriptStore：opts 缺省为空对象
+        return {"asset_id": args.asset_id, "opts": {}}
+
+    if command == "render":
+        # 其余 RenderSpec 字段（tts_engine / resolution / fps）由 worker 缺省补齐
+        return {
+            "source_version_id": args.version_id,
+            "template": args.template,
+        }
+
+    if command == "job":
+        action = getattr(args, "job_action", None)
+        if action == "status":
+            return {"job_id": args.job_id}
+        if action == "list":
+            # 契约：states / limit 均可选，缺省不写入 payload
+            payload = {}
+            if getattr(args, "states", None):
+                payload["states"] = args.states
+            if getattr(args, "limit", None) is not None:
+                payload["limit"] = args.limit
+            return payload
+        raise ValueError(f"unknown job action: {action!r}")
+
+    if command == "project":
+        action = getattr(args, "project_action", None)
+        if action == "list":
+            return {}
+        if action == "get":
+            return {"project_id": args.project_id}
+        raise ValueError(f"unknown project action: {action!r}")
+
     raise ValueError(f"unknown command: {command!r}")
 
 
@@ -189,7 +335,10 @@ def build_envelope_for(
     if not command_type:
         raise ValueError("subcommand did not set command_type")
     payload = build_payload(args)
-    project_id = getattr(args, "project_id", None) or None
+    # 子命令级 --project（如 import）优先于全局 --project-id
+    project_id = (
+        getattr(args, "project", None) or getattr(args, "project_id", None) or None
+    )
     return build_envelope(
         command_type=command_type,
         source=SOURCE,
@@ -212,7 +361,14 @@ def _print_error(message: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI 入口。返回进程退出码（0 成功 / 失败，异常为 1）。"""
+    """CLI 入口。返回进程退出码。
+
+    退出码约定（脚本 / agent 可依赖）：
+    - ``0``：命令执行成功（``result.ok == True``）。
+    - ``1``：命令执行失败（``result.ok == False`` 或 dispatch 异常）。
+    - ``2``：参数 / 用法错误（argparse 解析失败或 payload 构造非法）。
+    JSON 结果始终且仅打印到 stdout（argparse 的 usage 信息走 stderr）。
+    """
     parser = build_parser()
     args = parser.parse_args(argv)
 
@@ -231,7 +387,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # 结果一律美化输出；后端已对密钥做掩码，CLI 不额外回显明文。
     print(json.dumps(result, indent=2, ensure_ascii=False))
-    return 0
+    return 0 if bool(result.get("ok")) else 1
 
 
 if __name__ == "__main__":
