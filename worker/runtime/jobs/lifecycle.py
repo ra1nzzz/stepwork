@@ -93,11 +93,35 @@ def emit_job_progress(notify: Any, job: Job) -> None:
 
 @dataclass
 class _JobCtx:
-    """``content_job`` 上下文：暴露 job / project_id / repos。"""
+    """``content_job`` 上下文：暴露 job / project_id / repos 与进度上报。"""
 
     job: Job
     project_id: str
     repos: Any
+    #: 进度通知回调（由 content_job 注入），供 progress() 使用
+    notify: Any = None
+
+    def progress(self, value: float, stage: JobStage | None = None) -> None:
+        """上报中间进度（UX §10.2「长任务必须有阶段、进度」）。
+
+        此前只有渲染发真实进度，分析/角度/脚本只在进入 RUNNING（0）与
+        落库（1.0）各发一次，UI 进度条整段停在 0%。本方法让这些任务也能
+        在关键节点推进阶段与进度。
+
+        非阻塞：失败只记日志，绝不影响业务（进度是观测，不是事实源）。
+        """
+        try:
+            updated = transition(
+                self.repos,
+                self.job.id,
+                JobState.RUNNING,
+                progress=max(0.0, min(1.0, value)),
+                stage=stage,
+            )
+            self.job = updated
+            emit_job_progress(self.notify, updated)
+        except Exception:  # noqa: BLE001 - 进度上报失败不影响任务本身
+            logger.exception("progress report failed job=%s", self.job.id)
 
 
 @asynccontextmanager
@@ -147,7 +171,7 @@ async def content_job(
     job = transition(repos, job.id, JobState.RUNNING)
     await notify_job_progress(notify, job)
 
-    ctx = _JobCtx(job=job, project_id=project_id, repos=repos)
+    ctx = _JobCtx(job=job, project_id=project_id, repos=repos, notify=notify)
     # UX §10.2：登记当前 Task，使 CancelJob 能真正打断异步任务
     # （渲染另用 threading.Event，见 jobs/cancel.py）。
     current = asyncio.current_task()

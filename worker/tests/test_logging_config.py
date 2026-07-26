@@ -28,7 +28,7 @@ from typing import Any
 
 import pytest
 
-from worker.runtime.logging_config import configure_logging
+from worker.runtime.logging_config import _mask_log_str, configure_logging
 
 
 @pytest.fixture
@@ -162,3 +162,55 @@ def test_configure_logging_clears_existing_handlers(
     configure_logging(tmp_path / "logs")
 
     assert dummy not in root.handlers
+
+
+# ----- PRD §11.3「日志不包含 Cookie、Token、二维码和验证码」 -----
+
+
+def test_masks_cookie_session_and_authorization() -> None:
+    """此前只覆盖 api_key/secret/token/password，cookie 类全部漏网。"""
+    cases = [
+        ("Cookie: sessionid=abc123def", "abc123def"),
+        ("session_id: s-9988", "s-9988"),
+        # 认证方案词后面才是真凭据 —— 只掩掉 "Bearer" 等于没掩
+        ("Authorization: Bearer eyJhbGciOi", "eyJhbGciOi"),
+        ("authorization=Basic dXNlcjpwYXNz", "dXNlcjpwYXNz"),
+    ]
+    for raw, secret in cases:
+        masked = _mask_log_str(raw)
+        assert "••••" in masked, raw
+        assert secret not in masked, f"凭据泄漏：{raw} → {masked}"
+
+
+def test_masks_captcha_and_qrcode_including_chinese() -> None:
+    """二维码/验证码在日志里常直接写中文关键字。"""
+    for raw in (
+        "captcha=8842",
+        "verify_code: 662310",
+        "qrcode=https://example.com/q/abc",
+        "验证码：123456".replace("：", ":"),
+        "二维码=data-token-xyz",
+    ):
+        masked = _mask_log_str(raw)
+        assert "••••" in masked, raw
+
+
+def test_masks_inline_data_uri_qrcode() -> None:
+    """内联 data URI 二维码/截图整段抹掉（keyword 规则抓不到它）。"""
+    raw = "qr image data:image/png;base64,iVBORw0KGgoAAAANSUhEUg== rendered"
+    masked = _mask_log_str(raw)
+    assert "iVBORw0KGgo" not in masked
+    assert "••••" in masked
+    # 非敏感部分保留，便于排查
+    assert "rendered" in masked
+
+
+def test_masking_is_idempotent_for_new_patterns() -> None:
+    once = _mask_log_str("cookie=abc")
+    assert _mask_log_str(once) == once
+
+
+def test_ordinary_text_not_over_masked() -> None:
+    """普通叙述不该被误伤（关键字后无 : / = 时不触发）。"""
+    raw = "用户取消了任务，token 机制正常"
+    assert _mask_log_str(raw) == raw

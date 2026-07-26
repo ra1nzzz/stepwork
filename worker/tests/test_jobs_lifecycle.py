@@ -227,3 +227,62 @@ async def test_content_job_lease_takes_effect_while_running() -> None:
         assert got.state == JobState.RUNNING
         assert got.lease_owner == "test-owner"
         assert got.lease_expires_at is not None
+
+
+# ----- UX §10.2：分析/转写/脚本必须有真实中间进度 -----
+
+
+async def test_ctx_progress_emits_intermediate_updates() -> None:
+    """content_job 上下文的 progress() 落库并发通知。"""
+    repos = _repos()
+    conn = repos.conn
+    repos.workspaces.ensure("ws-1")
+
+    sent: list[dict[str, Any]] = []
+
+    async def _notify(method: str, params: dict[str, Any]) -> None:
+        sent.append({"method": method, **params})
+
+    async with content_job(
+        repos,
+        job_type="analyze",
+        stage=JobStage.ANALYZING,
+        env=_env(),
+        notify=_notify,
+    ) as ctx:
+        ctx.progress(0.2, JobStage.ANALYZING)
+        ctx.progress(0.8, JobStage.ANALYZING)
+        job_id = ctx.job.id
+
+    row = conn.execute("SELECT progress FROM jobs WHERE id=?", (job_id,)).fetchone()
+    # 最后一次上报的进度已落库
+    assert row["progress"] == 0.8
+
+    await asyncio.sleep(0)  # 让 fire-and-forget 的通知 task 跑完
+    progresses = [s["progress"] for s in sent if s["method"] == "job.progress"]
+    # 除了进入 RUNNING 的 0，还应有中间进度（此前整段停在 0）
+    assert any(p in (0.2, 0.8) for p in progresses), progresses
+
+
+async def test_ctx_progress_failure_does_not_break_job(
+    monkeypatch: Any,
+) -> None:
+    """进度上报失败只记日志，不影响任务本身（进度是观测不是事实源）。
+
+    用 monkeypatch 让 transition 抛错，而**不是**改 ctx.job.id ——
+    后者会让 content_job 的 finally 用错误的 key 清理取消注册表，
+    把脏条目泄漏给后续测试（这个坑真踩过一次）。
+    """
+    import worker.runtime.jobs.lifecycle as lifecycle_mod
+
+    repos = _repos()
+    repos.workspaces.ensure("ws-1")
+    async with content_job(
+        repos, job_type="analyze", stage=JobStage.ANALYZING, env=_env()
+    ) as ctx:
+        def _boom(*_a: Any, **_k: Any) -> Any:
+            raise RuntimeError("db down")
+
+        monkeypatch.setattr(lifecycle_mod, "transition", _boom)
+        ctx.progress(0.5)  # 不应抛
+        monkeypatch.undo()

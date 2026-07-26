@@ -74,7 +74,9 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         fail_code="TOPIC_FAILED",
         notify=deps.notify,
     ) as ctx:
+        ctx.progress(0.2, JobStage.PROPOSING)
         raw = await ai.complete(prompt, TOPIC_SCHEMA)
+        ctx.progress(0.8, JobStage.PROPOSING)
         proposal = parse_topic_proposal(raw, spec.count)
         content = proposal.model_dump_json()
         cv_id = persist_content_version(

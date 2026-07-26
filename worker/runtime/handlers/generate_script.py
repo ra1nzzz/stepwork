@@ -87,7 +87,9 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         fail_code="SCRIPT_FAILED",
         notify=deps.notify,
     ) as ctx:
+        ctx.progress(0.2, JobStage.SCRIPTING)
         raw = await ai.complete(prompt, SCRIPT_SCHEMA)
+        ctx.progress(0.8, JobStage.SCRIPTING)
         script = parse_script(raw)
         content = json.dumps(script, ensure_ascii=False)
         cv_id = persist_content_version(

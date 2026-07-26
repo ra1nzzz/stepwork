@@ -60,7 +60,10 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         },
         notify=deps.notify,
     ) as ctx:
+        # UX §10.2：转写进度此前恒为 0%（UI 进度条整段不动）
+        ctx.progress(0.15, JobStage.TRANSCRIBING)
         transcript = await asr.transcribe(local_uri, p.get("opts"))
+        ctx.progress(0.85, JobStage.TRANSCRIBING)
 
         # 字符上限保护（头脑风暴 P0）
         text = transcript.text

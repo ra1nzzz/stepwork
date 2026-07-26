@@ -110,7 +110,10 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         },
         notify=deps.notify,
     ) as ctx:
+        # UX §10.2：给出真实中间进度（此前整段停在 0%）
+        ctx.progress(0.2, JobStage.ANALYZING)
         raw = await ai.complete(prompt, ANALYSIS_SCHEMA)
+        ctx.progress(0.8, JobStage.ANALYZING)
         report = parse_analysis_report(raw)
         content = report.model_dump_json()
         cv_id = persist_content_version(

@@ -264,14 +264,16 @@ async def test_cancel_interrupts_async_job_and_marks_cancelled() -> None:
         "payload": {"text": "待分析文本"},
         "requestedAt": "2026-07-26T00:00:00+00:00",
     }
+    # 记录调用前已存在的条目，只认本次新增的（不依赖注册表恰好为空）
+    before = set(TASK_REGISTRY)
     task = asyncio.create_task(dispatch(env, deps))
 
-    # 等任务把自己登记进注册表（有界轮询）
     job_id = None
     for _ in range(100):
         await asyncio.sleep(0.01)
-        if TASK_REGISTRY:
-            job_id = next(iter(TASK_REGISTRY))
+        fresh = set(TASK_REGISTRY) - before
+        if fresh:
+            job_id = next(iter(fresh))
             break
     assert job_id is not None, "异步任务未登记到取消注册表"
 
