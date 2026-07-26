@@ -79,6 +79,15 @@ def _resolve_log_dir() -> Path:
     return Path(home) / "logs"
 
 
+def mask_secrets(s: str) -> str:
+    """公开别名：对任意字符串做 §11.3 掩码。
+
+    日志之外也需要它 —— 例如外部 MCP Server 的 stderr 要回显给用户排查，
+    但那段文本很可能含 ``api_key=sk-...``，不能原样透出。
+    """
+    return _mask_log_str(s)
+
+
 def _mask_log_str(s: str) -> str:
     """对格式化后的日志字符串做敏感信息掩码（PRD §11.3）。
 

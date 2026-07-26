@@ -64,6 +64,10 @@ _ROUTES: dict[str, str] = {
     "ListAgentConnections": "worker.runtime.handlers.agent",
     "SetAgentConnectionStatus": "worker.runtime.handlers.agent",
     "DeleteAgentConnection": "worker.runtime.handlers.agent",
+    # PRD-AGT-004 出站 MCP 客户端（我们去连别人的 Server）
+    "AddMcpServer": "worker.runtime.handlers.mcp_client",
+    "ListMcpTools": "worker.runtime.handlers.mcp_client",
+    "CallMcpTool": "worker.runtime.handlers.mcp_client",
     "ExportDiagnosticsBundle": "worker.runtime.handlers.diagnostics",
     # W9: 集成 / 数据迁移 / 种子测试（Layer 0 路由先行，handler 由各支线补齐）
     "ExportProject": "worker.runtime.handlers.project_io",
