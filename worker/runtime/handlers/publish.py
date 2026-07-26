@@ -27,6 +27,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from worker.runtime.audit import EVENT_BUNDLE_EXPORTED, record_event
 from worker.runtime.cleanup import resolve_stepwork_home
 from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
@@ -299,6 +300,11 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         }
         (bundle_dir / "meta.json").write_text(
             json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        # PRD §14 埋点：导出（此前 ExportBundle 无 job 也无 audit）
+        record_event(
+            repos.conn, env, EVENT_BUNDLE_EXPORTED,
+            {"variant_id": str(variant_id), "bundle_path": str(bundle_dir)},
         )
         return CommandResult(
             ok=True, commandId=env.commandId,

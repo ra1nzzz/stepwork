@@ -97,3 +97,54 @@ def record_provider_invocation(
         conn.commit()
     except Exception:  # noqa: BLE001 - 审计失败绝不影响业务流
         logger.warning("provider_invocation audit write failed", exc_info=True)
+
+
+#: PRD §14 要求埋点的领域事件类型（provider_invocation 已单独实现）
+EVENT_PROJECT_CREATED = "project_created"
+EVENT_SCRIPT_SAVED = "script_saved"
+EVENT_BUNDLE_EXPORTED = "bundle_exported"
+EVENT_APPROVAL_REQUESTED = "approval_requested"
+EVENT_APPROVAL_DECIDED = "approval_decided"
+EVENT_PLUGIN_ERROR = "plugin_error"
+
+
+def record_event(
+    conn: Any,
+    env: CommandEnvelope,
+    event_type: str,
+    payload: dict[str, Any] | None = None,
+) -> None:
+    """向 ``audit_events`` 写一行领域事件（PRD §14 埋点）。
+
+    PRD §14 列出的事件里，分析/转写/渲染由 ``jobs`` 表的状态迁移覆盖，
+    但**项目创建、脚本保存、导出、审批请求与结果、插件错误**此前完全
+    没有留痕。本函数补齐这些，与 ``record_provider_invocation`` 同表同风格
+    （可经 ``ListAuditEvents`` 读取）。
+
+    payload 由调用方保证不含密钥；写入失败一律吞掉并降级为日志。
+    """
+    try:
+        actor = env.actor if isinstance(env.actor, dict) else {}
+        conn.execute(
+            "INSERT INTO audit_events "
+            "(id, actor, source_protocol, command, target, requested_scope, "
+            "approval, result, correlation_id, timestamp, event_type, payload) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                f"audit_{uuid.uuid4().hex}",
+                f"{actor.get('type', 'unknown')}:{actor.get('id', 'unknown')}",
+                env.source,
+                env.commandType,
+                env.projectId,
+                None,
+                None,
+                "ok",
+                env.commandId,
+                datetime.now(UTC).isoformat(),
+                event_type,
+                json.dumps(payload or {}, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+    except Exception:  # noqa: BLE001 - 埋点失败绝不影响业务流
+        logger.exception("record_event failed type=%s", event_type)

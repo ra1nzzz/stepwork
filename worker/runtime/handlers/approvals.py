@@ -25,6 +25,11 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from worker.runtime.audit import (
+    EVENT_APPROVAL_DECIDED,
+    EVENT_APPROVAL_REQUESTED,
+    record_event,
+)
 from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
 from worker.runtime.models import CommandEnvelope, CommandResult
@@ -170,6 +175,11 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         row = conn.execute(
             "SELECT * FROM approval_requests WHERE id=?", (request_id,)
         ).fetchone()
+        # PRD §14 埋点：审批请求
+        record_event(
+            conn, env, EVENT_APPROVAL_REQUESTED,
+            {"approval_id": request_id, "action_type": str(action_type)},
+        )
         return CommandResult(
             ok=True,
             commandId=env.commandId,
@@ -241,6 +251,11 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         updated = conn.execute(
             "SELECT * FROM approval_requests WHERE id=?", (str(target_id),)
         ).fetchone()
+        # PRD §14 埋点：审批结果
+        record_event(
+            conn, env, EVENT_APPROVAL_DECIDED,
+            {"approval_id": str(target_id), "decision": decision},
+        )
         return CommandResult(
             ok=True,
             commandId=env.commandId,

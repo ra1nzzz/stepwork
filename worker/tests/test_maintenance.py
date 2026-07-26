@@ -189,3 +189,53 @@ async def test_run_cleanup_blocked_for_agents() -> None:
     )
     assert res["ok"] is False
     assert "FORBIDDEN_ACTOR" in res["error"]
+
+
+# ----- PRD §14 埋点：领域事件可查 -----
+
+
+async def test_domain_events_recorded_and_listable() -> None:
+    """PRD §14 列出的项目创建/脚本保存/审批 事件此前完全没有留痕。"""
+    deps, ws, _prj = _setup()
+
+    created = await dispatch(
+        _env("CreateProject", {"title": "埋点项目"}, ws, None), deps
+    )
+    assert created["ok"] is True, created.get("error")
+    project_id = created["detail"]["project"]["id"]
+
+    saved = await dispatch(
+        _env("SaveScript", {"content": {"text": "正文", "title": "T"}}, ws, project_id),
+        deps,
+    )
+    assert saved["ok"] is True, saved.get("error")
+
+    approved = await dispatch(
+        _env(
+            "CreateApprovalRequest",
+            {"actionType": "ExportBundle", "target": project_id},
+            ws,
+            project_id,
+        ),
+        deps,
+    )
+    assert approved["ok"] is True
+
+    listed = await dispatch(_env("ListAuditEvents", {"limit": 50}, ws, project_id), deps)
+    assert listed["ok"] is True
+    types = {e["event_type"] for e in listed["detail"]["events"]}
+    assert "project_created" in types
+    assert "script_saved" in types
+    assert "approval_requested" in types
+
+
+async def test_audit_event_filter_by_type() -> None:
+    deps, ws, _prj = _setup()
+    await dispatch(_env("CreateProject", {"title": "只看创建"}, ws, None), deps)
+
+    res = await dispatch(
+        _env("ListAuditEvents", {"eventType": "project_created"}, ws, None), deps
+    )
+    assert res["ok"] is True
+    assert res["detail"]["count"] >= 1
+    assert all(e["event_type"] == "project_created" for e in res["detail"]["events"])

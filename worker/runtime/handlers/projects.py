@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from worker.runtime.audit import EVENT_PROJECT_CREATED, record_event
 from worker.runtime.cleanup import assets_root, resolve_stepwork_home
 from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
@@ -112,6 +113,11 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         # 本地文件导入也不落项目目录。这里建出来并写入 project.json 元数据，
         # 使项目在磁盘上可被用户直接找到。失败不阻塞建项目（可能无权限）。
         project_dir = _ensure_project_dir(pid, title, now)
+        # PRD §14 埋点：项目创建（此前无任何事件）
+        record_event(
+            deps.repos.conn, env, EVENT_PROJECT_CREATED,
+            {"project_id": pid, "title": title, "tags": tags},
+        )
         return CommandResult(
             ok=True,
             commandId=env.commandId,
