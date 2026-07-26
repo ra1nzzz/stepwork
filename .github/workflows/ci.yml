@@ -5,7 +5,7 @@
 #
 # 三个独立 job：
 #   - rust-check  ：apps/desktop/src-tauri 的 cargo check/clippy/fmt/test
-#   - frontend-check：apps/desktop 的 tsc --noEmit + 生产构建
+#   - frontend-check：apps/desktop 的 tsc --noEmit + vitest 单测 + 生产构建
 #   - python-check ：worker 的 ruff / mypy / pytest（从仓库根 pyproject.toml 安装 -e .[dev]），
 #                    外加仓库根的 cli/tests + mcp/tests；worker pytest 跳过 perf 标记
 #                    （性能基线仅手动跑，见 docs/PERF_BASELINE.md）
@@ -87,6 +87,9 @@ jobs:
 
       - name: TypeScript check (node config)
         run: npx tsc --noEmit -p tsconfig.node.json
+
+      - name: Unit tests (vitest)
+        run: npm test
 
       - name: Build
         run: npm run build
