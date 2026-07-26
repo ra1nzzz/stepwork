@@ -37,7 +37,7 @@ def _mock_transport(payload: dict[str, Any]) -> httpx.MockTransport:
 
 def test_cloud_mock_returns_dict() -> None:
     client = httpx.AsyncClient(transport=_mock_transport(_VALID_ANALYSIS))
-    p = CloudAIProvider(api_key="k", client=client)
+    p = CloudAIProvider(api_key="k", base_url="https://ai.mock.test/v1", client=client)
     out = asyncio.run(p.complete("prompt", {"type": "object"}))
     assert out["summary"] == _VALID_ANALYSIS["summary"]
     assert out["sentiment"] == "positive"
@@ -59,6 +59,17 @@ def test_cloud_requires_key() -> None:
     except RuntimeError:
         return
     raise AssertionError("expected RuntimeError when API key missing")
+
+
+def test_cloud_requires_base_url() -> None:
+    # 去掉虚构默认后：base_url 未配置（参数 + env 皆空）应抛错，绝不静默请求
+    os.environ.pop("STEPWORK_AI_BASE_URL", None)
+    p = CloudAIProvider(api_key="k", base_url=None)
+    try:
+        asyncio.run(p.complete("prompt"))
+    except RuntimeError:
+        return
+    raise AssertionError("expected RuntimeError when base_url missing")
 
 
 def test_parse_json_response_strips_fence() -> None:
