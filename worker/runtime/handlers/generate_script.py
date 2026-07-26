@@ -64,6 +64,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         stage=JobStage.SCRIPTING,
         env=env,
         fail_code="SCRIPT_FAILED",
+        notify=deps.notify,
     ) as ctx:
         raw = await ai.complete(prompt, SCRIPT_SCHEMA)
         script = parse_script(raw)
@@ -82,6 +83,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             },
             stage=JobStage.SCRIPTING,
             parent_version_id=parent_id,
+            notify=deps.notify,
         )
     return CommandResult(
         ok=True,

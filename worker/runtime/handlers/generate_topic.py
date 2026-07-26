@@ -52,6 +52,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         stage=JobStage.PROPOSING,
         env=env,
         fail_code="TOPIC_FAILED",
+        notify=deps.notify,
     ) as ctx:
         raw = await ai.complete(prompt, TOPIC_SCHEMA)
         proposal = parse_topic_proposal(raw, spec.count)
@@ -70,6 +71,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             },
             stage=JobStage.PROPOSING,
             parent_version_id=spec.source_version_id,
+            notify=deps.notify,
         )
     return CommandResult(
         ok=True,

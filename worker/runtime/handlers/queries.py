@@ -1,11 +1,13 @@
-"""只读查询类命令处理（W7 Phase 3）。
+"""只读查询类命令处理（W7 Phase 3 + Tranche 1 ListJobs）。
 
-三个查询 handler，全部只读、不写库：
+四个查询 handler，全部只读、不写库：
 
 - ``ListProjects``：列出某工作区下的内容项目。
 - ``GetProject``：按 id 取单个项目（兼容 ``payload.projectId`` /
   ``payload.project_id`` / 信封顶层 ``projectId`` 三种来源）。
 - ``GetJobStatus``：按 id 取任务状态。
+- ``ListJobs``：按 ``created_at DESC`` 列出任务，支持 ``states``（小写
+  ``JobState`` value 列表）过滤与 ``limit``（默认 50）截断。
 
 ``Repos`` 暂未暴露 list / get-by-id 等读方法，故在 ``deps.repos.conn`` 上
 做只读 ``SELECT``；读取严格只读，绝不修改任何状态。
@@ -16,8 +18,12 @@ from __future__ import annotations
 from typing import Any
 
 from worker.runtime.commands.bus import DispatchError
+from worker.runtime.db.repos import _row_to_job
 from worker.runtime.deps import Deps
-from worker.runtime.models import CommandEnvelope, CommandResult
+from worker.runtime.models import CommandEnvelope, CommandResult, Job
+
+_DEFAULT_LIST_JOBS_LIMIT = 50
+"""``ListJobs`` 缺省返回条数上限。"""
 
 
 def _project_row_to_dict(row: Any) -> dict[str, Any]:
@@ -46,6 +52,21 @@ def _resolve_project_id(env: CommandEnvelope) -> str | None:
     """从 payload 或信封顶层解析 projectId（兼容两种命名）。"""
     payload = env.payload or {}
     return payload.get("projectId") or payload.get("project_id") or env.projectId
+
+
+def _job_to_dict(job: Job) -> dict[str, Any]:
+    """把 :class:`Job` 转为可序列化 dict（``GetJobStatus`` / ``ListJobs`` 同构）。"""
+    return {
+        "id": job.id,
+        "job_type": job.job_type,
+        "state": job.state.value,
+        "stage": job.stage.value if job.stage else None,
+        "progress": job.progress,
+        "attempt_count": job.attempt_count,
+        "error_code": job.error_code,
+        "created_at": job.created_at,
+        "updated_at": job.updated_at,
+    }
 
 
 async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
@@ -87,19 +108,41 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         return CommandResult(
             ok=True,
             commandId=env.commandId,
-            detail={
-                "job": {
-                    "id": job.id,
-                    "job_type": job.job_type,
-                    "state": job.state.value,
-                    "stage": job.stage.value if job.stage else None,
-                    "progress": job.progress,
-                    "attempt_count": job.attempt_count,
-                    "error_code": job.error_code,
-                    "created_at": job.created_at,
-                    "updated_at": job.updated_at,
-                }
-            },
+            detail={"job": _job_to_dict(job)},
+        )
+
+    if env.commandType == "ListJobs":
+        payload = env.payload or {}
+        states = payload.get("states")
+        limit = payload.get("limit", _DEFAULT_LIST_JOBS_LIMIT)
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
+            raise DispatchError(
+                "INVALID_ARGUMENT", f"limit must be a positive integer, got {limit!r}"
+            )
+        sql = "SELECT * FROM jobs"
+        args: list[Any] = []
+        if states is not None:
+            if not isinstance(states, list) or not all(
+                isinstance(s, str) for s in states
+            ):
+                raise DispatchError(
+                    "INVALID_ARGUMENT", "states must be a list of strings"
+                )
+            if not states:
+                # 显式空列表 → 空结果（与「未提供 = 不过滤」区分开）
+                return CommandResult(
+                    ok=True, commandId=env.commandId, detail={"jobs": []}
+                )
+            placeholders = ",".join(["?"] * len(states))
+            sql += f" WHERE state IN ({placeholders})"
+            args.extend(states)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        args.append(limit)
+        rows = deps.repos.conn.execute(sql, tuple(args)).fetchall()
+        # 复用 repos 的行→模型映射，保证 state/stage 枚举与 GetJobStatus 同构
+        jobs = [_job_to_dict(_row_to_job(r)) for r in rows]
+        return CommandResult(
+            ok=True, commandId=env.commandId, detail={"jobs": jobs}
         )
 
     raise DispatchError(

@@ -77,6 +77,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             "transcript_version_id": tv_id,
             "provider": getattr(ai, "name", "unknown"),
         },
+        notify=deps.notify,
     ) as ctx:
         raw = await ai.complete(prompt, ANALYSIS_SCHEMA)
         report = parse_analysis_report(raw)
@@ -95,6 +96,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
                 "schema_version": "analysis.schema.json",
             },
             stage=JobStage.ANALYZING,
+            notify=deps.notify,
         )
 
     return CommandResult(

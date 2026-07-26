@@ -15,6 +15,14 @@
    - :class:`ConnectionClosedError` → break
 8. 收到 ``runtime.shutdown`` → 设置 ``state.shutdown_event`` → 等 heartbeat 退出 →
    关闭 writer → 退出码 0
+
+T1 并发 dispatch：``job.*`` / ``command.*`` request 帧经 ``asyncio.create_task``
+并发处理，长任务（渲染 / 转写）不再阻塞读循环——``CancelJob`` 可在其它命令
+执行期间被处理。所有帧写入（响应 / 心跳 / notification）经 ``state.write_lock``
+整帧互斥：``write_frame`` 在帧内部 await（``drain`` → run_in_executor），
+两个任务并发写帧时，flush 可能在不同执行器线程上并发进行，帧序 / 字节序
+均无保证，必须加锁串行化。``runtime.health_check`` / ``runtime.shutdown``
+保持内联（快路径 + shutdown 需要即刻置位事件）。
 """
 
 from __future__ import annotations
@@ -25,7 +33,7 @@ import os
 import sys
 import threading
 import time
-from typing import IO
+from typing import IO, Any
 
 from worker.runtime.handlers import commands, health, lifecycle
 from worker.runtime.heartbeat import heartbeat_loop
@@ -238,11 +246,23 @@ async def amain() -> int:
 
     reader, writer = await _open_stdin_stdout()
 
+    async def _write_locked(frame: RpcFrame) -> None:
+        """经 ``state.write_lock`` 整帧互斥地写出一帧。"""
+        async with state.write_lock:
+            await write_frame(writer, frame)
+
+    async def _notify(method: str, params: dict[str, Any]) -> None:
+        """发送一条 JSON-RPC notification（进度通知等，T1 契约注入点）。"""
+        await _write_locked(make_notification(method, params))
+
+    # 注入进度通知回调：handler 经 deps/state 拿到（无注入时静默跳过）
+    state.notify = _notify
+
     # 计算启动耗时（v1.1 Patch-U3），再发送 ready
     state.startup_duration_ms = int((time.monotonic() - monotonic_start) * 1000)
 
     ready_params = await lifecycle.handle_ready(state)
-    await write_frame(writer, make_notification("runtime.ready", ready_params))
+    await _write_locked(make_notification("runtime.ready", ready_params))
     logger.info(
         "worker ready pid=%s protocol=%s startup_ms=%s",
         state.pid,
@@ -255,6 +275,20 @@ async def amain() -> int:
         name="runtime-heartbeat",
     )
 
+    # T1 并发 dispatch：跟踪 in-flight 任务，shutdown 时限时等待再取消
+    in_flight: set[asyncio.Task[None]] = set()
+
+    async def _dispatch_and_respond(frame: RpcFrame) -> None:
+        """并发路径：dispatch 一帧并（若有）写回响应；异常兜底不击垮循环。"""
+        try:
+            response = await _dispatch(frame, state)
+            if response is not None:
+                await _write_locked(response)
+        except ConnectionClosedError as exc:
+            logger.info("response write failed (peer gone): %s", exc)
+        except Exception:
+            logger.exception("dispatch task crashed method=%s id=%s", frame.method, frame.id)
+
     exit_code = 0
     try:
         while not state.shutdown_event.is_set():
@@ -262,15 +296,13 @@ async def amain() -> int:
                 frame = await read_frame(reader)
             except ParseError as exc:
                 logger.warning("parse error: %s", exc)
-                await write_frame(
-                    writer,
+                await _write_locked(
                     make_error_response(None, JSONRPC_PARSE_ERROR, f"Parse error: {exc}"),
                 )
                 break
             except FrameTooLargeError as exc:
                 logger.warning("frame too large: %s", exc)
-                await write_frame(
-                    writer,
+                await _write_locked(
                     make_error_response(
                         None,
                         JSONRPC_INVALID_REQUEST,
@@ -284,8 +316,7 @@ async def amain() -> int:
 
             if not _check_session_token(frame, state):
                 logger.warning("session token mismatch id=%s", frame.id)
-                await write_frame(
-                    writer,
+                await _write_locked(
                     make_error_response(
                         frame.id,
                         JSONRPC_UNAUTHORIZED,
@@ -294,11 +325,33 @@ async def amain() -> int:
                 )
                 continue
 
-            response = await _dispatch(frame, state)
-            if response is not None:
-                await write_frame(writer, response)
+            method = frame.method or ""
+            if frame.id is not None and method not in (
+                "runtime.health_check",
+                "runtime.shutdown",
+            ):
+                # request 帧并发处理：长任务不阻塞读循环，CancelJob 可乘隙抵达
+                task = asyncio.create_task(
+                    _dispatch_and_respond(frame),
+                    name=f"dispatch-{method}-{frame.id}",
+                )
+                in_flight.add(task)
+                task.add_done_callback(in_flight.discard)
+            else:
+                # health_check / shutdown（快路径，shutdown 需即刻置位事件）
+                # 与 notification 帧保持内联，语义与改造前一致
+                response = await _dispatch(frame, state)
+                if response is not None:
+                    await _write_locked(response)
     finally:
         state.shutdown_event.set()
+        # 限时等待 in-flight 任务收尾，超时后取消（避免卡死退出）
+        if in_flight:
+            _done, pending = await asyncio.wait(in_flight, timeout=5.0)
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
         heartbeat_task.cancel()
         try:
             await asyncio.wait_for(heartbeat_task, timeout=1.0)

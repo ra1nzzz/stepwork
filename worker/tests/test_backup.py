@@ -15,6 +15,9 @@
 7. ``test_restore_workspace_rejects_non_db``：backupPath 是 .txt → DispatchError INVALID_ARGUMENT
 8. ``test_backup_workspace_db_not_found``：STEPWORK_HOME 指向空目录（无 stepwork.db）
    → DispatchError NOT_FOUND
+9. ``test_restore_workspace_then_dispatch_still_works``（Tranche 1 回归）：
+   backup → restore → ListProjects 全走 ``handle_command``（``state.db_conn``
+   路径），恢复后的下一次 dispatch 必须成功
 
 参考 ``worker/tests/test_project_io.py`` 的 ``_envelope`` 风格，
 ``STEPWORK_HOME`` 指向 ``tmp_path`` 避免污染真实家目录；用真实文件 DB
@@ -269,6 +272,59 @@ async def test_restore_workspace_rejects_non_db(
         assert "INVALID_ARGUMENT" in res["error"]
     finally:
         deps.repos.conn.close()
+
+
+async def test_restore_workspace_then_dispatch_still_works(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Tranche 1（T2）回归：恢复后**下一次 dispatch** 仍可用。
+
+    ``handlers.commands.handle_command`` 每次都从 ``state.db_conn`` 重建
+    ``Repos``；旧实现 RestoreWorkspace 只 rebind 了本次请求的 ``Repos``，
+    ``state.db_conn`` 仍指向已关闭的旧连接 → 恢复后的任何命令都会
+    ``Cannot operate on a closed database``。修复后 handler 经
+    ``deps.worker_state`` 一并回写 ``state.db_conn``。
+    """
+    from worker.runtime.handlers.commands import handle_command
+    from worker.runtime.state import WorkerState
+
+    monkeypatch.setenv("STEPWORK_HOME", str(tmp_path))
+    db_path = tmp_path / "stepwork.db"
+    conn = connect(str(db_path))
+    run_migrations(conn, _MIG_DIR)
+    state = WorkerState()
+    state.db_conn = conn
+    state.db_path = str(db_path)
+
+    async def _dispatch_via_state(raw: dict[str, Any]) -> dict[str, Any]:
+        ret = await handle_command({"envelope": raw}, state)
+        assert "result" in ret, ret
+        return ret["result"]
+
+    # 写数据 → 备份 → 恢复（全部走 handle_command，即真实常驻 worker 路径）
+    imp = await _dispatch_via_state(
+        _envelope(
+            "ImportSource",
+            {"local_uri": "file://a.mp4", "content_hash": "h_state", "kind": "video"},
+        )
+    )
+    assert imp["ok"] is True
+
+    backup_res = await _dispatch_via_state(_envelope("BackupWorkspace", {}))
+    assert backup_res["ok"] is True
+    backup_path = backup_res["detail"]["backup_path"]
+
+    restore_res = await _dispatch_via_state(
+        _envelope("RestoreWorkspace", {"backupPath": backup_path})
+    )
+    assert restore_res["ok"] is True
+
+    # 关键断言：恢复后的下一条命令必须在新连接上成功
+    listed = await _dispatch_via_state(_envelope("ListProjects", {}))
+    assert listed["ok"] is True, listed.get("error")
+    assert len(listed["detail"]["projects"]) == 1
+
+    state.db_conn.close()
 
 
 async def test_backup_workspace_db_not_found(

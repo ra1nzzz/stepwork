@@ -46,7 +46,9 @@ async def run_command(
     try:
         ws = raw.get("workspaceId") or "ws-local"
         state = WorkerState()
-        bootstrap_db(state, db_path=db_path)
+        # recover_jobs=False：进程内门面每条命令都 bootstrap，且可能与正在
+        # 跑长任务的桌面 worker 并存，不能把在途 RUNNING/LEASED 误判为孤儿
+        bootstrap_db(state, db_path=db_path, recover_jobs=False)
         deps = Deps(
             repos=Repos(state.db_conn),
             ingest=ingest,

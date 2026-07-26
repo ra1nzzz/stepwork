@@ -33,11 +33,13 @@ _ROUTES: dict[str, str] = {
     "ListProjects": "worker.runtime.handlers.queries",
     "GetProject": "worker.runtime.handlers.queries",
     "GetJobStatus": "worker.runtime.handlers.queries",
+    "ListJobs": "worker.runtime.handlers.queries",
     "CreateProject": "worker.runtime.handlers.projects",
     "DeleteAsset": "worker.runtime.handlers.projects",
     # W8: 插件 / Provenance / Agent / 诊断包（Layer 0 路由先行，handler 由各支线补齐）
     "ListPlugins": "worker.runtime.handlers.plugins",
     "GetPluginManifest": "worker.runtime.handlers.plugins",
+    "InstallPlugin": "worker.runtime.handlers.plugins",
     "EnablePlugin": "worker.runtime.handlers.plugins",
     "DisablePlugin": "worker.runtime.handlers.plugins",
     "GetProvenance": "worker.runtime.handlers.provenance",

@@ -25,7 +25,12 @@ from pathlib import Path
 
 from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
-from worker.runtime.jobs import content_job, persist_content_version, transition
+from worker.runtime.jobs import (
+    content_job,
+    emit_job_progress,
+    persist_content_version,
+    transition,
+)
 from worker.runtime.jobs.cancel import clear, register
 from worker.runtime.models import (
     CommandEnvelope,
@@ -131,6 +136,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         env=env,
         fail_code="RENDER_FAILED",
         lease="render_source",
+        notify=deps.notify,
     ) as ctx:
         register(ctx.job.id, cancel_event)
         try:
@@ -148,7 +154,8 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             # 避免阻塞主事件循环。进度回调会跨线程触发，因此通过主线程的 loop
             # 把 DB 写入（transition）调度回主线程执行，确保所有 DB 访问留在
             # 创建连接的主线程（db_conn 使用 check_same_thread=True）。
-            # 进度写去抖（T5）：每 ~5% 或 ≥1s 才提交一次 UPDATE，抑制写放大。
+            # 进度写去抖（T5）：每 ~5% 或 ≥1s 才提交一次 UPDATE，抑制写放大；
+            # 每次落库同时 fire-and-forget 一条 job.progress 通知（Tranche 1）。
             loop = asyncio.get_running_loop()
             _last = {"progress": -1.0, "ts": 0.0}
 
@@ -158,13 +165,15 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
                     captured = prog
 
                     def _commit(p: float) -> None:
-                        transition(
+                        updated = transition(
                             repos,
                             ctx.job.id,
                             JobState.RUNNING,
                             progress=p,
                             stage=JobStage.RENDERING,
                         )
+                        # _commit 在主事件循环线程执行，可安全调度通知 task
+                        emit_job_progress(deps.notify, updated)
 
                     loop.call_soon_threadsafe(_commit, captured)
                     _last["progress"] = prog
@@ -200,6 +209,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
                 producer=meta.producer,
                 stage=JobStage.RENDERING,
                 parent_version_id=spec.source_version_id,
+                notify=deps.notify,
             )
             return CommandResult(
                 ok=True,

@@ -60,6 +60,12 @@ class WorkerState(BaseModel):
         degraded_reasons: 降级原因列表（非空时 health.status=degraded）。
         monotonic_start: ``time.monotonic()`` 启动锚点（用于 uptime 计算）。
         shutdown_event: 优雅退出事件（由 ``__main__`` 主循环监听）。
+        write_lock: stdout 帧写入锁（T1 并发 dispatch 后，响应 / 心跳 /
+            notification 三路并发写帧，必须整帧互斥，避免字节交错）。
+        notify: 可选异步通知回调（由 ``__main__`` 注入，签名
+            ``async def notify(method: str, params: dict) -> None``，内部经
+            ``write_lock`` 写一条 JSON-RPC notification）。未注入时为 ``None``，
+            handler 侧静默跳过。
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -75,6 +81,9 @@ class WorkerState(BaseModel):
     degraded_reasons: list[str] = Field(default_factory=list)
     monotonic_start: float = Field(default_factory=time.monotonic)
     shutdown_event: asyncio.Event = Field(default_factory=asyncio.Event)
+    # T1 并发 dispatch：帧写入互斥锁 + 进度通知回调（由 ``__main__`` 注入）
+    write_lock: asyncio.Lock = Field(default_factory=asyncio.Lock)
+    notify: Any = None
     # W3-W4 Batch 0：数据库层（由 ``bootstrap.bootstrap_db`` 回填）
     db_conn: Any = None
     db_path: str | None = None

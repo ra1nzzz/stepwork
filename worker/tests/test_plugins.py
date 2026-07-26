@@ -29,6 +29,11 @@ from worker.runtime.deps import Deps
 
 _MIG_DIR = Path(__file__).resolve().parents[2] / "migrations"
 
+# Tranche 1：InstallPlugin 测试用的示例插件目录（仓库自带）
+_EXAMPLE_PLUGIN_DIR = (
+    Path(__file__).resolve().parents[2] / "plugins" / "examples" / "dummy-ai-provider"
+)
+
 
 def _env(
     command_type: str,
@@ -170,6 +175,97 @@ def test_enable_disable_plugin(tmp_path: Path) -> None:
         assert res_d["ok"] is True
         disabled_plugin = res_d["detail"]["plugin"]
         assert disabled_plugin["enabled"] is False
+    finally:
+        conn.close()
+
+
+def test_install_plugin_example_manifest(tmp_path: Path) -> None:
+    """安装示例插件目录 → 落库 enabled=0、status='installed'、manifest 完整。"""
+    conn, repos = _new_db(tmp_path)
+    try:
+        deps = Deps(repos=repos)
+        res = _run(_env("InstallPlugin", {"path": str(_EXAMPLE_PLUGIN_DIR)}), deps)
+        assert res["ok"] is True, res.get("error")
+        plugin = res["detail"]["plugin"]
+        assert plugin["id"] == "dummy-ai-provider"
+        assert plugin["enabled"] is False
+        assert plugin["status"] == "installed"
+        assert plugin["manifest"]["apiVersion"] == "1"
+        assert plugin["manifest"]["permissions"] == ["ai:complete"]
+        # DB 行确实是 enabled=0
+        row = conn.execute(
+            "SELECT enabled, status FROM installed_plugins WHERE id=?",
+            ("dummy-ai-provider",),
+        ).fetchone()
+        assert row is not None
+        assert int(row["enabled"]) == 0
+        assert str(row["status"]) == "installed"
+    finally:
+        conn.close()
+
+
+def test_install_plugin_incompatible_api_version(tmp_path: Path) -> None:
+    """apiVersion 主版本 != 1 → INCOMPATIBLE_API_VERSION（PRD-PLG-001）。"""
+    conn, repos = _new_db(tmp_path)
+    try:
+        plugin_dir = tmp_path / "bad-api-plugin"
+        plugin_dir.mkdir()
+        (plugin_dir / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "id": "bad-api-plugin",
+                    "name": "Bad API",
+                    "version": "0.1.0",
+                    "apiVersion": "2.0",
+                    "permissions": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        deps = Deps(repos=repos)
+        res = _run(_env("InstallPlugin", {"path": str(plugin_dir)}), deps)
+        assert res["ok"] is False
+        assert "INCOMPATIBLE_API_VERSION" in res["error"]
+        # 不落库
+        row = conn.execute(
+            "SELECT id FROM installed_plugins WHERE id=?", ("bad-api-plugin",)
+        ).fetchone()
+        assert row is None
+    finally:
+        conn.close()
+
+
+def test_install_plugin_missing_manifest(tmp_path: Path) -> None:
+    """目录无 manifest.json → INVALID_ARGUMENT。"""
+    conn, repos = _new_db(tmp_path)
+    try:
+        empty_dir = tmp_path / "no-manifest"
+        empty_dir.mkdir()
+        deps = Deps(repos=repos)
+        res = _run(_env("InstallPlugin", {"path": str(empty_dir)}), deps)
+        assert res["ok"] is False
+        assert "INVALID_ARGUMENT" in res["error"]
+    finally:
+        conn.close()
+
+
+def test_install_plugin_missing_required_fields(tmp_path: Path) -> None:
+    """manifest 缺必填字段（permissions）→ INVALID_ARGUMENT。"""
+    conn, repos = _new_db(tmp_path)
+    try:
+        plugin_dir = tmp_path / "incomplete-plugin"
+        plugin_dir.mkdir()
+        (plugin_dir / "manifest.json").write_text(
+            json.dumps(
+                {"id": "incomplete", "name": "x", "version": "0.1.0", "apiVersion": 1}
+            ),
+            encoding="utf-8",
+        )
+        deps = Deps(repos=repos)
+        res = _run(_env("InstallPlugin", {"path": str(plugin_dir)}), deps)
+        assert res["ok"] is False
+        assert "INVALID_ARGUMENT" in res["error"]
+        assert "permissions" in res["error"]
     finally:
         conn.close()
 

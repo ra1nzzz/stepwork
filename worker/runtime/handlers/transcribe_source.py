@@ -57,6 +57,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             "local_uri": local_uri,
             "provider": getattr(asr, "name", "unknown"),
         },
+        notify=deps.notify,
     ) as ctx:
         transcript = await asr.transcribe(local_uri, p.get("opts"))
 
@@ -83,6 +84,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
                 "segments": [s.model_dump() for s in transcript.segments],
             },
             stage=JobStage.TRANSCRIBING,
+            notify=deps.notify,
         )
 
     return CommandResult(
