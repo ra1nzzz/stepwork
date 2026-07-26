@@ -68,6 +68,9 @@ export function PublishView() {
   const [scheduleAt, setScheduleAt] = useState<Record<string, string>>({});
   const [schedulingId, setSchedulingId] = useState<string | null>(null);
   const [scheduled, setScheduled] = useState<ScheduledPublish[]>([]);
+  // PRD-REN-006：剪辑时间线导出
+  const [exportingTimeline, setExportingTimeline] = useState(false);
+  const [timelineNotice, setTimelineNotice] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [tags, setTags] = useState<string[]>([]);
@@ -155,6 +158,32 @@ export function PublishView() {
       await loadScheduled();
     } finally {
       setSchedulingId(null);
+    }
+  }
+
+  /**
+   * 导出可继续剪辑的时间线（PRD-REN-006）。
+   *
+   * 不导剪映草稿：剪映 6+ 起草稿加密（现已 10.x），要写就得内置逆向解密，
+   * 与本项目立场冲突；OpenCut 目前也没有可移植工程格式。故导 OTIO
+   * （Resolve/Premiere/FCP/Avid 都读）与 EDL（最大公约数）。
+   */
+  async function exportTimeline(fmt: "otio" | "edl") {
+    if (!projectId) return;
+    setExportingTimeline(true);
+    try {
+      const res = await dispatchCommand(
+        buildEnvelope("ExportEditTimeline", getWorkspaceId(), projectId, {
+          projectId,
+          format: fmt,
+        }),
+      );
+      const d = (res.detail ?? {}) as { path?: string; note?: string };
+      setTimelineNotice(
+        res.ok ? `已导出：${d.path}（${d.note ?? ""}）` : (res.error ?? "导出失败"),
+      );
+    } finally {
+      setExportingTimeline(false);
     }
   }
 
@@ -455,6 +484,40 @@ export function PublishView() {
             </button>
           </div>
           <div className="panel-body">
+            {/* PRD-REN-006：把分析出的场景切点 + 逐字稿时间戳导成时间线，
+                拿去专业剪辑软件接着剪 */}
+            <div className="section-gap">
+              <p className="panel-meta" style={{ margin: "0 0 6px" }}>
+                导出剪辑时间线：把精确分析的场景切点与逐字稿时间戳带进
+                DaVinci Resolve / Premiere / Final Cut 继续剪。
+                <br />
+                不支持剪映草稿 —— 剪映 6.0 起对草稿文件加密，写入需内置逆向
+                解密，本项目不做这类绕过第三方保护措施的事。
+              </p>
+              <div className="inline-actions">
+                <button
+                  className="btn small ghost"
+                  type="button"
+                  disabled={!projectId || exportingTimeline}
+                  onClick={() => void exportTimeline("otio")}
+                >
+                  {exportingTimeline ? "导出中…" : "导出 OTIO"}
+                </button>
+                <button
+                  className="btn small ghost"
+                  type="button"
+                  disabled={!projectId || exportingTimeline}
+                  onClick={() => void exportTimeline("edl")}
+                >
+                  导出 EDL
+                </button>
+              </div>
+              {timelineNotice && (
+                <p className="panel-meta" data-od-id="timeline-notice">
+                  {timelineNotice}
+                </p>
+              )}
+            </div>
             {error && (
               <p className="error-text section-gap" style={{ color: "var(--danger)" }}>
                 {error}

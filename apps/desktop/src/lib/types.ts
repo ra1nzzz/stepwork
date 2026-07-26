@@ -177,6 +177,7 @@ export interface CommandEnvelope {
     | "ListScheduledPublishes"
     | "CancelScheduledPublish"
     | "FireDueSchedules"
+    | "ExportEditTimeline"
     | "RequestPublishAuthorization"
     | "RecordPublishResult"
     | "ListPublishJobs"

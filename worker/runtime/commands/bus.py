@@ -86,6 +86,8 @@ _ROUTES: dict[str, str] = {
     "ListScheduledPublishes": "worker.runtime.handlers.publish",
     "CancelScheduledPublish": "worker.runtime.handlers.publish",
     "FireDueSchedules": "worker.runtime.handlers.publish",
+    # PRD-REN-006 导出第三方剪辑数据（OTIO / EDL）
+    "ExportEditTimeline": "worker.runtime.handlers.export_timeline",
     "ExportDiagnosticsBundle": "worker.runtime.handlers.diagnostics",
     # W9: 集成 / 数据迁移 / 种子测试（Layer 0 路由先行，handler 由各支线补齐）
     "ExportProject": "worker.runtime.handlers.project_io",
