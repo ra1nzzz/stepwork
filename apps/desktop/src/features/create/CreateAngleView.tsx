@@ -20,6 +20,8 @@ export function CreateAngleView() {
   const isBusy = useScriptStore((s) => s.isBusy);
   const error = useScriptStore((s) => s.error);
   const generateTopics = useScriptStore((s) => s.generateTopics);
+  const useBrandProfile = useScriptStore((s) => s.useBrandProfile);
+  const setUseBrandProfile = useScriptStore((s) => s.setUseBrandProfile);
   const selectAngle = useScriptStore((s) => s.selectAngle);
 
   const hasSource = !!sourceVersionId;
@@ -51,6 +53,19 @@ export function CreateAngleView() {
                 ? `${angles.length} 个角度`
                 : "未生成"}
         </span>
+      </section>
+
+      {/* PRD-BRD-002：生成时可选择是否启用项目绑定的品牌档 */}
+      <section className="section-gap">
+        <label className="panel-meta" style={{ display: "inline-flex", gap: 6 }}>
+          <input
+            type="checkbox"
+            checked={useBrandProfile}
+            onChange={(e) => setUseBrandProfile(e.target.checked)}
+            disabled={isBusy}
+          />
+          生成时启用项目品牌档（定位 / 语气 / 内容支柱 / 禁用表达）
+        </label>
       </section>
 
       <section className="layout-main" data-od-id="angle-layout">
@@ -100,14 +115,33 @@ export function CreateAngleView() {
               <span className="topic-score">角度 {idx + 1}</span>
               <h3>{angle.title}</h3>
               <p>{angle.rationale}</p>
-              {angle.hook && (
-                <dl className="angle-facts">
+              {/* PRD-SCR-001：每个角度展示受众、观点、差异与风险 */}
+              <dl className="angle-facts">
+                {angle.hook && (
                   <div>
                     <dt>钩子</dt>
                     <dd>{angle.hook}</dd>
                   </div>
-                </dl>
-              )}
+                )}
+                {angle.audience && (
+                  <div>
+                    <dt>受众</dt>
+                    <dd>{angle.audience}</dd>
+                  </div>
+                )}
+                {angle.stance && (
+                  <div>
+                    <dt>观点</dt>
+                    <dd>{angle.stance}</dd>
+                  </div>
+                )}
+                {angle.risks && angle.risks.length > 0 && (
+                  <div>
+                    <dt>风险</dt>
+                    <dd>{angle.risks.join("；")}</dd>
+                  </div>
+                )}
+              </dl>
             </article>
           ))}
         </div>

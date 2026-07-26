@@ -52,6 +52,9 @@ interface ScriptStoreState {
 
   setSourceVersion: (id: string) => void;
   selectAngle: (id: string) => void;
+  /** PRD-BRD-002：生成时是否启用项目绑定的品牌档（默认启用） */
+  useBrandProfile: boolean;
+  setUseBrandProfile: (v: boolean) => void;
   generateTopics: () => Promise<void>;
   generateScript: () => Promise<void>;
   setScriptTitle: (t: string) => void;
@@ -113,6 +116,9 @@ export const useScriptStore = create<ScriptStoreState>((set, get) => ({
 
   selectAngle: (id) => set({ selectedAngleId: id }),
 
+  useBrandProfile: true,
+  setUseBrandProfile: (v) => set({ useBrandProfile: v }),
+
   generateTopics: async () => {
     if (get().isBusy) return;
     set({ topicStatus: "running", isBusy: true, error: null });
@@ -120,6 +126,7 @@ export const useScriptStore = create<ScriptStoreState>((set, get) => ({
       const payload: GenerateTopicPayload = {
         source_version_id: get().sourceVersionId,
         count: 3,
+        use_brand_profile: get().useBrandProfile,
       };
       const env = buildEnvelope(
         "GenerateTopic",
@@ -158,6 +165,7 @@ export const useScriptStore = create<ScriptStoreState>((set, get) => ({
         proposal_version_id: proposalId,
         topic_id: get().selectedAngleId,
         style: "short_video",
+        use_brand_profile: get().useBrandProfile,
       };
       const env = buildEnvelope(
         "GenerateScript",

@@ -265,6 +265,12 @@ export interface TopicAngle {
   title: string;
   rationale: string;
   hook: string;
+  /** PRD-SCR-001：目标受众（旧版本提案可能缺失） */
+  audience?: string | null;
+  /** PRD-SCR-001：核心观点/立场 */
+  stance?: string | null;
+  /** PRD-SCR-001：风险点 */
+  risks?: string[];
 }
 
 export interface TopicProposal {
@@ -287,8 +293,11 @@ export interface ScriptVersionRef {
 /** GenerateTopic payload（对齐 TopicProposalSpec） */
 export interface GenerateTopicPayload {
   source_version_id: string;
+  /** PRD-SCR-001：3—5 个角度（后端强校验，越界即 INVALID_ARGUMENT） */
   count?: number;
   provider?: Record<string, unknown> | null;
+  /** PRD-BRD-002：生成时是否启用项目绑定的品牌档 */
+  use_brand_profile?: boolean;
 }
 
 /** GenerateScript payload（对齐 ScriptSpec） */
@@ -298,6 +307,8 @@ export interface GenerateScriptPayload {
   outline?: string | null;
   style?: string;
   provider?: Record<string, unknown> | null;
+  /** PRD-BRD-002：生成时是否启用项目绑定的品牌档 */
+  use_brand_profile?: boolean;
 }
 
 /** SaveScript payload（自动保存 = 版本链追加） */

@@ -247,7 +247,7 @@ async def test_generate_topic_injects_brand_and_records_producer() -> None:
     res = await dispatch(
         _env(
             "GenerateTopic",
-            {"source_version_id": cv_id, "count": 1},
+            {"source_version_id": cv_id, "count": 3},
             workspace_id=ws_id,
             project_id=prj_id,
         ),
@@ -321,7 +321,7 @@ async def test_generate_topic_without_profile_backward_compatible() -> None:
     res = await dispatch(
         _env(
             "GenerateTopic",
-            {"source_version_id": cv_id, "count": 1},
+            {"source_version_id": cv_id, "count": 3},
             workspace_id=ws_id,
             project_id=prj_id,
         ),
@@ -338,3 +338,72 @@ async def test_generate_topic_without_profile_backward_compatible() -> None:
     producer = json.loads(row["producer"])
     assert producer["brand_profile_id"] is None
     assert producer["brand_profile_updated_at"] is None
+
+
+# ----- PRD-BRD-002「生成时可选择启用」 -----
+
+
+async def test_generate_topic_can_opt_out_of_brand_profile() -> None:
+    """关闭开关时，即便项目已绑定品牌档也不注入、不记录。"""
+    ai = _RecordingAIProvider()
+    deps = _deps(ai)
+    ws_id, prj_id, cv_id, _profile_id = await _setup_linked_project(deps)
+
+    res = await dispatch(
+        _env(
+            "GenerateTopic",
+            {"source_version_id": cv_id, "count": 3, "use_brand_profile": False},
+            workspace_id=ws_id,
+            project_id=prj_id,
+        ),
+        deps,
+    )
+    assert res["ok"] is True, res.get("error")
+
+    prompt = ai.prompts[-1]
+    # 品牌画像的特征串一个都不该出现
+    assert "克制第一人称" not in prompt
+    assert "实测定位" not in prompt
+    assert "不得使用以下表达" not in prompt
+
+    import json
+
+    row = deps.repos.conn.execute(
+        "SELECT producer FROM content_versions WHERE id=?",
+        (res["artifact_ids"][0],),
+    ).fetchone()
+    producer = json.loads(row["producer"])
+    # 可审计地表明「本次未使用品牌档」
+    assert producer.get("brand_profile_id") is None
+
+
+async def test_generate_script_can_opt_out_of_brand_profile() -> None:
+    ai = _RecordingAIProvider()
+    deps = _deps(ai)
+    ws_id, prj_id, cv_id, _profile_id = await _setup_linked_project(deps)
+
+    topic = await dispatch(
+        _env(
+            "GenerateTopic",
+            {"source_version_id": cv_id, "count": 3},
+            workspace_id=ws_id,
+            project_id=prj_id,
+        ),
+        deps,
+    )
+    assert topic["ok"] is True
+
+    res = await dispatch(
+        _env(
+            "GenerateScript",
+            {
+                "proposal_version_id": topic["artifact_ids"][0],
+                "use_brand_profile": False,
+            },
+            workspace_id=ws_id,
+            project_id=prj_id,
+        ),
+        deps,
+    )
+    assert res["ok"] is True, res.get("error")
+    assert "克制第一人称" not in ai.prompts[-1]

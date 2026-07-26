@@ -849,3 +849,36 @@ def test_audit_command(monkeypatch: pytest.MonkeyPatch) -> None:
         "eventType": "provider_invocation",
         "limit": 10,
     }
+
+
+# ----- Tranche 3：--no-brand（PRD-BRD-002 生成时可选择启用） -----
+
+
+def test_topic_generate_brand_enabled_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True, "detail": {}})
+    rc = main(["topic", "generate", "--source-version-id", "cv-1", "--count", "3"])
+
+    assert rc == 0
+    # 默认不下发该字段（信封与旧版一致），后端默认启用
+    assert "use_brand_profile" not in captured["env"]["payload"]
+
+
+def test_topic_generate_no_brand_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True, "detail": {}})
+    rc = main(
+        ["topic", "generate", "--source-version-id", "cv-1", "--count", "3",
+         "--no-brand"]
+    )
+
+    assert rc == 0
+    assert captured["env"]["payload"]["use_brand_profile"] is False
+
+
+def test_script_generate_no_brand_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True, "detail": {}})
+    rc = main(["script", "generate", "--proposal-version-id", "cv-1", "--no-brand"])
+
+    assert rc == 0
+    assert captured["env"]["payload"]["use_brand_profile"] is False

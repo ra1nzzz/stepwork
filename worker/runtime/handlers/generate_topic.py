@@ -57,7 +57,9 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     project_id = env.projectId or repos.projects.get_or_create_default(
         env.workspaceId
     ).id
-    brand = load_project_brand(repos, project_id)
+    # PRD-BRD-002「生成时可选择启用」：关闭时即便项目已绑定品牌档
+    # 也不加载、不注入，producer 也不记录品牌字段（可审计地表明未用）
+    brand = load_project_brand(repos, project_id) if spec.use_brand_profile else None
     brand_block = format_brand_prompt_block(brand) if brand else None
 
     prompt = build_topic_prompt(text, spec.count, brand_block)

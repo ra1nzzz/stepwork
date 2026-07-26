@@ -98,7 +98,16 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="源 content_version id（transcript / script 等）",
     )
-    tg.add_argument("--count", type=int, default=5, help="生成角度数量（默认 5）")
+    tg.add_argument(
+        "--count", type=int, default=5,
+        help="生成角度数量（PRD-SCR-001：3—5，默认 5）",
+    )
+    tg.add_argument(
+        "--no-brand",
+        dest="no_brand",
+        action="store_true",
+        help="PRD-BRD-002：本次生成不启用项目品牌档",
+    )
     tg.add_argument(
         "--provider",
         help="可选：provider 提示，JSON 字符串",
@@ -114,6 +123,12 @@ def build_parser() -> argparse.ArgumentParser:
     sg.add_argument("--topic-id", help="指定角度 id")
     sg.add_argument("--outline", help="可选：提纲文本")
     sg.add_argument("--style", default="short_video", help="脚本风格（默认 short_video）")
+    sg.add_argument(
+        "--no-brand",
+        dest="no_brand",
+        action="store_true",
+        help="PRD-BRD-002：本次生成不启用项目品牌档",
+    )
     sg.add_argument("--provider", help="可选：provider 提示，JSON 字符串")
 
     ss = script_sub.add_parser("save", help="保存脚本（SaveScript）")
@@ -518,6 +533,9 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
             "source_version_id": args.source_version_id,
             "count": args.count,
         }
+        # 仅在显式关闭时下发，保持默认信封与旧版一致
+        if getattr(args, "no_brand", False):
+            payload["use_brand_profile"] = False
         provider = _parse_provider(getattr(args, "provider", None))
         if provider is not None:
             payload["provider"] = provider
@@ -532,6 +550,8 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
                 "outline": getattr(args, "outline", None),
                 "style": getattr(args, "style", "short_video"),
             }
+            if getattr(args, "no_brand", False):
+                payload["use_brand_profile"] = False
             provider = _parse_provider(getattr(args, "provider", None))
             if provider is not None:
                 payload["provider"] = provider

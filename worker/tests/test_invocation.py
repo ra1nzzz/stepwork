@@ -138,7 +138,7 @@ async def test_topic_invocation_and_audit() -> None:
             content_hash="h",
         )
     )
-    env = _env("GenerateTopic", {"source_version_id": cv_id, "count": 1})
+    env = _env("GenerateTopic", {"source_version_id": cv_id, "count": 3})
     env["workspaceId"] = ws_id
     env["projectId"] = prj_id
     res = await dispatch(env, deps)
