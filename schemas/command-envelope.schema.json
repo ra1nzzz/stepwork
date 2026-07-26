@@ -68,7 +68,11 @@
         "CreatePlatformVariant",
         "ListPlatformVariants",
         "ExportBundle",
-        "ListRenderTemplates"
+        "ListRenderTemplates",
+        "ListSourceAssets",
+        "GetSourceAsset",
+        "RunCleanup",
+        "ListAuditEvents"
       ],
       "description": "Command type identifier. See SYSTEM_SPEC §7.2 for the canonical list."
     },

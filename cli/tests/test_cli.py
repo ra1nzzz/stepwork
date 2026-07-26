@@ -799,3 +799,53 @@ def test_templates_command(monkeypatch: pytest.MonkeyPatch) -> None:
     assert rc == 0
     assert captured["env"]["commandType"] == "ListRenderTemplates"
     assert captured["env"]["payload"] == {}
+
+
+# ----- Tranche 3：assets / cleanup / audit（PRD-SRC-003/005、ANA-006） -----
+
+
+def test_assets_list_and_get(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True, "detail": {}})
+
+    assert main(["assets", "list"]) == 0
+    assert captured["env"]["commandType"] == "ListSourceAssets"
+    assert captured["env"]["payload"] == {}
+
+    assert main(["assets", "list", "--limit", "5"]) == 0
+    assert captured["env"]["payload"] == {"limit": 5}
+
+    assert main(["assets", "get", "as-1"]) == 0
+    assert captured["env"]["commandType"] == "GetSourceAsset"
+    assert captured["env"]["payload"] == {"assetId": "as-1"}
+
+
+def test_cleanup_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True, "detail": {}})
+
+    assert main(["cleanup"]) == 0
+    assert captured["env"]["commandType"] == "RunCleanup"
+    assert captured["env"]["payload"] == {}
+
+    assert main(["cleanup", "--mode", "immediate"]) == 0
+    assert captured["env"]["payload"] == {"mode": "immediate"}
+
+
+def test_cleanup_rejects_manual_mode() -> None:
+    # manual 在「手动触发」语境下无意义，argparse 层即拒绝
+    with pytest.raises(SystemExit) as ei:
+        main(["cleanup", "--mode", "manual"])
+    assert ei.value.code == 2
+
+
+def test_audit_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True, "detail": {}})
+
+    assert main(["audit"]) == 0
+    assert captured["env"]["commandType"] == "ListAuditEvents"
+    assert captured["env"]["payload"] == {}
+
+    assert main(["audit", "--event-type", "provider_invocation", "--limit", "10"]) == 0
+    assert captured["env"]["payload"] == {
+        "eventType": "provider_invocation",
+        "limit": 10,
+    }

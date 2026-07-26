@@ -61,6 +61,12 @@ _ROUTES: dict[str, str] = {
     "ListContentVersions": "worker.runtime.handlers.queries",
     "GetContentVersion": "worker.runtime.handlers.queries",
     "ListRenderTemplates": "worker.runtime.handlers.queries",
+    # PRD-SRC-003：素材可追溯（此前只有写入/删除，无任何读命令）
+    "ListSourceAssets": "worker.runtime.handlers.queries",
+    "GetSourceAsset": "worker.runtime.handlers.queries",
+    # PRD-SRC-005 手动清理 / PRD-ANA-006 审计可查
+    "RunCleanup": "worker.runtime.handlers.maintenance",
+    "ListAuditEvents": "worker.runtime.handlers.maintenance",
     "CreateWorkspace": "worker.runtime.handlers.workspaces",
     "RenameWorkspace": "worker.runtime.handlers.workspaces",
     "ArchiveWorkspace": "worker.runtime.handlers.workspaces",
@@ -106,6 +112,8 @@ _AGENT_FORBIDDEN_COMMANDS: frozenset[str] = frozenset(
         "InstallPlugin",
         "EnablePlugin",
         "DisablePlugin",
+        # 手动清理会真实删除磁盘文件，归入「删除资产」类
+        "RunCleanup",
     }
 )
 

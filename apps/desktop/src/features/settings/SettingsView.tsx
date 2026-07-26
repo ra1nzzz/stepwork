@@ -12,7 +12,7 @@
  */
 import { useMemo, useState, useEffect, useCallback } from "react";
 import { useSettingsStore } from "@/stores/useSettingsStore";
-import type { SettingsConfig } from "@/stores/useSettingsStore";
+import type { CleanupMode, SettingsConfig } from "@/stores/useSettingsStore";
 import {
   buildEnvelope,
   dispatchCommand,
@@ -1032,6 +1032,31 @@ function DataPanel({
   onCheck: () => void;
 }) {
   const d = settings.data;
+  // PRD-SRC-005：手动触发清理（cleanupMode=manual 时这是唯一入口）
+  const [cleanupBusy, setCleanupBusy] = useState(false);
+  const [cleanupNotice, setCleanupNotice] = useState<string | null>(null);
+
+  async function runCleanup() {
+    setCleanupBusy(true);
+    setCleanupNotice(null);
+    try {
+      const env = buildEnvelope("RunCleanup", getWorkspaceId(), null, {
+        mode: "immediate",
+      });
+      const res = await dispatchCommand(env);
+      if (!res.ok) {
+        setCleanupNotice(res.error ?? "清理失败");
+        return;
+      }
+      const removed = (res.detail as { removed?: number } | null)?.removed ?? 0;
+      setCleanupNotice(`已清理 ${removed} 个临时文件`);
+    } catch (e) {
+      setCleanupNotice(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCleanupBusy(false);
+    }
+  }
+
   return (
     <>
       <div className="form-row">
@@ -1049,7 +1074,7 @@ function DataPanel({
         </div>
       </div>
       <div className="form-row">
-        <label htmlFor="retentionDays">日志保留天数</label>
+        <label htmlFor="retentionDays">保留天数</label>
         <input
           id="retentionDays"
           className="field"
@@ -1058,6 +1083,42 @@ function DataPanel({
           value={d.retentionDays}
           onChange={(e) => update({ data: { ...d, retentionDays: Number(e.target.value) } })}
         />
+      </div>
+      {/* PRD-SRC-005：清理时机三选一 + 手动触发入口 */}
+      <div className="form-row">
+        <label htmlFor="cleanupMode">临时文件清理</label>
+        <select
+          id="cleanupMode"
+          className="field"
+          value={d.cleanupMode}
+          onChange={(e) =>
+            update({
+              data: { ...d, cleanupMode: e.target.value as CleanupMode },
+            })
+          }
+        >
+          <option value="immediate">立即（导入完成后即清）</option>
+          <option value="scheduled">定时（启动时按保留天数清）</option>
+          <option value="manual">手动（仅在点击时清）</option>
+        </select>
+      </div>
+      <div className="form-row">
+        <span className="row-label">立即清理</span>
+        <div className="inline-actions">
+          <button
+            type="button"
+            className="btn small ghost"
+            onClick={() => void runCleanup()}
+            disabled={cleanupBusy}
+          >
+            {cleanupBusy ? "清理中…" : "立即清理临时文件"}
+          </button>
+          {cleanupNotice && (
+            <span className="panel-meta" role="status" style={{ alignSelf: "center" }}>
+              {cleanupNotice}
+            </span>
+          )}
+        </div>
       </div>
       <div className="form-row">
         <span className="row-label">策略</span>

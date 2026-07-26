@@ -23,7 +23,7 @@ import json
 from typing import Any
 
 from worker.runtime.commands.bus import DispatchError
-from worker.runtime.db.repos import _row_to_job
+from worker.runtime.db.repos import _row_to_job, _row_to_source_asset
 from worker.runtime.deps import Deps
 from worker.runtime.models import CommandEnvelope, CommandResult, Job
 from worker.runtime.render.templates import ASPECT_PRESETS, list_templates
@@ -33,6 +33,9 @@ _DEFAULT_LIST_JOBS_LIMIT = 50
 
 _DEFAULT_LIST_VERSIONS_LIMIT = 20
 """``ListContentVersions`` 缺省返回条数上限。"""
+
+_DEFAULT_LIST_ASSETS_LIMIT = 100
+"""``ListSourceAssets`` 缺省返回条数上限（PRD-SRC-003）。"""
 
 _PREVIEW_CHARS = 200
 """``ListContentVersions`` 条目 ``preview`` 的字符上限。"""
@@ -45,6 +48,27 @@ def _load_producer(raw: Any) -> dict[str, Any]:
     except (TypeError, ValueError):
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def _asset_to_dict(asset: Any) -> dict[str, Any]:
+    """SourceAsset → 可追溯字段（PRD-SRC-003：来源/作者/导入时间/权利声明）。
+
+    author 落在 metadata 里（见 import_source._merge_author），这里提到顶层
+    方便前端与 CLI 直接展示，不必各自去 metadata 里翻。
+    """
+    metadata = asset.metadata or {}
+    return {
+        "id": asset.id,
+        "project_id": asset.project_id,
+        "kind": asset.kind,
+        "local_uri": asset.local_uri,
+        "original_uri": asset.original_uri,
+        "content_hash": asset.content_hash,
+        "rights_declaration": asset.rights_declaration,
+        "author": metadata.get("author"),
+        "created_at": asset.created_at,
+        "metadata": metadata,
+    }
 
 
 def _project_row_to_dict(row: Any) -> dict[str, Any]:
@@ -233,6 +257,43 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
                     "producer": cv.producer,
                 }
             },
+        )
+
+    if env.commandType in ("ListSourceAssets", "GetSourceAsset"):
+        # PRD-SRC-003：素材此前只有写入（ImportSource）与删除（DeleteAsset），
+        # 没有任何读命令 —— 「每个 SourceAsset 均可追溯」无从谈起（前端素材
+        # 列表也只存在于内存 store，刷新即丢）。这里补上读取路径，返回来源、
+        # 作者、导入时间与权利声明。
+        if env.commandType == "GetSourceAsset":
+            payload = env.payload or {}
+            asset_id = payload.get("assetId") or payload.get("asset_id")
+            if not asset_id:
+                raise DispatchError("INVALID_ARGUMENT", "assetId required")
+            asset = deps.repos.source_assets.get(str(asset_id))
+            if asset is None:
+                raise DispatchError("NOT_FOUND", f"asset {asset_id!r} not found")
+            return CommandResult(
+                ok=True,
+                commandId=env.commandId,
+                detail={"asset": _asset_to_dict(asset)},
+            )
+
+        pid = _resolve_project_id(env)
+        if not pid:
+            raise DispatchError("INVALID_ARGUMENT", "missing projectId")
+        limit = (env.payload or {}).get("limit", _DEFAULT_LIST_ASSETS_LIMIT)
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
+            raise DispatchError(
+                "INVALID_ARGUMENT", f"limit must be a positive integer, got {limit!r}"
+            )
+        rows = deps.repos.conn.execute(
+            "SELECT * FROM source_assets WHERE project_id=? "
+            "ORDER BY created_at DESC LIMIT ?",
+            (pid, limit),
+        ).fetchall()
+        assets = [_asset_to_dict(_row_to_source_asset(r)) for r in rows]
+        return CommandResult(
+            ok=True, commandId=env.commandId, detail={"assets": assets}
         )
 
     if env.commandType == "ListRenderTemplates":

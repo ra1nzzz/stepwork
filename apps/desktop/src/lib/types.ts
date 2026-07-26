@@ -138,7 +138,11 @@ export interface CommandEnvelope {
     | "CreatePlatformVariant"
     | "ListPlatformVariants"
     | "ExportBundle"
-    | "ListRenderTemplates";
+    | "ListRenderTemplates"
+    | "ListSourceAssets"
+    | "GetSourceAsset"
+    | "RunCleanup"
+    | "ListAuditEvents";
   schemaVersion: string;
   actor: { type: "user" | "agent" | "plugin" | "system" | "desktop"; id: string };
   source: string;

@@ -191,6 +191,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="user_audio 引擎的录音文件 uri → payload.user_audio_uri",
     )
 
+    # ----- assets（PRD-SRC-003：素材可追溯） -----
+    asset = sub.add_parser("assets", help="素材命令（可追溯：来源/作者/权利声明）")
+    asset_sub = asset.add_subparsers(dest="assets_action", required=True)
+
+    al = asset_sub.add_parser("list", help="列出项目素材（ListSourceAssets）")
+    al.set_defaults(command_type="ListSourceAssets")
+    al.add_argument("--limit", type=int, default=None, help="可选：最多返回条数")
+
+    ag = asset_sub.add_parser("get", help="按 id 取素材（GetSourceAsset）")
+    ag.set_defaults(command_type="GetSourceAsset")
+    ag.add_argument("asset_id", help="素材 id")
+
+    # ----- cleanup（PRD-SRC-005：手动触发清理） -----
+    cl = sub.add_parser("cleanup", help="清理临时/下载中间文件（RunCleanup）")
+    cl.set_defaults(command_type="RunCleanup")
+    cl.add_argument(
+        "--mode",
+        choices=("immediate", "scheduled"),
+        default=None,
+        help="immediate 全清 / scheduled 按保留期清（缺省用工作区配置）",
+    )
+
+    # ----- audit（PRD-ANA-006：执行后可审计） -----
+    au = sub.add_parser("audit", help="查询审计事件（ListAuditEvents）")
+    au.set_defaults(command_type="ListAuditEvents")
+    au.add_argument("--event-type", dest="event_type", default=None, help="按类型过滤")
+    au.add_argument("--limit", type=int, default=None, help="可选：最多返回条数")
+
     # ----- templates（PRD-REN-005：可发现的模板/画幅清单） -----
     tpl = sub.add_parser("templates", help="列出渲染模板与画幅（ListRenderTemplates）")
     tpl.set_defaults(command_type="ListRenderTemplates")
@@ -547,6 +575,25 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
 
     if command == "templates":
         return {}
+
+    if command == "assets":
+        action = getattr(args, "assets_action", None)
+        if action == "list":
+            return {"limit": args.limit} if args.limit is not None else {}
+        if action == "get":
+            return {"assetId": args.asset_id}
+        raise ValueError(f"unknown assets action: {action!r}")
+
+    if command == "cleanup":
+        return {"mode": args.mode} if args.mode else {}
+
+    if command == "audit":
+        audit_payload: dict[str, Any] = {}
+        if getattr(args, "event_type", None):
+            audit_payload["eventType"] = args.event_type
+        if args.limit is not None:
+            audit_payload["limit"] = args.limit
+        return audit_payload
 
     if command == "job":
         action = getattr(args, "job_action", None)
