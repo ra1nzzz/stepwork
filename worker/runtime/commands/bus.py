@@ -73,6 +73,8 @@ _ROUTES: dict[str, str] = {
     "SaveAnalysis": "worker.runtime.handlers.save_analysis",
     "ListContentVersions": "worker.runtime.handlers.queries",
     "GetContentVersion": "worker.runtime.handlers.queries",
+    # PRD-SCR-006：AI 初稿与最终稿比较
+    "DiffContentVersions": "worker.runtime.handlers.queries",
     "ListRenderTemplates": "worker.runtime.handlers.queries",
     # PRD-SRC-003：素材可追溯（此前只有写入/删除，无任何读命令）
     "ListSourceAssets": "worker.runtime.handlers.queries",

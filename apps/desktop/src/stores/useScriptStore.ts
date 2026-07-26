@@ -18,6 +18,7 @@ import { useViewStore } from "@/stores/useViewStore";
 import type {
   SimilarityWarning,
   TopicAngle,
+  VersionDiff,
   ScriptVersionRef,
   GenerateTopicPayload,
   GenerateScriptPayload,
@@ -76,6 +77,11 @@ interface ScriptStoreState {
     operation: "rewrite" | "expand" | "condense" | "generate",
     instruction?: string,
   ) => Promise<string | null>;
+  /**
+   * PRD-SCR-006：比较当前版本与 AI 初稿（baseVersionId 省略时后端自动
+   * 沿 parent 链定位 kind='ai-script' 的那一版）。
+   */
+  diffVersions: (baseVersionId?: string) => Promise<VersionDiff | null>;
   loadVersions: () => Promise<void>;
   /** 加载指定版本全文（版本 tab 点击查看/回滚用） */
   loadVersionContent: (
@@ -283,6 +289,34 @@ export const useScriptStore = create<ScriptStoreState>((set, get) => ({
       return null;
     } finally {
       set({ isBusy: false });
+    }
+  },
+
+  diffVersions: async (baseVersionId) => {
+    const versionId = get().scriptVersionId;
+    if (!versionId) {
+      set({ error: "请先保存脚本，再比较版本" });
+      return null;
+    }
+    try {
+      const env = buildEnvelope(
+        "DiffContentVersions",
+        getWorkspaceId(),
+        currentProjectId(),
+        {
+          versionId,
+          ...(baseVersionId ? { baseVersionId } : {}),
+        },
+      );
+      const res = await dispatchCommand(env);
+      if (!res.ok) {
+        set({ error: res.error ?? "DIFF_FAILED" });
+        return null;
+      }
+      return (res.detail ?? null) as VersionDiff | null;
+    } catch (e) {
+      set({ error: e instanceof Error ? e.message : String(e) });
+      return null;
     }
   },
 

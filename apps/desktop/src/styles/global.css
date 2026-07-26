@@ -1105,3 +1105,12 @@ p { text-wrap: pretty; }
 
 /* PRD-AGT-008 审批中心列表 */
 .approval-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 12px; }
+
+/* PRD-SCR-006 版本差异视图 */
+.diff-view { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.6; max-height: 360px; overflow: auto; }
+.diff-line { display: flex; gap: 8px; padding: 1px 6px; white-space: pre-wrap; }
+.diff-gutter { flex: 0 0 12px; opacity: 0.6; }
+.diff-text { flex: 1; min-width: 0; }
+.diff-insert { background: color-mix(in srgb, var(--success, #2e7d32) 18%, transparent); }
+.diff-delete { background: color-mix(in srgb, var(--danger, #c62828) 18%, transparent); text-decoration: line-through; opacity: 0.85; }
+.diff-equal { opacity: 0.7; }

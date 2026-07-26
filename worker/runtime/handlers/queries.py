@@ -28,6 +28,12 @@ from worker.runtime.db.repos import _row_to_job, _row_to_source_asset
 from worker.runtime.deps import Deps
 from worker.runtime.models import CommandEnvelope, CommandResult, Job
 from worker.runtime.render.templates import ASPECT_PRESETS, list_templates
+from worker.runtime.script.diff import (
+    diff_lines,
+    extract_text,
+    find_ai_draft,
+    summarize,
+)
 
 _DEFAULT_LIST_JOBS_LIMIT = 50
 """``ListJobs`` 缺省返回条数上限。"""
@@ -374,6 +380,53 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         assets = [_asset_to_dict(_row_to_source_asset(r)) for r in rows]
         return CommandResult(
             ok=True, commandId=env.commandId, detail={"assets": assets}
+        )
+
+    if env.commandType == "DiffContentVersions":
+        # PRD-SCR-006「可比较 AI 初稿和最终稿」：版本链此前已完备，但没有
+        # 比较能力——用户只能各自打开两个版本肉眼比对，也没有「AI 初稿」
+        # 这个锚点。baseVersionId 省略时自动沿 parent 链定位 AI 初稿。
+        payload = env.payload or {}
+        target_id = payload.get("versionId") or payload.get("version_id")
+        if not target_id:
+            raise DispatchError("INVALID_ARGUMENT", "versionId required")
+        target = deps.repos.content_versions.get(str(target_id))
+        if target is None:
+            raise DispatchError("NOT_FOUND", f"version {target_id!r} not found")
+
+        base_id = payload.get("baseVersionId") or payload.get("base_version_id")
+        if not base_id:
+            base_id = find_ai_draft(deps.repos.conn, str(target_id))
+            if not base_id:
+                base_id = target.parent_version_id
+        if not base_id:
+            raise DispatchError(
+                "INVALID_ARGUMENT",
+                "no base version to compare (no AI draft and no parent)",
+            )
+        base = deps.repos.content_versions.get(str(base_id))
+        if base is None:
+            raise DispatchError("NOT_FOUND", f"version {base_id!r} not found")
+        if base.project_id != target.project_id:
+            raise DispatchError(
+                "INVALID_ARGUMENT", "versions belong to different projects"
+            )
+
+        before_text, before_title = extract_text(base.content or "")
+        after_text, after_title = extract_text(target.content or "")
+        lines = diff_lines(before_text, after_text)
+        return CommandResult(
+            ok=True,
+            commandId=env.commandId,
+            detail={
+                "base_version_id": str(base_id),
+                "target_version_id": str(target_id),
+                "base_is_ai_draft": (base.producer or {}).get("kind") == "ai-script",
+                "base_title": before_title,
+                "target_title": after_title,
+                "lines": lines,
+                "summary": summarize(lines),
+            },
         )
 
     if env.commandType == "ListRenderTemplates":

@@ -150,7 +150,8 @@ export interface CommandEnvelope {
     | "CreateApprovalRequest"
     | "ListApprovalRequests"
     | "DecideApprovalRequest"
-    | "SetProjectTags";
+    | "SetProjectTags"
+    | "DiffContentVersions";
   schemaVersion: string;
   actor: { type: "user" | "agent" | "plugin" | "system" | "desktop"; id: string };
   source: string;
@@ -301,6 +302,24 @@ export interface TopicProposal {
 export interface ScriptContent {
   title: string;
   body: string;
+}
+
+/** PRD-SCR-006：版本差异（AI 初稿 vs 最终稿） */
+export interface DiffLine {
+  op: "equal" | "insert" | "delete";
+  text: string;
+  before_line: number | null;
+  after_line: number | null;
+}
+
+export interface VersionDiff {
+  base_version_id: string;
+  target_version_id: string;
+  base_is_ai_draft: boolean;
+  base_title: string;
+  target_title: string;
+  lines: DiffLine[];
+  summary: { added: number; removed: number; unchanged: number };
 }
 
 /** 版本链节点（VersionHistory 用；对齐 content_versions 的 parent 链） */

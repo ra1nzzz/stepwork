@@ -16,6 +16,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useScriptStore } from "@/stores/useScriptStore";
+import type { VersionDiff } from "@/lib/types";
 import { useRenderStore } from "@/stores/useRenderStore";
 import { useViewStore } from "@/stores/useViewStore";
 
@@ -44,6 +45,19 @@ export function CreateScriptView() {
   const loadVersionContent = useScriptStore((s) => s.loadVersionContent);
   const editParagraph = useScriptStore((s) => s.editParagraph);
   const similarityWarnings = useScriptStore((s) => s.similarityWarnings);
+  const diffVersions = useScriptStore((s) => s.diffVersions);
+
+  // PRD-SCR-006：与 AI 初稿的差异（null = 未打开比较视图）
+  const [diff, setDiff] = useState<VersionDiff | null>(null);
+
+  async function handleDiff() {
+    if (diff) {
+      setDiff(null);
+      return;
+    }
+    const result = await diffVersions();
+    if (result) setDiff(result);
+  }
 
   const setRenderSourceVersion = useRenderStore((s) => s.setSourceVersion);
 
@@ -183,6 +197,48 @@ export function CreateScriptView() {
         </span>
       </section>
 
+      {/* PRD-SCR-006：AI 初稿 vs 当前稿的差异比较 */}
+      {diff && (
+        <section className="section-gap" data-od-id="version-diff">
+          <article className="panel">
+            <div className="panel-head">
+              <div>
+                <h2 className="panel-title">与初稿的差异</h2>
+                <div className="panel-meta">
+                  {diff.base_is_ai_draft ? "AI 初稿" : "上一版本"}「
+                  {diff.base_title || diff.base_version_id.slice(0, 8)}」 →
+                  当前稿 · 新增 {diff.summary.added} 行 · 删除{" "}
+                  {diff.summary.removed} 行
+                </div>
+              </div>
+              <button
+                className="btn small ghost"
+                type="button"
+                onClick={() => setDiff(null)}
+              >
+                关闭
+              </button>
+            </div>
+            <div className="panel-body">
+              <div className="diff-view">
+                {diff.lines.map((line, i) => (
+                  <div key={i} className={`diff-line diff-${line.op}`}>
+                    <span className="diff-gutter mono">
+                      {line.op === "insert"
+                        ? "+"
+                        : line.op === "delete"
+                          ? "−"
+                          : " "}
+                    </span>
+                    <span className="diff-text">{line.text || " "}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </article>
+        </section>
+      )}
+
       {/* PRD-SCR-005：原创性提醒（措辞是提醒，不做法律结论） */}
       {similarityWarnings.length > 0 && (
         <section className="section-gap" data-od-id="similarity-warnings">
@@ -240,6 +296,16 @@ export function CreateScriptView() {
                 disabled={!body}
               >
                 复制脚本
+              </button>
+              {/* PRD-SCR-006：比较 AI 初稿与最终稿 */}
+              <button
+                className="btn small ghost"
+                type="button"
+                onClick={() => void handleDiff()}
+                disabled={!scriptVersionId}
+                title="与 AI 初稿逐行比较"
+              >
+                {diff ? "关闭对比" : "对比初稿"}
               </button>
             </div>
           </div>
