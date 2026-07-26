@@ -58,6 +58,7 @@ export function CreateRenderView() {
   const setView = useViewStore((s) => s.setView);
   const sourceVersionId = useRenderStore((s) => s.sourceVersionId);
   const template = useRenderStore((s) => s.template);
+  const aspect = useRenderStore((s) => s.aspect);
   const ttsEngine = useRenderStore((s) => s.ttsEngine);
   const userAudioUri = useRenderStore((s) => s.userAudioUri);
   const status = useRenderStore((s) => s.status);
@@ -70,6 +71,7 @@ export function CreateRenderView() {
   const isBusy = useRenderStore((s) => s.isBusy);
   const error = useRenderStore((s) => s.error);
   const setTemplate = useRenderStore((s) => s.setTemplate);
+  const setAspect = useRenderStore((s) => s.setAspect);
   const setTtsEngine = useRenderStore((s) => s.setTtsEngine);
   const setUserAudioUri = useRenderStore((s) => s.setUserAudioUri);
   const render = useRenderStore((s) => s.render);
@@ -78,6 +80,40 @@ export function CreateRenderView() {
 
   const providerInfo = useProviderInfo();
   const [openNotice, setOpenNotice] = useState<string | null>(null);
+  // PRD-REN-005：模板与画幅清单来自后端注册表（ListRenderTemplates）
+  const [templates, setTemplates] = useState<
+    { id: string; label: string; default_aspect: string }[]
+  >([]);
+  const [aspects, setAspects] = useState<
+    { id: string; resolution: [number, number] }[]
+  >([]);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const env = buildEnvelope(
+          "ListRenderTemplates",
+          getWorkspaceId(),
+          null,
+          {},
+        );
+        const res = await dispatchCommand(env);
+        if (cancelled || !res.ok) return;
+        const d = (res.detail ?? {}) as {
+          templates?: { id: string; label: string; default_aspect: string }[];
+          aspects?: { id: string; resolution: [number, number] }[];
+        };
+        setTemplates(d.templates ?? []);
+        setAspects(d.aspects ?? []);
+      } catch {
+        /* 后端未连接：保持空列表，渲染按钮仍可用（后端有默认模板） */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // PRD-REN-002：执行前旁白费用需要源文本字符量（经 GetContentVersion 取）
   const [sourceCharCount, setSourceCharCount] = useState(0);
 
@@ -244,10 +280,31 @@ export function CreateRenderView() {
                   className="select"
                   value={template}
                   onChange={(e) => setTemplate(e.target.value)}
-                  disabled={isBusy}
+                  disabled={isBusy || templates.length === 0}
                 >
-                  <option value="vertical-caption-v1">竖屏字幕 v1</option>
-                  <option value="vertical-story-v1">竖屏故事 v1</option>
+                  {/* PRD-REN-005：选项来自后端注册表，避免 UI 有选项、
+                      后端不认（旧实现下拉切换后画面完全相同） */}
+                  {templates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group">
+                <label htmlFor="aspect">画幅比例</label>
+                <select
+                  id="aspect"
+                  className="select"
+                  value={aspect}
+                  onChange={(e) => setAspect(e.target.value)}
+                  disabled={isBusy || aspects.length === 0}
+                >
+                  {aspects.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.id}（{a.resolution[0]}×{a.resolution[1]}）
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>

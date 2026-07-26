@@ -39,6 +39,8 @@ interface RenderStoreState {
   /** 渲染源版本 id */
   sourceVersionId: string;
   template: string;
+  /** PRD-REN-005：画幅比例（9:16 / 16:9 / 1:1），随 payload 提交 */
+  aspect: string;
   ttsEngine: "synthesize" | "user_audio";
   /** 用户录音音频绝对路径（tts_engine=user_audio 时随 payload 提交） */
   userAudioUri: string | null;
@@ -62,6 +64,7 @@ interface RenderStoreState {
 
   setSourceVersion: (id: string) => void;
   setTemplate: (t: string) => void;
+  setAspect: (a: string) => void;
   setTtsEngine: (e: "synthesize" | "user_audio") => void;
   setUserAudioUri: (uri: string | null) => void;
   render: () => Promise<void>;
@@ -96,6 +99,7 @@ function metaFromDetail(
 export const useRenderStore = create<RenderStoreState>((set, get) => ({
   sourceVersionId: "",
   template: "vertical-caption-v1",
+  aspect: "9:16",
   ttsEngine: "synthesize",
   userAudioUri: null,
   status: "idle",
@@ -111,6 +115,7 @@ export const useRenderStore = create<RenderStoreState>((set, get) => ({
 
   setSourceVersion: (id) => set({ sourceVersionId: id }),
   setTemplate: (t) => set({ template: t }),
+  setAspect: (a) => set({ aspect: a }),
   setTtsEngine: (e) => set({ ttsEngine: e }),
   setUserAudioUri: (uri) => set({ userAudioUri: uri }),
 
@@ -125,6 +130,7 @@ export const useRenderStore = create<RenderStoreState>((set, get) => ({
       const payload: CreateRenderJobPayload = {
         source_version_id: get().sourceVersionId,
         template: get().template,
+        aspect: get().aspect,
         tts_engine: get().ttsEngine,
         user_audio_uri:
           get().ttsEngine === "user_audio" ? get().userAudioUri : null,

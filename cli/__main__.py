@@ -169,6 +169,31 @@ def build_parser() -> argparse.ArgumentParser:
         default="vertical-caption-v1",
         help="渲染模板（默认 vertical-caption-v1，与 worker RenderSpec 缺省一致）",
     )
+    # PRD-REN-005：画幅比例（9:16 优先，另支持 16:9 / 1:1）
+    rd.add_argument(
+        "--aspect",
+        choices=("9:16", "16:9", "1:1"),
+        default=None,
+        help="画幅比例 → payload.aspect（缺省沿用 worker 默认 9:16）",
+    )
+    # PRD-REN-003：用户录音替代 TTS（此前 CLI 用户用不到此能力）
+    rd.add_argument(
+        "--tts-engine",
+        dest="tts_engine",
+        choices=("synthesize", "user_audio"),
+        default=None,
+        help="旁白来源：synthesize 合成（默认）/ user_audio 用户录音",
+    )
+    rd.add_argument(
+        "--user-audio",
+        dest="user_audio",
+        default=None,
+        help="user_audio 引擎的录音文件 uri → payload.user_audio_uri",
+    )
+
+    # ----- templates（PRD-REN-005：可发现的模板/画幅清单） -----
+    tpl = sub.add_parser("templates", help="列出渲染模板与画幅（ListRenderTemplates）")
+    tpl.set_defaults(command_type="ListRenderTemplates")
 
     # ----- job -----
     job = sub.add_parser("job", help="任务查询命令")
@@ -506,11 +531,22 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
         return {"asset_id": args.asset_id, "opts": {}}
 
     if command == "render":
-        # 其余 RenderSpec 字段（tts_engine / resolution / fps）由 worker 缺省补齐
-        return {
+        # 其余 RenderSpec 字段（resolution / fps）由 worker 缺省补齐
+        # 独立命名，避免与上文 analyze 分支的 payload 复用同名（mypy no-redef）
+        render_payload: dict[str, Any] = {
             "source_version_id": args.version_id,
             "template": args.template,
         }
+        if getattr(args, "aspect", None):
+            render_payload["aspect"] = args.aspect
+        if getattr(args, "tts_engine", None):
+            render_payload["tts_engine"] = args.tts_engine
+        if getattr(args, "user_audio", None):
+            render_payload["user_audio_uri"] = args.user_audio
+        return render_payload
+
+    if command == "templates":
+        return {}
 
     if command == "job":
         action = getattr(args, "job_action", None)

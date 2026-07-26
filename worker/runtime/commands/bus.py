@@ -60,6 +60,7 @@ _ROUTES: dict[str, str] = {
     "SaveAnalysis": "worker.runtime.handlers.save_analysis",
     "ListContentVersions": "worker.runtime.handlers.queries",
     "GetContentVersion": "worker.runtime.handlers.queries",
+    "ListRenderTemplates": "worker.runtime.handlers.queries",
     "CreateWorkspace": "worker.runtime.handlers.workspaces",
     "RenameWorkspace": "worker.runtime.handlers.workspaces",
     "ArchiveWorkspace": "worker.runtime.handlers.workspaces",

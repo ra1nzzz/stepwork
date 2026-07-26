@@ -733,3 +733,69 @@ def test_analyze_rejects_unknown_mode() -> None:
     with pytest.raises(SystemExit) as ei:
         main(["analyze", "--text", "x", "--mode", "ultra"])
     assert ei.value.code == 2
+
+
+# ----- Tranche 3：render 模板/画幅/用户录音（PRD-REN-003/005） -----
+
+
+def test_render_defaults_omit_optional_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True, "detail": {}})
+    rc = main(["render", "--version-id", "cv-1"])
+
+    assert rc == 0
+    # 默认信封与旧版一致（不下发 aspect/tts_engine/user_audio_uri）
+    assert captured["env"]["payload"] == {
+        "source_version_id": "cv-1",
+        "template": "vertical-caption-v1",
+    }
+
+
+def test_render_with_aspect_and_template(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True, "detail": {}})
+    rc = main(
+        [
+            "render", "--version-id", "cv-1",
+            "--template", "landscape-caption-v1",
+            "--aspect", "16:9",
+        ]
+    )
+
+    assert rc == 0
+    assert captured["env"]["payload"] == {
+        "source_version_id": "cv-1",
+        "template": "landscape-caption-v1",
+        "aspect": "16:9",
+    }
+
+
+def test_render_user_audio_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True, "detail": {}})
+    rc = main(
+        [
+            "render", "--version-id", "cv-1",
+            "--tts-engine", "user_audio",
+            "--user-audio", "file:///tmp/rec.wav",
+        ]
+    )
+
+    assert rc == 0
+    payload = captured["env"]["payload"]
+    assert payload["tts_engine"] == "user_audio"
+    assert payload["user_audio_uri"] == "file:///tmp/rec.wav"
+
+
+def test_render_rejects_unknown_aspect() -> None:
+    with pytest.raises(SystemExit) as ei:
+        main(["render", "--version-id", "cv-1", "--aspect", "4:3"])
+    assert ei.value.code == 2
+
+
+def test_templates_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True, "detail": {}})
+    rc = main(["templates"])
+
+    assert rc == 0
+    assert captured["env"]["commandType"] == "ListRenderTemplates"
+    assert captured["env"]["payload"] == {}

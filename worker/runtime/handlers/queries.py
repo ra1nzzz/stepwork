@@ -26,6 +26,7 @@ from worker.runtime.commands.bus import DispatchError
 from worker.runtime.db.repos import _row_to_job
 from worker.runtime.deps import Deps
 from worker.runtime.models import CommandEnvelope, CommandResult, Job
+from worker.runtime.render.templates import ASPECT_PRESETS, list_templates
 
 _DEFAULT_LIST_JOBS_LIMIT = 50
 """``ListJobs`` 缺省返回条数上限。"""
@@ -231,6 +232,21 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
                     "created_at": cv.created_at,
                     "producer": cv.producer,
                 }
+            },
+        )
+
+    if env.commandType == "ListRenderTemplates":
+        # PRD-REN-005：模板与画幅是后端注册表的事实，前端/CLI 不再硬编码，
+        # 避免出现「UI 有选项、后端不认」的错配。
+        return CommandResult(
+            ok=True,
+            commandId=env.commandId,
+            detail={
+                "templates": list_templates(),
+                "aspects": [
+                    {"id": name, "resolution": list(size)}
+                    for name, size in ASPECT_PRESETS.items()
+                ],
             },
         )
 

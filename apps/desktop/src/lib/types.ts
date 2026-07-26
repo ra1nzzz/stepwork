@@ -137,7 +137,8 @@ export interface CommandEnvelope {
     | "ListWorkspaces"
     | "CreatePlatformVariant"
     | "ListPlatformVariants"
-    | "ExportBundle";
+    | "ExportBundle"
+    | "ListRenderTemplates";
   schemaVersion: string;
   actor: { type: "user" | "agent" | "plugin" | "system" | "desktop"; id: string };
   source: string;
@@ -305,6 +306,8 @@ export interface SaveScriptPayload {
 export interface CreateRenderJobPayload {
   source_version_id: string;
   template?: string;
+  /** PRD-REN-005：画幅比例（9:16 / 16:9 / 1:1），后端据此解析 resolution */
+  aspect?: string;
   tts_engine?: "synthesize" | "user_audio";
   tts_provider?: string | null;
   user_audio_uri?: string | null;

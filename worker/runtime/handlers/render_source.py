@@ -57,6 +57,7 @@ from worker.runtime.render.subtitles import (
     probe_audio_duration,
     write_srt_sidecar,
 )
+from worker.runtime.render.templates import resolve_resolution, resolve_template
 
 _MAX_DRAFT_META_CHARS = 20000
 
@@ -104,10 +105,25 @@ def _truncate_meta_json(meta: VideoDraftMeta) -> str:
 async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     """处理 ``RenderSource``。"""
     repos = deps.repos
+    payload = dict(env.payload)
+    # PRD-REN-005：可用 aspect（9:16 / 16:9 / 1:1）代替显式 resolution；
+    # 二者都给时以显式 resolution 为准（更精确）。
+    aspect = payload.pop("aspect", None)
+    if aspect is not None and "resolution" not in payload:
+        try:
+            payload["resolution"] = resolve_resolution(str(aspect))
+        except KeyError as e:
+            raise DispatchError("INVALID_ARGUMENT", str(e)) from None
     try:
-        spec = RenderSpec(**env.payload)
+        spec = RenderSpec(**payload)
     except Exception as e:
         raise DispatchError("INVALID_ARGUMENT", f"bad render spec: {e}") from None
+
+    # 模板必须已注册：未知模板绝不静默回退（旧行为是全部渲成同一个画面）
+    try:
+        resolve_template(spec.template)
+    except KeyError as e:
+        raise DispatchError("INVALID_ARGUMENT", str(e)) from None
 
     repos.workspaces.ensure(env.workspaceId)
     project_id = env.projectId or repos.projects.get_or_create_default(
