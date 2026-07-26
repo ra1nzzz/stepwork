@@ -68,6 +68,13 @@ _ROUTES: dict[str, str] = {
     "AddMcpServer": "worker.runtime.handlers.mcp_client",
     "ListMcpTools": "worker.runtime.handlers.mcp_client",
     "CallMcpTool": "worker.runtime.handlers.mcp_client",
+    # PRD-AGT-005 A2A：入站 Server 开关 + 出站 Client
+    "GetAgentCard": "worker.runtime.handlers.a2a",
+    "StartA2aServer": "worker.runtime.handlers.a2a",
+    "StopA2aServer": "worker.runtime.handlers.a2a",
+    "GetA2aServerStatus": "worker.runtime.handlers.a2a",
+    "AddA2aAgent": "worker.runtime.handlers.a2a",
+    "CallA2aSkill": "worker.runtime.handlers.a2a",
     "ExportDiagnosticsBundle": "worker.runtime.handlers.diagnostics",
     # W9: 集成 / 数据迁移 / 种子测试（Layer 0 路由先行，handler 由各支线补齐）
     "ExportProject": "worker.runtime.handlers.project_io",

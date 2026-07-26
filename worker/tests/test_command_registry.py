@@ -22,7 +22,8 @@ _ROOT = Path(__file__).resolve().parents[2]
 def _bus_commands() -> set[str]:
     text = (_ROOT / "worker/runtime/commands/bus.py").read_text(encoding="utf-8")
     return set(
-        re.findall(r'^\s*"([A-Z][A-Za-z]+)":\s*"worker\.runtime\.handlers', text, re.M)
+        # 命令名允许含数字：A2A 这类协议名本身带数字（StartA2aServer）
+        re.findall(r'^\s*"([A-Z][A-Za-z0-9]+)":\s*"worker\.runtime\.handlers', text, re.M)
     )
 
 
@@ -36,7 +37,7 @@ def _schema_commands() -> set[str]:
 def _frontend_commands() -> set[str]:
     text = (_ROOT / "apps/desktop/src/lib/types.ts").read_text(encoding="utf-8")
     block = text.split("commandType:")[1].split(";")[0]
-    return set(re.findall(r'"([A-Z][A-Za-z]+)"', block))
+    return set(re.findall(r'"([A-Z][A-Za-z0-9]+)"', block))
 
 
 def test_bus_routes_and_schema_enum_match() -> None:

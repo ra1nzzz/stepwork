@@ -103,6 +103,14 @@ export function AgentView() {
   const [mcpBusy, setMcpBusy] = useState(false);
   const [mcpError, setMcpError] = useState<string | null>(null);
   const [mcpTools, setMcpTools] = useState<Record<string, McpTool[]>>({});
+  // PRD-AGT-005：A2A Server / 对端
+  const [a2aRunning, setA2aRunning] = useState(false);
+  const [a2aUrl, setA2aUrl] = useState("");
+  const [a2aToken, setA2aToken] = useState("");
+  const [a2aBusy, setA2aBusy] = useState(false);
+  const [a2aError, setA2aError] = useState<string | null>(null);
+  const [a2aPeerUrl, setA2aPeerUrl] = useState("");
+  const [a2aPeerToken, setA2aPeerToken] = useState("");
 
   async function loadConnections() {
     const env = buildEnvelope("ListAgentConnections", getWorkspaceId(), null, {});
@@ -164,6 +172,63 @@ export function AgentView() {
     }
   }
 
+  /* PRD-AGT-005：A2A —— 入站 Server 开关 + 出站对端 */
+
+  async function loadA2aStatus() {
+    const env = buildEnvelope("GetA2aServerStatus", getWorkspaceId(), null, {});
+    const res = await dispatchCommand(env);
+    if (res.ok) {
+      const d = (res.detail ?? {}) as { running?: boolean; url?: string };
+      setA2aRunning(Boolean(d.running));
+      setA2aUrl(d.url ?? "");
+    }
+  }
+
+  async function toggleA2aServer() {
+    setA2aBusy(true);
+    setA2aError(null);
+    try {
+      const command = a2aRunning ? "StopA2aServer" : "StartA2aServer";
+      const res = await dispatchCommand(
+        buildEnvelope(command, getWorkspaceId(), null, {}),
+      );
+      if (!res.ok) {
+        setA2aError(res.error ?? "操作失败");
+        return;
+      }
+      const d = (res.detail ?? {}) as { url?: string; token?: string };
+      // 令牌只在启动时回一次且不落盘，必须当场展示给用户抄走
+      setA2aToken(d.token ?? "");
+      await loadA2aStatus();
+    } finally {
+      setA2aBusy(false);
+    }
+  }
+
+  async function addA2aAgent() {
+    const url = a2aPeerUrl.trim();
+    if (!url) return;
+    setA2aBusy(true);
+    setA2aError(null);
+    try {
+      const res = await dispatchCommand(
+        buildEnvelope("AddA2aAgent", getWorkspaceId(), null, {
+          url,
+          token: a2aPeerToken.trim() || undefined,
+        }),
+      );
+      if (!res.ok) {
+        setA2aError(res.error ?? "连接失败");
+        return;
+      }
+      setA2aPeerUrl("");
+      setA2aPeerToken("");
+      await loadConnections();
+    } finally {
+      setA2aBusy(false);
+    }
+  }
+
   /** 刷新某条出站连接的工具目录（对方升级后用） */
   async function refreshTools(id: string) {
     setConnBusy(id);
@@ -204,6 +269,7 @@ export function AgentView() {
         }
 
         void loadConnections();
+        void loadA2aStatus();
         const artEnv = buildEnvelope("ListAgentArtifacts", getWorkspaceId(), null, {});
         const artRes: CommandResult = await dispatchCommand(artEnv);
         if (cancelled) return;
@@ -297,6 +363,73 @@ export function AgentView() {
         )}
         <p className="panel-meta">
           外部 Server 返回的内容标记为「外部未验证」且需人工复核，不会自动写入正文。
+        </p>
+      </div>
+
+      {/* PRD-AGT-005：A2A 双向 */}
+      <div className="agent-section" data-od-id="a2a-panel">
+        <h2>A2A 互操作</h2>
+
+        <p className="panel-meta">
+          远程 Agent 服务默认<strong>不监听</strong>。开启后仅绑定 127.0.0.1，且能力面需要令牌；
+          Agent Card（能力发现）公开可读，不含项目数据。
+        </p>
+        <div className="inline-actions">
+          <span className={`status ${a2aRunning ? "success" : "warning"}`}>
+            {a2aRunning ? `已开启 ${a2aUrl}` : "未开启"}
+          </span>
+          <button
+            type="button"
+            className="btn small"
+            disabled={a2aBusy}
+            onClick={() => void toggleA2aServer()}
+          >
+            {a2aRunning ? "停止服务" : "开启服务"}
+          </button>
+        </div>
+        {a2aToken && a2aRunning && (
+          <p className="panel-meta" data-od-id="a2a-token">
+            访问令牌（仅本次运行有效，不会保存，请立即复制）：<code>{a2aToken}</code>
+          </p>
+        )}
+
+        <h3>连接远端 Agent</h3>
+        <div className="inline-actions">
+          <input
+            type="text"
+            className="text-input"
+            placeholder="远端地址，如 http://127.0.0.1:8790"
+            value={a2aPeerUrl}
+            disabled={a2aBusy}
+            onChange={(e) => setA2aPeerUrl(e.target.value)}
+            data-od-id="a2a-peer-url"
+          />
+          <input
+            // 令牌用 password 控件，避免录屏/旁人看到
+            type="password"
+            className="text-input"
+            placeholder="访问令牌（可选）"
+            value={a2aPeerToken}
+            disabled={a2aBusy}
+            onChange={(e) => setA2aPeerToken(e.target.value)}
+            data-od-id="a2a-peer-token"
+          />
+          <button
+            type="button"
+            className="btn small"
+            disabled={a2aBusy || !a2aPeerUrl.trim()}
+            onClick={() => void addA2aAgent()}
+          >
+            {a2aBusy ? "连接中…" : "拉取 Agent Card"}
+          </button>
+        </div>
+        {a2aError && (
+          <p className="error-text" data-od-id="a2a-error">
+            {a2aError}
+          </p>
+        )}
+        <p className="panel-meta">
+          令牌只保存在内存中，worker 重启后需重填 —— 与 API Key 一样绝不落盘。
         </p>
       </div>
 
