@@ -117,6 +117,11 @@ def bootstrap_db(
             logger.info(
                 "startup job recovery: swept=%s orphaned=%s", len(swept), orphaned
             )
+    # Tranche 2（PRD-SRC-005）：启动清扫 temp/下载中间文件
+    # （retentionDays + cleanupMode 策略；内部兜底，绝不阻塞启动）
+    from worker.runtime.cleanup import run_retention_sweep
+
+    run_retention_sweep(connection)
     state.db_conn = connection
     state.db_path = path
     return state

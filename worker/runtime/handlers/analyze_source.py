@@ -16,6 +16,7 @@ from typing import Any
 from worker.runtime.analysis.prompt import build_analysis_prompt
 from worker.runtime.analysis.report import parse_analysis_report
 from worker.runtime.analysis.schema import ANALYSIS_SCHEMA
+from worker.runtime.audit import build_invocation, record_provider_invocation
 from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
 from worker.runtime.jobs import content_job, persist_content_version
@@ -99,6 +100,9 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             notify=deps.notify,
         )
 
+    # 费用透明（Tranche 2）：detail.invocation + provider_invocation 审计行
+    invocation = build_invocation(ai, len(prompt) + len(content))
+    record_provider_invocation(repos.conn, env, invocation)
     return CommandResult(
         ok=True,
         commandId=env.commandId,
@@ -111,5 +115,6 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             "sentiment": report.sentiment,
             "topic_count": len(report.topics),
             "confidence": report.confidence,
+            "invocation": invocation,
         },
     )

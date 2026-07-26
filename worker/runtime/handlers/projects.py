@@ -3,19 +3,35 @@
 - ``CreateProject``：先 ``workspaces.ensure``（新库直插会触发 FK 失败），
   再在 ``content_projects`` 新建一行（status=active，与 0001_init.sql 默认值 /
   ``ContentProject`` 模型 / seed_demo.py 一致）。
-- ``DeleteAsset``：按 id 删除 ``source_assets`` 行（先 SELECT 校验存在）。
+- ``DeleteAsset``（Tranche 2，PRD-SRC-005）：按 id 删除 ``source_assets``
+  行（先 SELECT 校验存在）。文件本体：路径位于
+  ``$STEPWORK_HOME/assets/`` 内（严格前缀校验，防目录逃逸/符号链接）
+  时一并删除；在外则只删行并在 detail 注明 ``file_kept=true``。
   ``content_versions`` 无 ``source_asset_id`` 外键（见 0001_init.sql），
-  故不做关联清理。文件本体不删除（Tranche 1 范围外）。
+  故不做关联清理。
 """
 
 from __future__ import annotations
 
+import os
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 
+from worker.runtime.cleanup import assets_root
 from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
 from worker.runtime.models import CommandEnvelope, CommandResult
+
+
+def _is_inside_assets_dir(path: Path) -> bool:
+    """严格前缀校验：``path`` 解析后必须落在资产目录内（防目录逃逸）。"""
+    try:
+        resolved = path.resolve()
+        root = assets_root().resolve()
+    except OSError:
+        return False
+    return resolved.is_relative_to(root)
 
 
 async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
@@ -60,7 +76,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         if not asset_id:
             raise DispatchError("INVALID_ARGUMENT", "missing assetId")
         row = deps.repos.conn.execute(
-            "SELECT id FROM source_assets WHERE id=?", (asset_id,)
+            "SELECT id, local_uri FROM source_assets WHERE id=?", (asset_id,)
         ).fetchone()
         if row is None:
             raise DispatchError("NOT_FOUND", f"asset {asset_id!r} not found")
@@ -68,11 +84,22 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             "DELETE FROM source_assets WHERE id=?", (asset_id,)
         )
         deps.repos.conn.commit()
-        return CommandResult(
-            ok=True,
-            commandId=env.commandId,
-            detail={"deleted": True, "asset_id": asset_id},
-        )
+
+        # 文件本体：仅在 $STEPWORK_HOME/assets/ 内才删除（严格前缀校验）
+        local_uri = str(row["local_uri"] or "")
+        file_path = Path(local_uri[7:] if local_uri.startswith("file://") else local_uri)
+        detail: dict[str, object] = {"deleted": True, "asset_id": asset_id}
+        if local_uri and _is_inside_assets_dir(file_path):
+            try:
+                os.remove(file_path)
+                detail["file_deleted"] = True
+            except FileNotFoundError:
+                detail["file_deleted"] = True  # 已不存在：视为删除完成
+            except OSError:
+                detail["file_kept"] = True  # 占用/权限受限：行已删，文件保留
+        else:
+            detail["file_kept"] = True
+        return CommandResult(ok=True, commandId=env.commandId, detail=detail)
 
     raise DispatchError(
         "UNKNOWN_COMMAND",

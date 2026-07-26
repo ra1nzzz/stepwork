@@ -22,6 +22,11 @@ class AnalysisReport(BaseModel):
     suggested_tags: list[str] = Field(default_factory=list)
     key_points: list[str] = Field(default_factory=list)
     target_audience: str | None = None
+    # Tranche 2（PRD-ANA-002/004）：开头钩子 / 内容结构骨架 / 风险点。
+    # pydantic 侧给默认值，兼容旧版本落库内容（缺字段时不炸回读）。
+    hook: str | None = None
+    structure: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
     provider: str = ""
     model: str = ""
     confidence: float = 0.0

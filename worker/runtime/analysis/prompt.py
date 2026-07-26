@@ -36,5 +36,8 @@ def build_analysis_prompt(source_meta: dict[str, Any], brand: dict[str, Any] | N
         f"请基于以上输出 JSON，字段必须包含：{schema_hint}。\n"
         f"sentiment 取值为 positive / neutral / negative；"
         f"confidence 为 0~1 的置信度；"
-        f"topics / suggested_tags / key_points 为字符串数组。"
+        f"topics / suggested_tags / key_points 为字符串数组；"
+        f"hook 为素材开头钩子（无明显钩子时为 null）；"
+        f"structure 为内容结构骨架（字符串数组，按叙事顺序）；"
+        f"risks 为风险点（字符串数组，如事实存疑 / 合规 / 版权风险）。"
     )

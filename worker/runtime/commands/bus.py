@@ -52,6 +52,21 @@ _ROUTES: dict[str, str] = {
     "ImportProject": "worker.runtime.handlers.project_io",
     "BackupWorkspace": "worker.runtime.handlers.backup",
     "RestoreWorkspace": "worker.runtime.handlers.backup",
+    # Tranche 2: BrandProfile / 分析保存 / 版本查询 / Workspace / 发布 MVP
+    "CreateBrandProfile": "worker.runtime.handlers.brand",
+    "UpdateBrandProfile": "worker.runtime.handlers.brand",
+    "ListBrandProfiles": "worker.runtime.handlers.brand",
+    "SetProjectBrandProfile": "worker.runtime.handlers.brand",
+    "SaveAnalysis": "worker.runtime.handlers.save_analysis",
+    "ListContentVersions": "worker.runtime.handlers.queries",
+    "GetContentVersion": "worker.runtime.handlers.queries",
+    "CreateWorkspace": "worker.runtime.handlers.workspaces",
+    "RenameWorkspace": "worker.runtime.handlers.workspaces",
+    "ArchiveWorkspace": "worker.runtime.handlers.workspaces",
+    "ListWorkspaces": "worker.runtime.handlers.workspaces",
+    "CreatePlatformVariant": "worker.runtime.handlers.publish",
+    "ListPlatformVariants": "worker.runtime.handlers.publish",
+    "ExportBundle": "worker.runtime.handlers.publish",
 }
 
 # 写配置（UpdateConfig）仅允许来自「用户态 / 桌面壳」的 actor（三角色 P0 安全模型）；

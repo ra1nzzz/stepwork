@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
+from worker.runtime.audit import build_invocation, record_provider_invocation
 from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
 from worker.runtime.jobs import content_job, persist_content_version
@@ -87,6 +88,9 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             notify=deps.notify,
         )
 
+    # 费用透明（Tranche 2）：detail.invocation + provider_invocation 审计行
+    invocation = build_invocation(asr, len(text))
+    record_provider_invocation(repos.conn, env, invocation)
     return CommandResult(
         ok=True,
         commandId=env.commandId,
@@ -100,5 +104,6 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             "segment_count": len(transcript.segments),
             "char_count": len(text),
             "capped": capped,
+            "invocation": invocation,
         },
     )

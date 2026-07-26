@@ -192,6 +192,9 @@ class VideoDraftMeta(BaseModel):
     resolution: tuple[int, int]
     fps: int
     source_version_id: str
+    # Tranche 2（PRD-REN-001/003）：字幕 sidecar 与旁白音频 artifact 登记
+    subtitles_uri: str | None = None
+    audio_uri: str | None = None
     producer: dict[str, Any] = Field(default_factory=dict)
 
 

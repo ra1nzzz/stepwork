@@ -20,6 +20,8 @@ NNNN_description.sql
 | 0001 | `0001_init.sql` | 5 张核心表（workspaces / content_projects / source_assets / jobs / content_versions） | ✅ W1 |
 | 0002 | `0002_audit_events.sql` | 审计事件表 | ✅ W1 |
 | 0003 | `0003_agent_placeholder.sql` | Agent / Publisher / Provenance 占位表 | ✅ W1 |
+| 0004 | `0004_plugin_registry.sql` | 插件注册表（installed_plugins） | ✅ W8 |
+| 0005 | `0005_brand_profiles.sql` | brand_profiles 表 + audit_events 补 event_type/payload + platform_variants 补 project_id/video_version_id | ✅ Tranche 2 |
 
 ## 执行规则
 

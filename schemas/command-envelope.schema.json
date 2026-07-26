@@ -53,7 +53,21 @@
         "ExportProject",
         "ImportProject",
         "BackupWorkspace",
-        "RestoreWorkspace"
+        "RestoreWorkspace",
+        "CreateBrandProfile",
+        "UpdateBrandProfile",
+        "ListBrandProfiles",
+        "SetProjectBrandProfile",
+        "SaveAnalysis",
+        "ListContentVersions",
+        "GetContentVersion",
+        "CreateWorkspace",
+        "RenameWorkspace",
+        "ArchiveWorkspace",
+        "ListWorkspaces",
+        "CreatePlatformVariant",
+        "ListPlatformVariants",
+        "ExportBundle"
       ],
       "description": "Command type identifier. See SYSTEM_SPEC §7.2 for the canonical list."
     },

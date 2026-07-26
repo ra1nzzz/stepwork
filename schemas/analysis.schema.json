@@ -43,6 +43,24 @@
         "null"
       ]
     },
+    "hook": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "structure": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "risks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "provider": {
       "type": "string"
     },
@@ -61,6 +79,9 @@
     "suggested_tags",
     "key_points",
     "target_audience",
+    "hook",
+    "structure",
+    "risks",
     "provider",
     "model",
     "confidence"

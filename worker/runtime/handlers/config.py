@@ -52,6 +52,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "data": {
         "retentionDays": 30,
+        # Tranche 2（PRD-SRC-005）：临时/下载中间文件清理策略。
+        # immediate=导入完成后即删；scheduled=启动时按 retentionDays 清扫；
+        # manual=不自动清扫。
+        "cleanupMode": "scheduled",
         "desensitize": True,
         "projectDelete": False,
         "uploadScope": "",

@@ -11,8 +11,14 @@ from __future__ import annotations
 
 import hashlib
 
+from worker.runtime.audit import build_invocation, record_provider_invocation
 from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
+from worker.runtime.handlers.brand import (
+    brand_producer_fields,
+    format_brand_prompt_block,
+    load_project_brand,
+)
 from worker.runtime.jobs import content_job, persist_content_version
 from worker.runtime.models import (
     CommandEnvelope,
@@ -45,7 +51,16 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     if ai is None:
         raise DispatchError("UNAVAILABLE", "ai provider not configured")
 
-    prompt = build_topic_prompt(text, spec.count)
+    # 品牌画像注入（Tranche 2）：项目已关联 profile 时注入提示词约束，
+    # 并在 producer 记录 brand_profile_id / brand_profile_updated_at。
+    repos.workspaces.ensure(env.workspaceId)
+    project_id = env.projectId or repos.projects.get_or_create_default(
+        env.workspaceId
+    ).id
+    brand = load_project_brand(repos, project_id)
+    brand_block = format_brand_prompt_block(brand) if brand else None
+
+    prompt = build_topic_prompt(text, spec.count, brand_block)
     async with content_job(
         repos,
         job_type="topic",
@@ -68,11 +83,15 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
                 "kind": "ai-topic",
                 "provider": getattr(ai, "name", "unknown"),
                 "model": getattr(ai, "model", "unknown"),
+                **brand_producer_fields(brand),
             },
             stage=JobStage.PROPOSING,
             parent_version_id=spec.source_version_id,
             notify=deps.notify,
         )
+    # 费用透明（Tranche 2）：detail.invocation + provider_invocation 审计行
+    invocation = build_invocation(ai, len(prompt) + len(content))
+    record_provider_invocation(repos.conn, env, invocation)
     return CommandResult(
         ok=True,
         commandId=env.commandId,
@@ -83,5 +102,6 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             "source_version_id": spec.source_version_id,
             # 供前端直接渲染，无需额外 content-fetch 接口
             "angles": [a.model_dump() for a in proposal.angles],
+            "invocation": invocation,
         },
     )
