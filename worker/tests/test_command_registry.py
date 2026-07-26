@@ -42,8 +42,12 @@ def _frontend_commands() -> set[str]:
 def test_bus_routes_and_schema_enum_match() -> None:
     bus, schema = _bus_commands(), _schema_commands()
     assert bus, "未能从 bus.py 解析出任何命令（正则失效？）"
-    assert not bus - schema, f"有 bus 路由但 schema enum 缺失（信封会被拒）: {sorted(bus - schema)}"
-    assert not schema - bus, f"schema enum 有但无 bus 路由（unknown commandType）: {sorted(schema - bus)}"
+    assert not bus - schema, (
+        f"有 bus 路由但 schema enum 缺失（信封会被拒）: {sorted(bus - schema)}"
+    )
+    assert not schema - bus, (
+        f"schema enum 有但无 bus 路由（unknown commandType）: {sorted(schema - bus)}"
+    )
 
 
 def test_frontend_union_matches_bus_routes() -> None:
