@@ -200,7 +200,10 @@ export const useRenderStore = create<RenderStoreState>((set, get) => ({
       payload,
     );
     try {
-      await dispatchCommand(env);
+      // 此前只 catch 异常、不看 res.ok：后端返回 ok=false（如任务已终态）
+      // 会被当成成功，用户以为取消了、其实没有
+      const res = await dispatchCommand(env);
+      if (!res.ok) set({ error: res.error ?? "取消渲染任务失败" });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       set({ error: msg });

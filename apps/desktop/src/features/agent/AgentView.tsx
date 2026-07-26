@@ -6,6 +6,7 @@
 
 import { useEffect, useState } from "react";
 import { buildEnvelope, dispatchCommand, getWorkspaceId } from "@/lib/tauri";
+import { errorText, runCommand } from "@/lib/useCommand";
 import type { CommandResult } from "@/lib/types";
 
 interface AgentTask {
@@ -98,6 +99,8 @@ export function AgentView() {
   // PRD-AGT-007：连接列表（可启停 / 删除）
   const [connections, setConnections] = useState<AgentConnection[]>([]);
   const [connBusy, setConnBusy] = useState<string | null>(null);
+  // 连接操作的失败必须显示出来：此前 setConnStatus/deleteConn 完全吞掉错误
+  const [connError, setConnError] = useState<string | null>(null);
   // PRD-AGT-004：出站 MCP 客户端
   const [mcpCommand, setMcpCommand] = useState("");
   const [mcpBusy, setMcpBusy] = useState(false);
@@ -117,25 +120,26 @@ export function AgentView() {
   const [acpError, setAcpError] = useState<string | null>(null);
 
   async function loadConnections() {
-    const env = buildEnvelope("ListAgentConnections", getWorkspaceId(), null, {});
-    const res = await dispatchCommand(env);
-    if (res.ok) {
-      const d = (res.detail ?? {}) as { connections?: AgentConnection[] };
-      setConnections(d.connections ?? []);
+    try {
+      // detail 现在是契约推导出来的强类型，不再需要 `as { connections?: ... }`
+      const d = await runCommand("ListAgentConnections");
+      setConnections((d.connections ?? []) as unknown as AgentConnection[]);
+    } catch (e) {
+      // 加载失败此前被静默吞掉 → 界面显示空列表，看起来像「没有连接」
+      setConnError(errorText(e));
     }
   }
 
   async function setConnStatus(id: string, status: "active" | "inactive") {
     setConnBusy(id);
+    setConnError(null);
     try {
-      const env = buildEnvelope(
-        "SetAgentConnectionStatus",
-        getWorkspaceId(),
-        null,
-        { connectionId: id, status },
-      );
-      await dispatchCommand(env);
+      // 改造前这里不检查 res.ok：后端拒了也照常刷新，用户点了没反应且
+      // 看不到任何原因。现在统一走 runCommand，失败即抛。
+      await runCommand("SetAgentConnectionStatus", { connectionId: id, status });
       await loadConnections();
+    } catch (e) {
+      setConnError(errorText(e));
     } finally {
       setConnBusy(null);
     }
@@ -143,12 +147,12 @@ export function AgentView() {
 
   async function deleteConn(id: string) {
     setConnBusy(id);
+    setConnError(null);
     try {
-      const env = buildEnvelope("DeleteAgentConnection", getWorkspaceId(), null, {
-        connectionId: id,
-      });
-      await dispatchCommand(env);
+      await runCommand("DeleteAgentConnection", { connectionId: id });
       await loadConnections();
+    } catch (e) {
+      setConnError(errorText(e));
     } finally {
       setConnBusy(null);
     }
@@ -179,12 +183,12 @@ export function AgentView() {
   /* PRD-AGT-005：A2A —— 入站 Server 开关 + 出站对端 */
 
   async function loadA2aStatus() {
-    const env = buildEnvelope("GetA2aServerStatus", getWorkspaceId(), null, {});
-    const res = await dispatchCommand(env);
-    if (res.ok) {
-      const d = (res.detail ?? {}) as { running?: boolean; url?: string };
-      setA2aRunning(Boolean(d.running));
-      setA2aUrl(d.url ?? "");
+    try {
+      const d = await runCommand("GetA2aServerStatus");
+      setA2aRunning(d.running);
+      setA2aUrl(d.url);
+    } catch (e) {
+      setA2aError(errorText(e));
     }
   }
 
@@ -260,16 +264,8 @@ export function AgentView() {
     setConnBusy(id);
     setMcpError(null);
     try {
-      const env = buildEnvelope("ListMcpTools", getWorkspaceId(), null, {
-        connectionId: id,
-      });
-      const res = await dispatchCommand(env);
-      if (!res.ok) {
-        setMcpError(res.error ?? "刷新工具目录失败");
-        return;
-      }
-      const d = (res.detail ?? {}) as { tools?: McpTool[] };
-      setMcpTools((prev) => ({ ...prev, [id]: d.tools ?? [] }));
+      const d = await runCommand("ListMcpTools", { connectionId: id });
+      setMcpTools((prev) => ({ ...prev, [id]: d.tools as unknown as McpTool[] }));
       await loadConnections();
     } finally {
       setConnBusy(null);
@@ -499,6 +495,11 @@ export function AgentView() {
       {/* PRD-AGT-007：连接管理（启停 / 删除；停用后该通道调用会被拒） */}
       <div className="agent-section">
         <h2>协议连接</h2>
+        {connError && (
+          <p className="error-text" data-od-id="conn-error">
+            {connError}
+          </p>
+        )}
         {connections.length === 0 ? (
           <p className="panel-meta">
             尚无连接记录。外部 Agent（MCP / A2A / ACP）首次调用后会出现在这里。

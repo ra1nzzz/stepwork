@@ -218,17 +218,29 @@ export const useImportStore = create<ImportStoreState>((set, get) => ({
 
   reset: async () => {
     const assets = get().assets;
-    // 通知后端删除 source_assets 记录（失败静默忽略，前端仍清空）
+    const failed: string[] = [];
+    // 通知后端删除 source_assets 记录
     for (const a of assets) {
       try {
         const env = buildEnvelope("DeleteAsset", getWorkspaceId(), a.project_id, {
           assetId: a.id,
         });
-        await dispatchCommand(env);
+        const res = await dispatchCommand(env);
+        if (!res.ok) failed.push(a.id);
       } catch {
-        // 静默：后端删除失败不阻塞前端清空
+        failed.push(a.id);
       }
     }
-    set({ assets: [], error: null, dedupNotice: null, urlStatus: "idle", urlError: null });
+    set({
+      assets: [],
+      // 前端仍清空（用户的意图很明确），但后端删不掉要说出来 ——
+      // 否则库里留下孤儿素材记录，而用户以为清干净了
+      error: failed.length
+        ? `${failed.length} 条素材在后端未删除成功，可能仍占用磁盘`
+        : null,
+      dedupNotice: null,
+      urlStatus: "idle",
+      urlError: null,
+    });
   },
 }));

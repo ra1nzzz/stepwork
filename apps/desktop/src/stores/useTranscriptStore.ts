@@ -120,9 +120,14 @@ export const useTranscriptStore = create<TranscriptStoreState>((set, get) => ({
         const env = buildEnvelope("CancelJob", getWorkspaceId(), currentProjectId(), {
           job_id: job.jobId,
         });
-        await dispatchCommand(env);
-      } catch {
-        // 静默：本地已标记 cancelled，后端失败不回滚
+        const res = await dispatchCommand(env);
+        if (!res.ok) {
+          // 不回滚本地的 cancelled 标记（回滚会让界面来回跳），但必须说出来：
+          // 后端没取消成功意味着任务**还在跑**，而 UI 显示已取消
+          set({ error: `后端未确认取消，任务可能仍在运行：${res.error ?? ""}` });
+        }
+      } catch (e) {
+        set({ error: `后端未确认取消：${e instanceof Error ? e.message : String(e)}` });
       }
     }
   },

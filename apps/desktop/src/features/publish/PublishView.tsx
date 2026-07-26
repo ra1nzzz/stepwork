@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { buildEnvelope, dispatchCommand, getWorkspaceId } from "@/lib/tauri";
+import { errorText, runCommand } from "@/lib/useCommand";
 import { openLocalPath } from "@/lib/shell";
 import { useViewStore } from "@/stores/useViewStore";
 import { useRenderStore } from "@/stores/useRenderStore";
@@ -120,13 +121,13 @@ export function PublishView() {
 
   /** 拉取排期列表（含到点提醒状态） */
   const loadScheduled = useCallback(async () => {
-    const env = buildEnvelope("ListScheduledPublishes", getWorkspaceId(), projectId, {
-      projectId,
-    });
-    const res = await dispatchCommand(env);
-    if (!res.ok) return;
-    const d = (res.detail ?? {}) as { scheduled?: ScheduledPublish[] };
-    setScheduled(d.scheduled ?? []);
+    try {
+      const d = await runCommand("ListScheduledPublishes", { projectId }, { projectId });
+      setScheduled(d.scheduled as unknown as ScheduledPublish[]);
+    } catch {
+      // 排期列表拉不到不该打断发布主流程，但也不能装作「没有排期」
+      setScheduled([]);
+    }
   }, [projectId]);
 
   /**
@@ -188,11 +189,13 @@ export function PublishView() {
   }
 
   async function cancelSchedule(scheduleId: string) {
-    const env = buildEnvelope("CancelScheduledPublish", getWorkspaceId(), projectId, {
-      scheduleId,
-    });
-    await dispatchCommand(env);
-    await loadScheduled();
+    try {
+      // 此前不检查 ok：取消失败也照常刷新，排期还在列表里但用户以为取消了
+      await runCommand("CancelScheduledPublish", { scheduleId }, { projectId });
+      await loadScheduled();
+    } catch (e) {
+      setTimelineNotice(errorText(e));
+    }
   }
 
   // 加载项目列表（进入发布页时）
@@ -243,9 +246,12 @@ export function PublishView() {
       // 先补扫一次到期排期，再拉列表 —— 否则 worker 关机期间到点的条目
       // 会一直停在 pending，用户打开页面看不到任何提醒
       void (async () => {
-        await dispatchCommand(
-          buildEnvelope("FireDueSchedules", getWorkspaceId(), projectId, {}),
-        );
+        // 补扫失败不影响后续列表加载，故单独 catch
+        try {
+          await runCommand("FireDueSchedules", {}, { projectId });
+        } catch {
+          /* 到期补扫失败：列表仍照常加载 */
+        }
         await loadScheduled();
       })();
     } else {

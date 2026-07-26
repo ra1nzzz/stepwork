@@ -94,12 +94,17 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             "SELECT * FROM agent_connections ORDER BY created_at DESC"
         ).fetchall()
         connections = [_row_to_dict(r) for r in rows]
-        # 附上每条连接的任务数，便于页面显示活跃度
+        # 任务数一次 GROUP BY 取回，而不是每条连接查一次。连接数少时两者
+        # 无差别，但 N+1 是会随数据增长而恶化的写法，没有理由留着。
+        counts = {
+            str(r["target_agent_id"]): int(r["n"])
+            for r in deps.repos.conn.execute(
+                "SELECT target_agent_id, COUNT(*) n FROM agent_tasks "
+                "GROUP BY target_agent_id"
+            ).fetchall()
+        }
         for item in connections:
-            item["task_count"] = deps.repos.conn.execute(
-                "SELECT COUNT(*) n FROM agent_tasks WHERE target_agent_id=?",
-                (item["id"],),
-            ).fetchone()["n"]
+            item["task_count"] = counts.get(str(item["id"]), 0)
         return CommandResult(
             ok=True, commandId=env.commandId, detail={"connections": connections}
         )
