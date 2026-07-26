@@ -23,6 +23,7 @@ import asyncio
 import logging
 import os
 import sys
+import threading
 import time
 from typing import IO
 
@@ -80,25 +81,81 @@ def _stdout_binary() -> IO[bytes]:
     return buffer if buffer is not None else sys.stdout  # type: ignore[return-value]
 
 
-async def _open_stdin_stdout() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-    """把进程 stdin/stdout 包装为 asyncio StreamReader/StreamWriter。
+class _ThreadStdoutWriter:
+    """Async-compatible stdout writer that writes in a thread executor.
 
-    通过 ``loop.connect_read_pipe`` / ``loop.connect_write_pipe`` 把
-    ``sys.stdin.buffer`` / ``sys.stdout.buffer`` 接入事件循环。
+    Replaces ``loop.connect_write_pipe`` which is unsupported by
+    ``SelectorEventLoop`` on Windows. Buffers writes and flushes via
+    ``run_in_executor`` to avoid blocking the event loop.
+    """
+
+    def __init__(self, stdout: IO[bytes], loop: asyncio.AbstractEventLoop) -> None:
+        self._stdout = stdout
+        self._loop = loop
+        self._buf = bytearray()
+        self._closed = False
+
+    def write(self, data: bytes) -> None:
+        self._buf.extend(data)
+
+    async def drain(self) -> None:
+        if self._buf:
+            data = bytes(self._buf)
+            self._buf.clear()
+            await self._loop.run_in_executor(None, self._write_sync, data)
+
+    def _write_sync(self, data: bytes) -> None:
+        try:
+            self._stdout.write(data)
+            self._stdout.flush()
+        except (OSError, BrokenPipeError, ValueError):
+            pass
+
+    def close(self) -> None:
+        self._closed = True
+
+    async def wait_closed(self) -> None:
+        await self.drain()
+
+
+async def _open_stdin_stdout() -> tuple[asyncio.StreamReader, _ThreadStdoutWriter]:
+    """把进程 stdin/stdout 包装为 asyncio StreamReader / 自定义 Writer。
+
+    使用守护线程从 ``sys.stdin.buffer`` 读取数据并 feed 到 ``asyncio.StreamReader``，
+    通过 ``run_in_executor`` 写入 ``sys.stdout.buffer``。
+
+    这种方式兼容 Windows 上的 ``SelectorEventLoop`` 和 ``ProactorEventLoop``，
+    避免了 ``connect_read_pipe`` 在 ``SelectorEventLoop`` 下的 ``NotImplementedError``
+    以及 ``ProactorEventLoop`` 在 Python 3.13 下的 ``_empty_waiter`` bug。
 
     Returns:
         ``(reader, writer)`` 元组。
     """
     loop = asyncio.get_running_loop()
-
     reader = asyncio.StreamReader()
-    reader_protocol = asyncio.StreamReaderProtocol(reader)
-    await loop.connect_read_pipe(lambda: reader_protocol, _stdin_binary())
 
-    writer_transport, writer_protocol = await loop.connect_write_pipe(
-        asyncio.streams.FlowControlMixin, _stdout_binary()
-    )
-    writer = asyncio.StreamWriter(writer_transport, writer_protocol, reader, loop)
+    stdin_bin = _stdin_binary()
+
+    def _feed_stdin() -> None:
+        try:
+            while True:
+                # read1() returns as soon as any data is available (up to n bytes),
+                # unlike read() which blocks until n bytes or EOF.
+                data = stdin_bin.read1(4096)
+                if not data:
+                    break
+                loop.call_soon_threadsafe(reader.feed_data, data)
+        except (OSError, ValueError):
+            pass
+        finally:
+            try:
+                loop.call_soon_threadsafe(reader.feed_eof)
+            except RuntimeError:
+                pass
+
+    threading.Thread(target=_feed_stdin, daemon=True).start()
+
+    writer = _ThreadStdoutWriter(_stdout_binary(), loop)
     return reader, writer
 
 
@@ -260,6 +317,9 @@ async def amain() -> int:
 
 def main() -> None:
     """同步入口（``pyproject.toml [project.scripts]`` 注册点）。"""
+    # stdin/stdout I/O 使用线程桥接（_open_stdin_stdout），不依赖
+    # connect_read_pipe/connect_write_pipe，因此兼容默认事件循环策略。
+    # 不再需要 WindowsSelectorEventLoopPolicy hack。
     try:
         code = asyncio.run(amain())
     except KeyboardInterrupt:

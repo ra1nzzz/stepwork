@@ -107,10 +107,21 @@ export interface CommandEnvelope {
     | "GetProvenance"
     | "ListAgentTasks"
     | "ListAgentArtifacts"
+    | "GetAgentTask"
     | "ExportDiagnosticsBundle"
     | "ListPlugins"
+    | "GetPluginManifest"
     | "EnablePlugin"
-    | "DisablePlugin";
+    | "DisablePlugin"
+    | "ExportProject"
+    | "ImportProject"
+    | "ListProjects"
+    | "GetProject"
+    | "GetJobStatus"
+    | "CreateProject"
+    | "DeleteAsset"
+    | "BackupWorkspace"
+    | "RestoreWorkspace";
   schemaVersion: string;
   actor: { type: "user" | "agent" | "plugin" | "system" | "desktop"; id: string };
   source: string;

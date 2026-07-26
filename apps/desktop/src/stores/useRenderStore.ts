@@ -2,7 +2,12 @@
  * 视频草稿渲染 Store（W6 Batch1）
  * - 对 script/transcript 版 dispatch CreateRenderJob → 渲染视频草稿
  * - 支持取消（CancelJob，置位后端 cancel event）与失败重试（PRD §338）
- * - 复用既有 buildEnvelope / dispatchCommand；浏览器下由 tauri.ts mock 返回示例产物
+ * - 复用既有 buildEnvelope / dispatchCommand
+ *
+ * 修复：
+ * - cancel 在 jobId 为 null（render 调用中尚未返回）时也清本地 isBusy + 置 cancelled
+ * - retry 前清旧 error，避免 UI 残留上一次失败文案
+ * - metaFromDetail 优先读后端 detail 中的 resolution/fps/duration_seconds
  */
 
 import { create } from "zustand";
@@ -23,7 +28,7 @@ export type RenderStatus =
   | "cancelled";
 
 interface RenderStoreState {
-  /** 渲染源版本 id（默认 mock 的 script 版，便于演示） */
+  /** 渲染源版本 id */
   sourceVersionId: string;
   template: string;
   ttsEngine: "synthesize" | "user_audio";
@@ -49,19 +54,23 @@ function metaFromDetail(
   ttsEngine: string,
   sourceVersionId: string,
 ): VideoDraftMeta {
+  // 优先读后端真实值；缺失时回落到默认（竖屏 9:16）
+  const resolution = (detail.resolution as [number, number] | undefined) ?? [1080, 1920];
+  const fps = (detail.fps as number | undefined) ?? 30;
+  const durationSeconds = (detail.duration_seconds as number | undefined) ?? 0;
   return {
     video_uri: (detail.video_uri as string | undefined) ?? "",
-    duration_seconds: 0,
+    duration_seconds: durationSeconds,
     template: (detail.template as string | undefined) ?? template,
     tts_engine: (detail.tts_engine as string | undefined) ?? ttsEngine,
-    resolution: [1080, 1920],
-    fps: 30,
+    resolution,
+    fps,
     source_version_id: sourceVersionId,
   };
 }
 
 export const useRenderStore = create<RenderStoreState>((set, get) => ({
-  sourceVersionId: "cv-script-local",
+  sourceVersionId: "",
   template: "vertical-caption-v1",
   ttsEngine: "synthesize",
   status: "idle",
@@ -103,7 +112,7 @@ export const useRenderStore = create<RenderStoreState>((set, get) => ({
       const detail = (res.detail ?? {}) as Record<string, unknown>;
       set({
         status: "succeeded",
-        jobId: res.job_id,
+        jobId: res.job_id ?? null,
         progress: 1,
         draft: metaFromDetail(
           detail,
@@ -121,6 +130,8 @@ export const useRenderStore = create<RenderStoreState>((set, get) => ({
   },
 
   cancel: async () => {
+    // 无论 jobId 是否存在，都先清本地状态（避免 jobId null 时 UI 卡在"渲染中"）
+    set({ status: "cancelled", isBusy: false });
     const id = get().jobId;
     if (!id) return;
     const payload: CancelJobPayload = { job_id: id };
@@ -132,7 +143,6 @@ export const useRenderStore = create<RenderStoreState>((set, get) => ({
     );
     try {
       await dispatchCommand(env);
-      set({ status: "cancelled" });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       set({ error: msg });
@@ -140,6 +150,8 @@ export const useRenderStore = create<RenderStoreState>((set, get) => ({
   },
 
   retry: async () => {
+    // 清旧 error，避免 UI 残留上一次失败文案
+    set({ error: null, status: "idle", draft: null, jobId: null, progress: 0 });
     await get().render();
   },
 
@@ -150,5 +162,6 @@ export const useRenderStore = create<RenderStoreState>((set, get) => ({
       progress: 0,
       draft: null,
       error: null,
+      isBusy: false,
     }),
 }));

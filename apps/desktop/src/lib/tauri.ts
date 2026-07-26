@@ -1,24 +1,57 @@
 /**
  * Tauri API 封装
- * - 在 Tauri 环境中走 @tauri-apps/api invoke
- * - 在纯浏览器环境（npm run dev）下返回 mock 数据，便于前端独立调试（P1-UX #1）
+ * - Tauri 环境：走 @tauri-apps/api invoke → Rust sidecar → Python worker
+ * - 浏览器环境：自动探测 dev_bridge（VITE_DEV_BRIDGE=1 或自动探测）
+ * - 无连接时：返回明确的错误状态，绝不返回虚假 mock 数据
  */
 
-import type { AppInfo, HealthStatus } from "./types";
+import type {
+  AppInfo,
+  HealthStatus,
+  CommandEnvelope,
+  CommandResult,
+  ConfigResult,
+} from "./types";
+import { useSettingsStore } from "@/stores/useSettingsStore";
+import type { SettingsConfig } from "@/stores/useSettingsStore";
 
 export const isTauri = (): boolean =>
-  typeof window !== "undefined" && "__TAURI__" in window;
+  typeof window !== "undefined" &&
+  ("__TAURI_INTERNALS__" in window || "__TAURI__" in window);
 
-/**
- * Dev bridge 模式（P1）：当以 `VITE_DEV_BRIDGE=1 npm run dev` 启动时，
- * 浏览器版 GUI 不再走 mock，而是把命令转发到本地 Python dev_bridge
- * （worker/dev_bridge.py），从而调用**真实**的 worker Command Bus。
- * 这在没有 Rust sidecar 的纯前端开发/沙箱环境里，让 MVP 功能真正可用。
- */
-export const DEV_BRIDGE = import.meta.env.VITE_DEV_BRIDGE === "1";
+/* ===== Dev Bridge 自动探测 ===== */
+
+const DEV_BRIDGE_EXPLICIT = import.meta.env.VITE_DEV_BRIDGE === "1";
 const DEV_BRIDGE_URL =
   (import.meta.env.VITE_DEV_BRIDGE_URL as string | undefined) ??
   "http://127.0.0.1:8787";
+
+let _bridgeDetected: boolean | null = null;
+
+/** 探测 dev_bridge 是否可用（缓存结果，避免重复探测） */
+async function isBridgeAvailable(): Promise<boolean> {
+  if (_bridgeDetected !== null) return _bridgeDetected;
+  if (DEV_BRIDGE_EXPLICIT) {
+    _bridgeDetected = true;
+    return true;
+  }
+  try {
+    const res = await fetch(`${DEV_BRIDGE_URL}/health`, {
+      method: "GET",
+      signal: AbortSignal.timeout(1200),
+    });
+    _bridgeDetected = res.ok;
+    return _bridgeDetected;
+  } catch {
+    _bridgeDetected = false;
+    return false;
+  }
+}
+
+/** 重置 bridge 探测缓存（用于手动重连场景） */
+export function resetBridgeDetection(): void {
+  _bridgeDetected = null;
+}
 
 type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
@@ -31,106 +64,94 @@ async function getInvoke(): Promise<InvokeFn> {
   return cachedInvoke;
 }
 
-const MOCK_STARTED_AT = Date.now();
-
-function mockHealth(): HealthStatus {
-  const uptime = Math.floor((Date.now() - MOCK_STARTED_AT) / 1000);
+/** 构造未连接后端的健康状态 */
+function disconnectedHealth(): HealthStatus {
   return {
-    status: "ok",
-    version: "0.1.0-mock",
+    status: "down",
+    version: "0.0.0",
     protocol_version: "1",
-    uptime_seconds: uptime,
-    pid: 42424,
-    last_heartbeat_at: new Date().toISOString(),
-    startup_duration_ms: 832,
+    uptime_seconds: 0,
+    pid: 0,
+    last_heartbeat_at: null,
+    startup_duration_ms: 0,
     active_jobs: 0,
-    degraded_reasons: [],
+    degraded_reasons: ["backend_not_connected"],
     runtime_info: {
-      python_version: "3.13.0 (mock)",
-      sqlite_version: "3.45.1",
-      platform: "browser-mock",
+      python_version: "n/a",
+      sqlite_version: "n/a",
+      platform: "browser",
     },
   };
 }
 
-function mockAppInfo(): AppInfo {
+/** 构造未连接后端的 AppInfo */
+function disconnectedAppInfo(): AppInfo {
   return {
-    version: "0.1.0-mock",
+    version: "0.0.0",
     platform: "browser",
-    stepwork_home: "~/STEPWORK (mock)",
+    stepwork_home: "未连接",
     restart_count: 0,
     last_crash_at: null,
   };
 }
 
+/* ===== Health / AppInfo ===== */
+
 export async function getWorkerHealth(): Promise<HealthStatus> {
-  if (DEV_BRIDGE) {
+  if (isTauri()) {
+    const invoke = await getInvoke();
+    return invoke<HealthStatus>("get_worker_health");
+  }
+  if (await isBridgeAvailable()) {
     try {
       const res = await fetch(`${DEV_BRIDGE_URL}/health`);
       if (res.ok) return (await res.json()) as HealthStatus;
     } catch {
-      /* 桥未启动：返回降级健康，UI 仍可渲染 */
+      /* bridge 探测后仍失败 */
     }
-    return {
-      status: "degraded",
-      version: "0.1.0-bridge-offline",
-      protocol_version: "1",
-      uptime_seconds: 0,
-      pid: 0,
-      last_heartbeat_at: new Date().toISOString(),
-      startup_duration_ms: 0,
-      active_jobs: 0,
-      degraded_reasons: ["dev_bridge_offline"],
-      runtime_info: { python_version: "n/a", sqlite_version: "n/a", platform: "browser-devbridge" },
-    };
   }
-  if (!isTauri()) {
-    // 模拟网络/进程延迟
-    await new Promise((r) => setTimeout(r, 220));
-    return mockHealth();
-  }
-  const invoke = await getInvoke();
-  return invoke<HealthStatus>("get_worker_health");
+  return disconnectedHealth();
 }
 
 export async function restartWorker(): Promise<void> {
-  if (!isTauri()) {
-    await new Promise((r) => setTimeout(r, 800));
+  if (isTauri()) {
+    const invoke = await getInvoke();
+    return invoke<void>("restart_worker");
+  }
+  if (await isBridgeAvailable()) {
+    // dev_bridge 无重启接口，静默
     return;
   }
-  const invoke = await getInvoke();
-  return invoke<void>("restart_worker");
+  throw new Error("未连接到后端，无法重启 Worker");
 }
 
 export async function getAppInfo(): Promise<AppInfo> {
-  if (!isTauri()) {
-    return mockAppInfo();
+  if (isTauri()) {
+    const invoke = await getInvoke();
+    return invoke<AppInfo>("get_app_info");
   }
-  const invoke = await getInvoke();
-  return invoke<AppInfo>("get_app_info");
+  if (await isBridgeAvailable()) {
+    // dev_bridge 无 app_info 接口，返回降级信息
+    return {
+      version: "0.1.0-devbridge",
+      platform: "browser",
+      stepwork_home: `dev-bridge (${DEV_BRIDGE_URL})`,
+      restart_count: 0,
+      last_crash_at: null,
+    };
+  }
+  return disconnectedAppInfo();
 }
 
-/**
- * ===== W3 / W4 Command Bus 桥接（Batch3） =====
- *
- * 所有 W3/W4 命令（ImportSource / TranscribeSource / AnalyzeSource）
- * 都经由 Rust `dispatch_command` 单点转发到 worker 的 Command Bus。
- * 真实 Tauri 环境走 invoke；纯浏览器环境返回 mock 以便独立调试。
- */
+/* ===== Command Bus 桥接 ===== */
 
-import type { CommandEnvelope, CommandResult, ConfigResult } from "./types";
-import { useSettingsStore } from "@/stores/useSettingsStore";
-import type { SettingsConfig } from "@/stores/useSettingsStore";
-
-/** 浏览器/mock 环境的默认工作区 id */
+/** 浏览器环境的默认工作区 id */
 export const DEFAULT_WORKSPACE_ID = "ws-local";
 
-/** 当前工作区 id（单工作区占位；未来接入真实 workspace 上下文时替换此函数）。 */
 export function getWorkspaceId(): string {
   return DEFAULT_WORKSPACE_ID;
 }
 
-/** 轻量 uuid（浏览器 crypto.randomUUID 优先，降级到时间+随机） */
 function uuid(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();
@@ -138,7 +159,6 @@ function uuid(): string {
   return `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-/** 构造一个符合 command-envelope.schema.json 的信封（泛型透传已类型化的 payload） */
 export function buildEnvelope<T>(
   commandType: CommandEnvelope["commandType"],
   workspaceId: string,
@@ -159,11 +179,29 @@ export function buildEnvelope<T>(
   };
 }
 
-/** 转发信封到 worker Command Bus（经 Rust dispatch_command） */
+/** 未连接后端的统一错误返回 */
+function disconnectedResult(envelope: CommandEnvelope): CommandResult {
+  return {
+    ok: false,
+    commandId: envelope.commandId,
+    job_id: null,
+    artifact_ids: [],
+    error: "BACKEND_NOT_CONNECTED",
+    detail: {
+      message:
+        "未连接到后端。请在 Tauri 桌面环境中运行，或启动 dev_bridge（python worker/dev_bridge.py）。",
+    },
+  };
+}
+
 export async function dispatchCommand(
   envelope: CommandEnvelope,
 ): Promise<CommandResult> {
-  if (DEV_BRIDGE) {
+  if (isTauri()) {
+    const invoke = await getInvoke();
+    return invoke<CommandResult>("dispatch_command", { envelope });
+  }
+  if (await isBridgeAvailable()) {
     try {
       const res = await fetch(`${DEV_BRIDGE_URL}/dispatch`, {
         method: "POST",
@@ -193,108 +231,12 @@ export async function dispatchCommand(
       };
     }
   }
-  if (!isTauri()) {
-    await new Promise((r) => setTimeout(r, 300));
-    return mockDispatchResult(envelope);
-  }
-  const invoke = await getInvoke();
-  return invoke<CommandResult>("dispatch_command", { envelope });
+  return disconnectedResult(envelope);
 }
 
-/**
- * 浏览器 mock：导入 / 转写默认成功（无密钥也可演示流程）；
- * 分析默认失败（需要真实密钥），借此暴露失败重试 UI 路径。
- * W5：GenerateTopic 返回示例角度；GenerateScript/SaveScript 返回示例脚本，
- * 使选题→脚本→编辑器链路在纯浏览器下也可演示。
- */
-function mockDispatchResult(env: CommandEnvelope): CommandResult {
-  if (env.commandType === "AnalyzeSource") {
-    return {
-      ok: false,
-      commandId: env.commandId,
-      job_id: null,
-      artifact_ids: [],
-      error: "MOCK_NO_PROVIDER",
-      detail: null,
-    };
-  }
-  return {
-    ok: true,
-    commandId: env.commandId,
-    job_id: `job-${uuid()}`,
-    artifact_ids: [`cv-${uuid()}`],
-    error: null,
-    detail: mockDetail(env.commandType),
-  };
-}
+/* ===== Config 桥接 ===== */
 
-function mockDetail(commandType: CommandEnvelope["commandType"]): Record<string, unknown> {
-  if (commandType === "GenerateTopic") {
-    return {
-      mock: true,
-      angles: [
-        { id: "a1", title: "角度一：反常识开场", rationale: "用冲突感抓住注意力", hook: "你以为…其实…" },
-        { id: "a2", title: "角度二：实用清单", rationale: "可收藏的干货结构", hook: "3 个立刻能用的招" },
-        { id: "a3", title: "角度三：真实故事", rationale: "情绪共鸣驱动转发", hook: "我朋友亲身经历…" },
-      ],
-    };
-  }
-  if (commandType === "GenerateScript" || commandType === "SaveScript") {
-    return {
-      mock: true,
-      title: "示例短视频脚本",
-      parent: null,
-      script: {
-        title: "示例短视频脚本",
-        body: "（镜头 0-3s）钩子：你以为剪视频很难？\n（3-10s）其实只要三步…\n（10-15s）关注我，下期拆解。",
-      },
-    };
-  }
-  if (commandType === "CreateRenderJob") {
-    return {
-      mock: true,
-      video_uri: "file:///mock/render/out.mp4",
-      template: "vertical-caption-v1",
-      tts_engine: "synthesize",
-    };
-  }
-  if (commandType === "CancelJob") {
-    return { mock: true, cancelled: true };
-  }
-  // W8：溯源 / Agent / 诊断 / 插件——MVP 阶段返回空态结构（不含虚假记录），
-  // 诊断包导出返回 plausible 路径以便 UI 演示结果展示。
-  if (commandType === "GetProvenance") {
-    return { mock: true, records: [] };
-  }
-  if (commandType === "ListAgentTasks") {
-    return { mock: true, tasks: [] };
-  }
-  if (commandType === "ListAgentArtifacts") {
-    return { mock: true, artifacts: [] };
-  }
-  if (commandType === "ExportDiagnosticsBundle") {
-    return {
-      mock: true,
-      bundle_path: `file:///mock/diagnostics/stepwork-bundle-${Date.now()}.zip`,
-      size_bytes: 0,
-      desensitized: true,
-    };
-  }
-  if (commandType === "ListPlugins") {
-    return { mock: true, plugins: [] };
-  }
-  if (commandType === "EnablePlugin") {
-    return { mock: true, enabled: true };
-  }
-  if (commandType === "DisablePlugin") {
-    return { mock: true, enabled: false };
-  }
-  return { mock: true };
-}
-
-/* ===== SET.4 设置页配置桥接 ===== */
-
-/** 本地推导解析摘要（mock 模式用）。 */
+/** 本地推导解析摘要（bridge 未启用时给 SettingsView 降级展示） */
 function deriveResolved(s: SettingsConfig): ConfigResult["resolved"] {
   return {
     ai: { provider: s.llm.provider, model: s.llm.model, hasKey: !!s.llm.apiKey },
@@ -303,7 +245,6 @@ function deriveResolved(s: SettingsConfig): ConfigResult["resolved"] {
   };
 }
 
-/** 把后端 CommandResult（detail={config,resolved}）适配为前端 ConfigResult。 */
 function adaptConfig(res: CommandResult): ConfigResult {
   if (!res.ok) return { ok: false, error: res.error ?? "bridge_error" };
   const detail = (res.detail ?? {}) as {
@@ -313,7 +254,6 @@ function adaptConfig(res: CommandResult): ConfigResult {
   return { ok: true, config: detail.config, resolved: detail.resolved };
 }
 
-/** 经 dev-bridge 转发配置命令到真实 worker Command Bus。 */
 async function bridgeConfig(
   commandType: CommandEnvelope["commandType"],
   payload: Record<string, unknown>,
@@ -323,32 +263,35 @@ async function bridgeConfig(
   return adaptConfig(res);
 }
 
-/** 读取合并后的配置（掩码视图）+ 解析摘要。 */
 export async function getConfig(): Promise<ConfigResult> {
-  if (DEV_BRIDGE) return bridgeConfig("GetConfig", {});
-  if (!isTauri()) {
-    const s = useSettingsStore.getState().settings;
-    return {
-      ok: true,
-      config: s as unknown as Record<string, unknown>,
-      resolved: deriveResolved(s),
-    };
+  if (isTauri()) {
+    const env = buildEnvelope("GetConfig", getWorkspaceId(), null, {});
+    const invoke = await getInvoke();
+    return adaptConfig(await invoke<CommandResult>("dispatch_command", { envelope: env }));
   }
-  const env = buildEnvelope("GetConfig", getWorkspaceId(), null, {});
-  const invoke = await getInvoke();
-  return adaptConfig(await invoke<CommandResult>("dispatch_command", { envelope: env }));
+  if (await isBridgeAvailable()) {
+    return bridgeConfig("GetConfig", {});
+  }
+  // 未连接后端时，返回本地 store 作为降级（但标记为未持久化到后端）
+  const s = useSettingsStore.getState().settings;
+  return {
+    ok: true,
+    config: s as unknown as Record<string, unknown>,
+    resolved: deriveResolved(s),
+  };
 }
 
-/** 保存配置：非密钥落 Workspace.settings；密钥仅进内存覆盖层（后端剥离+内存）。 */
 export async function updateConfig(settings: SettingsConfig): Promise<ConfigResult> {
   const payload = settings as unknown as Record<string, unknown>;
-  if (DEV_BRIDGE) return bridgeConfig("UpdateConfig", payload);
-  if (!isTauri()) {
-    // mock：仅更新内存 store（persist 的 partialize 会剔除密钥）
-    useSettingsStore.getState().update({ ...settings });
-    return { ok: true };
+  if (isTauri()) {
+    const env = buildEnvelope("UpdateConfig", getWorkspaceId(), null, payload);
+    const invoke = await getInvoke();
+    return adaptConfig(await invoke<CommandResult>("dispatch_command", { envelope: env }));
   }
-  const env = buildEnvelope("UpdateConfig", getWorkspaceId(), null, payload);
-  const invoke = await getInvoke();
-  return adaptConfig(await invoke<CommandResult>("dispatch_command", { envelope: env }));
+  if (await isBridgeAvailable()) {
+    return bridgeConfig("UpdateConfig", payload);
+  }
+  // 未连接后端时，仅更新本地内存 store
+  useSettingsStore.getState().update({ ...settings });
+  return { ok: true };
 }

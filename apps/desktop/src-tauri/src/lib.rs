@@ -1,12 +1,16 @@
 //! STEPWORK Desktop Tauri 2 主进程库。
+//!
+//! W9 增补：调试模式（debug_config.rs），支持配置文件控制控制台显隐 + 日志流推送。
 
 pub mod commands;
+pub mod debug_config;
 pub mod error;
 pub mod sidecar;
 pub mod state;
 
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
@@ -26,7 +30,10 @@ pub fn run() {
             commands::health::get_worker_health,
             commands::health::restart_worker,
             commands::health::get_app_info,
-            commands::dispatch::dispatch_command
+            commands::dispatch::dispatch_command,
+            commands::debug::get_debug_config,
+            commands::debug::set_debug_config,
+            commands::debug::get_recent_logs
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
@@ -51,10 +58,11 @@ async fn run_sidecar_monitor(app: tauri::AppHandle) {
         *s.restart_tx.lock().await = Some(restart_tx.clone());
     }
 
-    let config = resolve_config();
-
     loop {
-        match spawn_sidecar(config.clone()).await {
+        let config = resolve_config(app.clone()).await;
+        let session_token = config.session_token.clone();
+
+        match spawn_sidecar(config).await {
             Ok((child, rpc)) => {
                 // Watchdog: on heartbeat timeout, ask the monitor to restart.
                 let (watchdog, hb_arc) = HeartbeatWatchdog::with_default_timeout({
@@ -84,7 +92,7 @@ async fn run_sidecar_monitor(app: tauri::AppHandle) {
                     child,
                     rpc: std::sync::Arc::clone(&rpc),
                     watchdog: watchdog_handle,
-                    session_token: config.session_token.clone(),
+                    session_token,
                     started_at: Utc::now(),
                 };
                 {
@@ -126,7 +134,9 @@ async fn run_sidecar_monitor(app: tauri::AppHandle) {
 
 /// Resolve the spawn configuration: prefer the repo-local venv python,
 /// else fall back to `python` on PATH. Working directory is the repo root.
-fn resolve_config() -> SpawnConfig {
+///
+/// W9 增补：优先使用打包的 sidecar EXE（若存在），回退到开发模式 .venv/python
+async fn resolve_config(app: tauri::AppHandle) -> SpawnConfig {
     let repo_root = crate::sidecar::spawn::resolve_repo_root();
     let venv_python = repo_root.join(".venv").join("Scripts").join("python.exe");
     let python_path = if venv_python.exists() {
@@ -134,9 +144,82 @@ fn resolve_config() -> SpawnConfig {
     } else {
         PathBuf::from("python")
     };
+
+    // 解析打包的 sidecar EXE 路径
+    // Tauri 在打包模式下将 externalBin 放到可执行文件同目录
+    let sidecar_path = resolve_sidecar_path(&app);
+
+    // 读取调试模式配置
+    let s = app.state::<AppState>();
+    let debug = s.debug_config.get().await;
+    let stderr_buf = Arc::clone(&s.stderr_buf);
+
     SpawnConfig {
         python_path,
+        sidecar_path,
         cwd: Some(repo_root),
+        debug,
+        app_handle: Some(app.clone()),
+        stderr_buf: Some(stderr_buf),
         ..Default::default()
     }
+}
+
+/// 当前编译目标的 Tauri sidecar target triple
+/// 与 rustc -vV 的 host 一致，用于定位 sidecar 二进制
+#[cfg(all(target_arch = "x86_64", target_os = "windows", target_env = "msvc"))]
+const TARGET_TRIPLE: &str = "x86_64-pc-windows-msvc";
+
+#[cfg(all(target_arch = "x86_64", target_os = "windows", target_env = "gnu"))]
+const TARGET_TRIPLE: &str = "x86_64-pc-windows-gnu";
+
+#[cfg(all(target_arch = "aarch64", target_os = "windows", target_env = "msvc"))]
+const TARGET_TRIPLE: &str = "aarch64-pc-windows-msvc";
+
+#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+const TARGET_TRIPLE: &str = "x86_64-unknown-linux-gnu";
+
+#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+const TARGET_TRIPLE: &str = "aarch64-apple-darwin";
+
+#[cfg(all(target_arch = "x86_64", target_os = "macos"))]
+const TARGET_TRIPLE: &str = "x86_64-apple-darwin";
+
+/// 解析打包的 sidecar EXE 路径
+///
+/// Tauri sidecar 文件名格式：`<name>-<target-triple><ext>`
+/// - 开发模式：`src-tauri/binaries/stepwork-worker-<target-triple>.exe`
+/// - 打包模式：`<exe_dir>/binaries/stepwork-worker-<target-triple>.exe`
+fn resolve_sidecar_path(_app: &tauri::AppHandle) -> Option<PathBuf> {
+    let sidecar_name = format!("stepwork-worker-{}.exe", TARGET_TRIPLE);
+
+    // 1) 打包模式：EXE 同目录下的 binaries/
+    if let Ok(exe_dir) = std::env::current_exe() {
+        if let Some(parent) = exe_dir.parent() {
+            let packed = parent.join("binaries").join(&sidecar_name);
+            if packed.exists() {
+                return Some(packed);
+            }
+            // 某些 Tauri 版本放在 EXE 同级而非 binaries/ 子目录
+            let flat = parent.join(&sidecar_name);
+            if flat.exists() {
+                return Some(flat);
+            }
+        }
+    }
+
+    // 2) 开发模式：cwd/binaries/（cwd 是 src-tauri）
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let dev_candidate = cwd.join("binaries").join(&sidecar_name);
+    if dev_candidate.exists() {
+        return Some(dev_candidate);
+    }
+
+    // 3) 开发模式备选：从 repo root 找 src-tauri/binaries/
+    let repo_candidate = cwd.join("src-tauri").join("binaries").join(&sidecar_name);
+    if repo_candidate.exists() {
+        return Some(repo_candidate);
+    }
+
+    None
 }

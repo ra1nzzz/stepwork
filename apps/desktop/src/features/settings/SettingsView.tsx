@@ -6,7 +6,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { useSettingsStore } from "@/stores/useSettingsStore";
 import type { SettingsConfig } from "@/stores/useSettingsStore";
-import { getConfig, updateConfig, DEV_BRIDGE, isTauri } from "@/lib/tauri";
+import { getConfig, updateConfig } from "@/lib/tauri";
 
 import "@/styles/settings.css";
 
@@ -48,8 +48,8 @@ export default function SettingsView() {
 
   // 重载后回灌后端已存配置（掩码态），使 UI 与后端密钥覆盖层对齐，
   // 避免「字段显示空串但后端其实持有密钥」的错位（qa P0 两层对齐）。
+  // 无连接时 getConfig() 快速返回本地数据，不阻塞。
   useEffect(() => {
-    if (!DEV_BRIDGE && !isTauri()) return; // mock 模式无需回灌
     let cancelled = false;
     (async () => {
       try {

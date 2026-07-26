@@ -28,8 +28,8 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
-    "icon": [],
-    "externalBin": [],
+    "icon": ["icons/icon.ico"],
+    "externalBin": ["binaries/stepwork-worker"],
     "windows": {
       "webviewInstallMode": {
         "type": "embedBootstrapper"

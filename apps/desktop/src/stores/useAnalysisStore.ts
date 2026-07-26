@@ -1,33 +1,29 @@
 /**
  * 内容分析 Store（W4 Batch3）
- * - provider-switch：cloud / openai-compatible / ollama 三种后端
- * - 对转写 dispatch AnalyzeSource，payload.provider 携带当前选择，
- *   使前端的 provider 切换真正生效（worker 端按 hint 构造 provider）
+ * - provider 来源：useSettingsStore.settings.llm（用户在设置页配置）
+ *   analyze 时实时读取，确保用户改 Settings 立即生效
+ * - 对转写 dispatch AnalyzeSource，payload.provider 携带映射后的 snake_case 配置
  * - 失败保留 error，支持重试（PRD §338）
  *
- * 安全：api_key 仅由运行时输入，绝不写死、绝不落库。
+ * 安全：api_key 仅由 SettingsStore 持有内存，绝不写死、绝不落库。
  */
 
 import { create } from "zustand";
 import { buildEnvelope, dispatchCommand } from "@/lib/tauri";
+import { useSettingsStore } from "@/stores/useSettingsStore";
 import type {
   AnalysisChapter,
   AnalysisReport,
   AnalysisStatus,
   AnalysisTopic,
-  ProviderConfig,
-  ProviderKind,
 } from "@/lib/types";
 
 const WORKSPACE = "ws-local";
 
 interface AnalysisStoreState {
   reports: AnalysisReport[];
-  provider: ProviderConfig;
   isBusy: boolean;
   error: string | null;
-  setProviderKind: (kind: ProviderKind) => void;
-  setProviderField: (field: "base_url" | "api_key" | "model", value: string) => void;
   analyze: (transcriptVersionId: string, brand?: string) => Promise<void>;
   reset: () => void;
 }
@@ -47,28 +43,32 @@ function blankReport(): AnalysisReport {
   };
 }
 
+/** 从 useSettingsStore 读取 llm 配置，映射成后端期望的 snake_case provider */
+function readProviderFromSettings(): {
+  kind: string;
+  base_url: string;
+  api_key: string;
+  model: string;
+} {
+  const llm = useSettingsStore.getState().settings.llm;
+  return {
+    kind: llm.provider,
+    base_url: llm.baseUrl,
+    api_key: llm.apiKey,
+    model: llm.model,
+  };
+}
+
 export const useAnalysisStore = create<AnalysisStoreState>((set, get) => ({
   reports: [],
-  provider: {
-    kind: "ollama" as ProviderKind,
-    base_url: "http://localhost:11434/v1",
-    api_key: "",
-    model: "llama3.1",
-  },
   isBusy: false,
   error: null,
 
-  setProviderKind: (kind) =>
-    set((s) => ({ provider: { ...s.provider, kind } })),
-
-  setProviderField: (field, value) =>
-    set((s) => ({ provider: { ...s.provider, [field]: value } })),
-
   analyze: async (transcriptVersionId, brand) => {
-    const cfg = get().provider;
+    const cfg = readProviderFromSettings();
     // ollama 一般不要求 key；cloud / openai-compatible 需要
     if (cfg.kind !== "ollama" && !cfg.api_key) {
-      set({ error: "该 Provider 需要 API Key" });
+      set({ error: "请先在设置页配置 LLM API Key" });
       return;
     }
     const report = blankReport();
@@ -78,12 +78,12 @@ export const useAnalysisStore = create<AnalysisStoreState>((set, get) => ({
       error: null,
     });
 
+    // 用 index 定位要 patch 的 report（避免 find 命中错位）
+    const reportIndex = get().reports.length - 1;
     const apply = (changes: Partial<AnalysisReport>) =>
       set((s) => ({
-        reports: s.reports.map((r) =>
-          r === get().reports.find((x) => x.provider === cfg.kind && x.status === "pending")
-            ? { ...r, ...changes }
-            : r,
+        reports: s.reports.map((r, i) =>
+          i === reportIndex ? { ...r, ...changes } : r,
         ),
       }));
 

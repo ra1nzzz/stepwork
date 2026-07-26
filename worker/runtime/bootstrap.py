@@ -21,9 +21,15 @@ MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations"
 
 
 def _resolve_db_path() -> str:
-    """解析数据库路径：``$STEPWORK_HOME/stepwork.db``，缺省落到用户主目录。"""
+    """解析数据库路径：``$STEPWORK_HOME/stepwork.db``，缺省落到用户主目录。
+
+    启动时自动备份现有数据库（回滚策略见 migrations/README）。
+    备份失败不阻塞启动（仅记录到 stderr），避免权限问题导致 worker 崩溃。
+    """
+    import logging
     import os
 
+    logger = logging.getLogger("worker.runtime")
     home = os.environ.get("STEPWORK_HOME") or str(Path.home() / "STEPWORK")
     Path(home).mkdir(parents=True, exist_ok=True)
     db = Path(home) / "stepwork.db"
@@ -31,7 +37,11 @@ def _resolve_db_path() -> str:
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
         backup = Path(home) / "backups" / f"stepwork-{stamp}.db"
         backup.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(db, backup)
+        try:
+            shutil.copyfile(db, backup)
+        except OSError as exc:
+            # 备份失败不阻塞启动（可能权限受限或磁盘满）
+            logger.warning("启动备份失败（不阻塞启动）: %s", exc)
     return str(db)
 
 

@@ -5,6 +5,7 @@
 
 import { useRef, useState, type DragEvent } from "react";
 import { useImportStore, type ImportFileInput } from "@/stores/useImportStore";
+import { isTauri } from "@/lib/tauri";
 
 function statusLabel(s: string): string {
   if (s === "done") return "已导入";
@@ -22,10 +23,12 @@ export function ImportView() {
   const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
+  const inTauri = isTauri();
+
   const handleFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;
     const inputs: ImportFileInput[] = Array.from(files).map((f) => ({
-      uri: f.name, // mock 路径；真实 Tauri 环境由 fs 解析绝对路径
+      uri: inTauri ? f.name : URL.createObjectURL(f),
       name: f.name,
       sizeBytes: f.size,
       mimeType: f.type || "application/octet-stream",

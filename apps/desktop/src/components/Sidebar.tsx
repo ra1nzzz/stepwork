@@ -7,18 +7,13 @@ interface NavItemDef {
   icon: string;
 }
 
+/** 与 Prototype index.html .nav 5 项 1:1 对齐 */
 const NAV_ITEMS: NavItemDef[] = [
-  { id: "home", label: "概览", icon: "01" },
-  { id: "import", label: "素材导入", icon: "02" },
-  { id: "transcript", label: "转写", icon: "03" },
-  { id: "analysis", label: "内容分析", icon: "04" },
-  { id: "script", label: "脚本创作", icon: "05" },
-  { id: "render", label: "视频渲染", icon: "06" },
-  { id: "settings", label: "设置", icon: "07" },
-  { id: "provenance", label: "溯源", icon: "08" },
-  { id: "agent", label: "Agent", icon: "09" },
-  { id: "diagnostics", label: "诊断", icon: "10" },
-  { id: "plugins", label: "插件", icon: "11" },
+  { id: "home", label: "首页", icon: "01" },
+  { id: "projects", label: "项目", icon: "02" },
+  { id: "create", label: "创作", icon: "03" },
+  { id: "tasks", label: "任务", icon: "04" },
+  { id: "settings", label: "设置", icon: "05" },
 ];
 
 function statusLabel(status: "ok" | "degraded" | "down" | null): string {
@@ -29,8 +24,8 @@ function statusLabel(status: "ok" | "degraded" | "down" | null): string {
 }
 
 /**
- * 左侧导航栏：复用 Prototype .sidebar 结构，导航项驱动视图切换
- * （W3-W4 Batch3 接入素材导入 / 转写 / 内容分析）。
+ * 左侧导航栏：与 Prototype .sidebar 结构 1:1 对齐
+ * 5 项一级导航（首页/项目/创作/任务/设置）
  */
 export function Sidebar() {
   const health = useHealthStore((s) => s.health);

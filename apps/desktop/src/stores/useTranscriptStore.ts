@@ -1,10 +1,11 @@
 /**
  * 转写 Store（W3 Batch3）
  * - 对素材 dispatch TranscribeSource，跟踪 job 阶段 / 进度 / 失败
- * - 支持取消（本地标记）与失败重试（PRD §338）
+ * - 支持取消（dispatch CancelJob + 本地标记）与失败重试（PRD §338）
  *
  * 注：worker 端转写为同步执行（命令内 await ASR），故无实时进度流；
- * 真实环境由 content_version 回填正文，mock 环境仅保留状态与失败重试路径。
+ * 真实环境由 content_version 回填正文。cancel 仍会调 CancelJob 通知后端
+ * 把 content_jobs 记录标记为 cancelled。
  */
 
 import { create } from "zustand";
@@ -22,6 +23,8 @@ export type TranscriptStatus =
 
 export interface TranscriptJob {
   id: string;
+  /** 后端 content_jobs.id（用于 CancelJob）；可能为 null（后端未返回时） */
+  jobId: string | null;
   assetId: string | null;
   versionId: string | null;
   language: string | null;
@@ -38,7 +41,7 @@ interface TranscriptStoreState {
   isBusy: boolean;
   error: string | null;
   transcribe: (assetId: string, opts?: Record<string, unknown>) => Promise<void>;
-  cancel: (id: string) => void;
+  cancel: (id: string) => Promise<void>;
   retry: (id: string) => Promise<void>;
   reset: () => void;
 }
@@ -46,6 +49,7 @@ interface TranscriptStoreState {
 function newJob(assetId: string | null, opts?: Record<string, unknown>): TranscriptJob {
   return {
     id: `tj-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    jobId: null,
     assetId,
     versionId: null,
     language: (opts?.language as string | undefined) ?? null,
@@ -83,6 +87,7 @@ export const useTranscriptStore = create<TranscriptStoreState>((set, get) => ({
           status: "succeeded",
           progress: 1,
           versionId: res.artifact_ids[0] ?? null,
+          jobId: res.job_id ?? null,
           language,
         }),
       });
@@ -97,10 +102,22 @@ export const useTranscriptStore = create<TranscriptStoreState>((set, get) => ({
     }
   },
 
-  cancel: (id) => {
-    set({
-      jobs: patch(get().jobs, id, { status: "cancelled", progress: 0 }),
-    });
+  cancel: async (id) => {
+    const job = get().jobs.find((j) => j.id === id);
+    if (!job) return;
+    // 本地立即标记 cancelled
+    set({ jobs: patch(get().jobs, id, { status: "cancelled", progress: 0 }) });
+    // 通知后端 CancelJob（如果有 jobId）
+    if (job.jobId) {
+      try {
+        const env = buildEnvelope("CancelJob", WORKSPACE, null, {
+          job_id: job.jobId,
+        });
+        await dispatchCommand(env);
+      } catch {
+        // 静默：本地已标记 cancelled，后端失败不回滚
+      }
+    }
   },
 
   retry: async (id) => {

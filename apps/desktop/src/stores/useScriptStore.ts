@@ -5,8 +5,7 @@
  * - 编辑器内容变化（TipTap JSON）经防抖后 dispatch SaveScript 自动保存，
  *   每次保存新建一条 script 版本并串 parent 链（防丢稿）
  *
- * 与 W3/W4 store 一致：经由 buildEnvelope + dispatchCommand；
- * 浏览器下由 tauri.ts mock 返回示例数据。
+ * 与 W3/W4 store 一致：经由 buildEnvelope + dispatchCommand
  */
 
 import { create } from "zustand";
@@ -24,7 +23,7 @@ const WORKSPACE = "ws-local";
 export type ScriptStatus = "idle" | "running" | "succeeded" | "failed";
 
 interface ScriptStoreState {
-  /** 选题来源的转写/素材版本 id（默认 mock 版，便于演示） */
+  /** 选题来源的转写/素材版本 id */
   sourceVersionId: string;
   angles: TopicAngle[];
   proposalVersionId: string | null;
@@ -45,8 +44,8 @@ interface ScriptStoreState {
   generateTopics: () => Promise<void>;
   generateScript: () => Promise<void>;
   setScriptTitle: (t: string) => void;
-  /** 编辑器内容（TipTap JSON）防抖后调用，新建版本并串链 */
-  saveScript: (doc: Record<string, unknown>) => Promise<void>;
+  /** 保存正文（可选标题）到后端，新建版本并串链 */
+  saveScript: (text: string, title?: string) => Promise<void>;
   reset: () => void;
 }
 
@@ -64,7 +63,7 @@ function newVersionRef(
 }
 
 export const useScriptStore = create<ScriptStoreState>((set, get) => ({
-  sourceVersionId: "cv-local",
+  sourceVersionId: "",
   angles: [],
   proposalVersionId: null,
   selectedAngleId: null,
@@ -155,9 +154,9 @@ export const useScriptStore = create<ScriptStoreState>((set, get) => ({
 
   setScriptTitle: (t) => set({ scriptTitle: t }),
 
-  saveScript: async (doc) => {
+  saveScript: async (text, title) => {
     const payload: SaveScriptPayload = {
-      content: doc,
+      content: { text, title: title ?? get().scriptTitle },
       parent_version_id: get().scriptVersionId,
     };
     const env = buildEnvelope(

@@ -1,6 +1,6 @@
 /**
  * 视频草稿渲染视图（W6 Batch1）
- * - 选渲染源版本（默认 mock 的 script 版）/ 模板 / TTS 引擎
+ * - 选渲染源版本 / 模板 / TTS 引擎
  * - 渲染（CreateRenderJob）→ 取消（CancelJob）→ 失败重试
  * - 展示产物 video_uri（对齐 PRD §338 的 阶段/进度/取消/重试）
  */
@@ -69,7 +69,7 @@ export function RenderView() {
         <button
           type="button"
           className="btn primary"
-          disabled={isBusy}
+          disabled={isBusy || !sourceVersionId.trim()}
           onClick={() => void render()}
         >
           {status === "running" ? "渲染中…" : "开始渲染"}
