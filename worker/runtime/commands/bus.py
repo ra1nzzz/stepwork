@@ -20,6 +20,11 @@ from typing import Any
 from worker.runtime.commands import idempotency
 from worker.runtime.commands.envelope import EnvelopeError, parse_envelope
 from worker.runtime.models import CommandEnvelope, CommandResult
+from worker.runtime.observability import (
+    CommandTimer,
+    record_metric,
+    resolve_correlation_id,
+)
 from worker.runtime.results import validate_detail
 
 logger = logging.getLogger("worker.runtime")
@@ -297,7 +302,11 @@ class DispatchError(Exception):
 
 
 async def dispatch(raw: dict[str, Any], deps: Any) -> dict[str, Any]:
-    """校验信封并路由到对应 handler。
+    """校验信封并路由到对应 handler，全程计时与留痕。
+
+    可观测性包在最外层而不是各 handler 里：埋在 handler 里必然会漏，
+    而漏掉的那条恰好就是出问题时最想看的那条。信封解析失败也要记 ——
+    「命令根本没进来」和「命令执行失败」是两回事，日志里必须能分开。
 
     Args:
         raw: 调用方传入的原始命令 dict。
@@ -306,6 +315,19 @@ async def dispatch(raw: dict[str, Any], deps: Any) -> dict[str, Any]:
     Returns:
         :class:`CommandResult` 的 ``model_dump()`` 字典。
     """
+    command_type = str(raw.get("commandType") or "?")
+    correlation_id = resolve_correlation_id(raw)
+    with CommandTimer(command_type, correlation_id, raw.get("payload")) as timer:
+        result = await _dispatch_inner(raw, deps)
+        timer.finish(ok=bool(result.get("ok")), error=result.get("error"))
+        conn = getattr(getattr(deps, "repos", None), "conn", None)
+        if conn is not None:
+            record_metric(conn, timer)
+        return result
+
+
+async def _dispatch_inner(raw: dict[str, Any], deps: Any) -> dict[str, Any]:
+    """实际的校验与路由（计时与指标由 :func:`dispatch` 负责）。"""
     try:
         env = parse_envelope(raw)
     except EnvelopeError as e:

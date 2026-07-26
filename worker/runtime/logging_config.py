@@ -50,10 +50,14 @@ _SECRET_PATTERN: re.Pattern[str] = re.compile(
     r"cookie|set-cookie|session[_-]?id|authorization|bearer|"
     r"qr[_-]?code|qrcode|captcha|verify[_-]?code|otp|"
     r"二维码|验证码|密码|凭据"
-    r")\s*[:=]\s*"
+    # 关键字与分隔符之间允许一个引号：JSON 形态是 ``"apiKey": "sk-..."``，
+    # 不放行这个引号的话，日志里所有 JSON 形式的密钥都掩不掉 —— 而结构化
+    # 日志恰恰全是 JSON。
+    r")[\"']?\s*[:=]\s*"
     # 值部分：允许先跟一个认证方案词（Bearer / Basic / Token）再跟真实凭据，
     # 否则 "Authorization: Bearer <token>" 只会掩掉 "Bearer"，真 token 泄漏。
-    r"(?:(?:bearer|basic|token|digest)\s+)?\S+"
+    # 带引号的值整段吃掉，避免只掩到闭合引号之前。
+    r"(?:(?:bearer|basic|token|digest)\s+)?(?:\"[^\"]*\"|'[^']*'|\S+)"
 )
 
 # data URI 形式的二维码/截图（``data:image/png;base64,...``）：整段抹掉。
