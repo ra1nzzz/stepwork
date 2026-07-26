@@ -1082,3 +1082,23 @@ p { text-wrap: pretty; }
   .flow-five { grid-template-columns: repeat(5, minmax(150px, 1fr)); overflow-x: auto; }
   .source-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* PRD-SCR-003 段落级操作行（每段一行：序号 / 预览 / 四个操作） */
+.paragraph-ops { display: flex; flex-direction: column; gap: 8px; }
+.paragraph-op-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border, rgba(255,255,255,0.12));
+  border-radius: 8px;
+}
+.paragraph-op-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  opacity: 0.85;
+}

@@ -28,6 +28,8 @@ _ROUTES: dict[str, str] = {
     "GenerateTopic": "worker.runtime.handlers.generate_topic",
     "GenerateScript": "worker.runtime.handlers.generate_script",
     "SaveScript": "worker.runtime.handlers.save_script",
+    # PRD-SCR-003：段落级生成/重写/扩写/压缩
+    "EditParagraph": "worker.runtime.handlers.edit_paragraph",
     "GetConfig": "worker.runtime.handlers.config",
     "UpdateConfig": "worker.runtime.handlers.config",
     "ListProjects": "worker.runtime.handlers.queries",

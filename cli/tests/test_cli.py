@@ -882,3 +882,46 @@ def test_script_generate_no_brand_flag(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert rc == 0
     assert captured["env"]["payload"]["use_brand_profile"] is False
+
+
+# ----- Tranche 3：script paragraph（PRD-SCR-003 段落级编辑） -----
+
+
+def test_script_paragraph_builds_edit_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True, "detail": {}})
+    rc = main(
+        ["script", "paragraph", "--version-id", "cv-1",
+         "--index", "2", "--operation", "expand"]
+    )
+
+    assert rc == 0
+    assert captured["env"]["commandType"] == "EditParagraph"
+    assert captured["env"]["payload"] == {
+        "version_id": "cv-1",
+        "paragraph_index": 2,
+        "operation": "expand",
+    }
+
+
+def test_script_paragraph_with_instruction_and_no_brand(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True, "detail": {}})
+    rc = main(
+        ["script", "paragraph", "--version-id", "cv-1", "--index", "0",
+         "--operation", "condense", "--instruction", "更口语", "--no-brand"]
+    )
+
+    assert rc == 0
+    payload = captured["env"]["payload"]
+    assert payload["instruction"] == "更口语"
+    assert payload["use_brand_profile"] is False
+
+
+def test_script_paragraph_rejects_unknown_operation() -> None:
+    with pytest.raises(SystemExit) as ei:
+        main(["script", "paragraph", "--version-id", "cv-1",
+              "--index", "0", "--operation", "translate"])
+    assert ei.value.code == 2

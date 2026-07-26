@@ -131,6 +131,29 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sg.add_argument("--provider", help="可选：provider 提示，JSON 字符串")
 
+    # PRD-SCR-003：段落级生成/重写/扩写/压缩
+    sp = script_sub.add_parser(
+        "paragraph", help="段落级编辑（EditParagraph；生成新版本，可回滚）"
+    )
+    sp.set_defaults(command_type="EditParagraph")
+    sp.add_argument("--version-id", dest="version_id", required=True, help="源脚本版本 id")
+    sp.add_argument(
+        "--index", type=int, required=True, help="目标段落序号（0 起）"
+    )
+    sp.add_argument(
+        "--operation",
+        choices=("rewrite", "expand", "condense", "generate"),
+        required=True,
+        help="段落操作：重写 / 扩写 / 压缩 / 生成",
+    )
+    sp.add_argument("--instruction", default=None, help="可选：补充要求")
+    sp.add_argument(
+        "--no-brand",
+        dest="no_brand",
+        action="store_true",
+        help="PRD-BRD-002：本次编辑不启用项目品牌档",
+    )
+
     ss = script_sub.add_parser("save", help="保存脚本（SaveScript）")
     ss.set_defaults(command_type="SaveScript")
     ss.add_argument(
@@ -556,6 +579,17 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
             if provider is not None:
                 payload["provider"] = provider
             return payload
+        if action == "paragraph":
+            para_payload: dict[str, Any] = {
+                "version_id": args.version_id,
+                "paragraph_index": args.index,
+                "operation": args.operation,
+            }
+            if getattr(args, "instruction", None):
+                para_payload["instruction"] = args.instruction
+            if getattr(args, "no_brand", False):
+                para_payload["use_brand_profile"] = False
+            return para_payload
         if action == "save":
             content = getattr(args, "content", None)
             if getattr(args, "stdin", False):

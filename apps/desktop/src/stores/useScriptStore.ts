@@ -61,6 +61,16 @@ interface ScriptStoreState {
   /** 保存正文（可选标题）到后端，新建版本并串链 */
   saveScript: (text: string, title?: string) => Promise<void>;
   /** 进入创作页时恢复项目的 script 版本链，并 seed 最新版本内容（WS-005） */
+  /**
+   * PRD-SCR-003：段落级生成/重写/扩写/压缩。
+   * 生成新版本（parent 指向当前版本），因此可经版本历史回滚撤销。
+   * 成功后返回新正文，调用方据此刷新编辑器。
+   */
+  editParagraph: (
+    index: number,
+    operation: "rewrite" | "expand" | "condense" | "generate",
+    instruction?: string,
+  ) => Promise<string | null>;
   loadVersions: () => Promise<void>;
   /** 加载指定版本全文（版本 tab 点击查看/回滚用） */
   loadVersionContent: (
@@ -223,6 +233,43 @@ export const useScriptStore = create<ScriptStoreState>((set, get) => ({
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       set({ error: msg });
+    }
+  },
+
+  editParagraph: async (index, operation, instruction) => {
+    const versionId = get().scriptVersionId;
+    if (!versionId) {
+      set({ error: "请先保存脚本，再做段落级编辑" });
+      return null;
+    }
+    set({ isBusy: true, error: null });
+    try {
+      const env = buildEnvelope("EditParagraph", WORKSPACE, currentProjectId(), {
+        version_id: versionId,
+        paragraph_index: index,
+        operation,
+        ...(instruction ? { instruction } : {}),
+        use_brand_profile: get().useBrandProfile,
+      });
+      const res = await dispatchCommand(env);
+      if (!res.ok) {
+        set({ error: res.error ?? "EDIT_FAILED" });
+        return null;
+      }
+      const newVersionId = res.artifact_ids[0] ?? null;
+      if (newVersionId) set({ scriptVersionId: newVersionId });
+      await get().loadVersions();
+      // 拉回新版本全文，交给编辑器刷新
+      if (newVersionId) {
+        const detail = await get().loadVersionContent(newVersionId);
+        return detail?.body ?? null;
+      }
+      return null;
+    } catch (e) {
+      set({ error: e instanceof Error ? e.message : String(e) });
+      return null;
+    } finally {
+      set({ isBusy: false });
     }
   },
 

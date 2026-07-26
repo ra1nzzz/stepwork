@@ -14,8 +14,16 @@
  *   - 回滚 = 以历史内容 SaveScript 生成新版本，绝不覆盖历史
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useScriptStore } from "@/stores/useScriptStore";
+
+/** PRD-SCR-003 四种段落级操作（与后端 OPERATIONS 一一对应） */
+const PARAGRAPH_OPS = [
+  { id: "rewrite" as const, label: "重写" },
+  { id: "expand" as const, label: "扩写" },
+  { id: "condense" as const, label: "压缩" },
+  { id: "generate" as const, label: "生成" },
+];
 import { useRenderStore } from "@/stores/useRenderStore";
 import { useViewStore } from "@/stores/useViewStore";
 
@@ -34,6 +42,7 @@ export function CreateScriptView() {
   const saveScript = useScriptStore((s) => s.saveScript);
   const loadVersions = useScriptStore((s) => s.loadVersions);
   const loadVersionContent = useScriptStore((s) => s.loadVersionContent);
+  const editParagraph = useScriptStore((s) => s.editParagraph);
 
   const setRenderSourceVersion = useRenderStore((s) => s.setSourceVersion);
 
@@ -112,6 +121,29 @@ export function CreateScriptView() {
       await saveScript(value, title ?? scriptTitle);
       setSaveLabel("已保存");
     }, 800);
+  }
+
+  // 与后端 worker/runtime/script/paragraph.py 的 split_paragraphs 同规则
+  // （按空行切分、去空段），否则 paragraph_index 会对不上。
+  const paragraphs = useMemo(
+    () =>
+      body
+        .split(/\n\s*\n+/)
+        .map((t) => t.trim())
+        .filter(Boolean),
+    [body],
+  );
+
+  async function handleParagraphOp(
+    index: number,
+    operation: "rewrite" | "expand" | "condense" | "generate",
+  ) {
+    const updated = await editParagraph(index, operation);
+    if (updated !== null) {
+      // 后端已落新版本，这里只同步编辑器显示，不再触发自动保存
+      setBody(updated);
+      setSaveLabel("已保存");
+    }
   }
 
   function handleBodyChange(value: string) {
@@ -273,6 +305,43 @@ export function CreateScriptView() {
                     style={{ width: "100%", resize: "vertical", fontFamily: "inherit", lineHeight: 1.7 }}
                   />
                 </div>
+
+                {/* PRD-SCR-003：段落级生成/重写/扩写/压缩。
+                    每次操作生成新版本，可在右侧版本历史回滚撤销。 */}
+                {paragraphs.length > 0 && (
+                  <div className="form-group">
+                    <label>段落操作</label>
+                    <p className="panel-meta" style={{ marginTop: 0 }}>
+                      共 {paragraphs.length} 段（按空行切分）。每次操作生成新版本，
+                      可在「版本历史」回滚撤销。
+                      {!scriptVersionId && " 请先保存脚本后再操作。"}
+                    </p>
+                    <div className="paragraph-ops">
+                      {paragraphs.map((para, idx) => (
+                        <div key={idx} className="paragraph-op-row">
+                          <span className="panel-meta mono">#{idx + 1}</span>
+                          <span className="paragraph-op-text">
+                            {para.length > 60 ? `${para.slice(0, 60)}…` : para}
+                          </span>
+                          <span className="inline-actions">
+                            {PARAGRAPH_OPS.map((op) => (
+                              <button
+                                key={op.id}
+                                type="button"
+                                className="btn small ghost"
+                                disabled={isBusy || !scriptVersionId}
+                                onClick={() => void handleParagraphOp(idx, op.id)}
+                                title={op.label}
+                              >
+                                {op.label}
+                              </button>
+                            ))}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </div>

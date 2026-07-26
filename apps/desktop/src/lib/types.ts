@@ -142,7 +142,8 @@ export interface CommandEnvelope {
     | "ListSourceAssets"
     | "GetSourceAsset"
     | "RunCleanup"
-    | "ListAuditEvents";
+    | "ListAuditEvents"
+    | "EditParagraph";
   schemaVersion: string;
   actor: { type: "user" | "agent" | "plugin" | "system" | "desktop"; id: string };
   source: string;
