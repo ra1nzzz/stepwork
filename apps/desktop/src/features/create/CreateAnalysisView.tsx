@@ -16,7 +16,7 @@
  *   - 费用透明：执行前展示 provider/model/预计费用，执行后展示 detail.invocation
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useImportStore } from "@/stores/useImportStore";
 import { useTranscriptStore, type TranscriptJob } from "@/stores/useTranscriptStore";
 import { useAnalysisStore } from "@/stores/useAnalysisStore";
@@ -171,6 +171,15 @@ export function CreateAnalysisView() {
 
   // 编辑模式
   const [editModel, setEditModel] = useState<EditModel | null>(null);
+  // PRD-WS-005：分析报告编辑的防抖自动保存（与脚本编辑器同节奏 800ms）
+  const autoSaveTimer = useRef<number | null>(null);
+  const [autoSaveLabel, setAutoSaveLabel] = useState<string | null>(null);
+  useEffect(
+    () => () => {
+      if (autoSaveTimer.current) window.clearTimeout(autoSaveTimer.current);
+    },
+    [],
+  );
 
   // 自动选中第一个 asset
   useEffect(() => {
@@ -263,8 +272,32 @@ export function CreateAnalysisView() {
 
   async function handleSaveEdit() {
     if (!editModel || !reportData) return;
+    if (autoSaveTimer.current) window.clearTimeout(autoSaveTimer.current);
     await saveAnalysis(fromEditModel(editModel, reportData));
+    setAutoSaveLabel("已保存");
     setEditModel(null);
+  }
+
+  /**
+   * PRD-WS-005「自动保存和版本恢复：异常退出后正文丢失不超过最近一次保存周期」。
+   * 此前只有脚本编辑器有 800ms 防抖自动保存，分析报告编辑必须手动点保存 ——
+   * 编辑到一半崩溃即全部丢失。这里对齐脚本编辑器的节奏。
+   */
+  function patchEdit(patch: Partial<EditModel>) {
+    setEditModel((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, ...patch };
+      if (autoSaveTimer.current) window.clearTimeout(autoSaveTimer.current);
+      setAutoSaveLabel("正在保存…");
+      autoSaveTimer.current = window.setTimeout(() => {
+        if (reportData) {
+          void saveAnalysis(fromEditModel(next, reportData)).then(() =>
+            setAutoSaveLabel("已保存"),
+          );
+        }
+      }, 800);
+      return next;
+    });
   }
 
   return (
@@ -622,7 +655,7 @@ export function CreateAnalysisView() {
                     rows={3}
                     style={{ width: "100%", resize: "vertical", fontFamily: "inherit" }}
                     value={editModel.summary}
-                    onChange={(e) => setEditModel({ ...editModel, summary: e.target.value })}
+                    onChange={(e) => patchEdit({ summary: e.target.value })}
                   />
                 </div>
                 <div className="form-group" style={{ marginBottom: 10 }}>
@@ -633,7 +666,7 @@ export function CreateAnalysisView() {
                     rows={2}
                     style={{ width: "100%", resize: "vertical", fontFamily: "inherit" }}
                     value={editModel.hook}
-                    onChange={(e) => setEditModel({ ...editModel, hook: e.target.value })}
+                    onChange={(e) => patchEdit({ hook: e.target.value })}
                   />
                 </div>
                 <div className="form-group" style={{ marginBottom: 10 }}>
@@ -645,7 +678,7 @@ export function CreateAnalysisView() {
                     style={{ width: "100%", resize: "vertical", fontFamily: "inherit" }}
                     value={editModel.structureText}
                     onChange={(e) =>
-                      setEditModel({ ...editModel, structureText: e.target.value })
+                      patchEdit({ structureText: e.target.value })
                     }
                   />
                 </div>
@@ -658,7 +691,7 @@ export function CreateAnalysisView() {
                     style={{ width: "100%", resize: "vertical", fontFamily: "inherit" }}
                     value={editModel.topicsText}
                     onChange={(e) =>
-                      setEditModel({ ...editModel, topicsText: e.target.value })
+                      patchEdit({ topicsText: e.target.value })
                     }
                   />
                 </div>
@@ -671,7 +704,7 @@ export function CreateAnalysisView() {
                     style={{ width: "100%", resize: "vertical", fontFamily: "inherit" }}
                     value={editModel.keyPointsText}
                     onChange={(e) =>
-                      setEditModel({ ...editModel, keyPointsText: e.target.value })
+                      patchEdit({ keyPointsText: e.target.value })
                     }
                   />
                 </div>
@@ -684,7 +717,7 @@ export function CreateAnalysisView() {
                     style={{ width: "100%", resize: "vertical", fontFamily: "inherit" }}
                     value={editModel.risksText}
                     onChange={(e) =>
-                      setEditModel({ ...editModel, risksText: e.target.value })
+                      patchEdit({ risksText: e.target.value })
                     }
                   />
                 </div>
@@ -695,7 +728,7 @@ export function CreateAnalysisView() {
                     className="select"
                     value={editModel.sentiment}
                     onChange={(e) =>
-                      setEditModel({ ...editModel, sentiment: e.target.value })
+                      patchEdit({ sentiment: e.target.value })
                     }
                   >
                     <option value="positive">正面</option>
@@ -711,7 +744,7 @@ export function CreateAnalysisView() {
                     style={{ width: "100%" }}
                     value={editModel.suggestedTitle}
                     onChange={(e) =>
-                      setEditModel({ ...editModel, suggestedTitle: e.target.value })
+                      patchEdit({ suggestedTitle: e.target.value })
                     }
                   />
                 </div>
@@ -724,7 +757,7 @@ export function CreateAnalysisView() {
                     style={{ width: "100%", resize: "vertical", fontFamily: "inherit" }}
                     value={editModel.suggestedTagsText}
                     onChange={(e) =>
-                      setEditModel({ ...editModel, suggestedTagsText: e.target.value })
+                      patchEdit({ suggestedTagsText: e.target.value })
                     }
                   />
                 </div>
@@ -745,6 +778,12 @@ export function CreateAnalysisView() {
                   >
                     {isSaving ? "保存中…" : "保存为新版本"}
                   </button>
+                  {/* PRD-WS-005：自动保存状态可见，用户知道内容不会丢 */}
+                  {autoSaveLabel && (
+                    <span className="panel-meta" style={{ alignSelf: "center" }}>
+                      {autoSaveLabel}（编辑后 0.8 秒自动保存）
+                    </span>
+                  )}
                 </div>
               </>
             )}
