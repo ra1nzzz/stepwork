@@ -24,6 +24,7 @@ import pytest
 from worker.runtime.agents.acp_client import (
     AcpClientError,
     AcpSession,
+    build_permission_outcome,
     summarize_updates,
 )
 from worker.runtime.commands.bus import dispatch
@@ -70,7 +71,10 @@ for line in sys.stdin:
                      "content":{"type":"text","text":"素材……"}}}})
         # 2) 反向请求权限（有 id），等我们回包
         w({"jsonrpc":"2.0","id":9001,"method":"session/request_permission",
-           "params":{"sessionId":sid,"toolCall":{"title":"删除项目文件","kind":"delete"}}})
+           "params":{"sessionId":sid,"toolCall":{"toolCallId":"call_001","title":"删除项目文件","kind":"delete"},
+             "options":[{"optionId":"allow-once","name":"允许一次","kind":"allow_once"},
+                        {"optionId":"allow-always","name":"总是允许","kind":"allow_always"},
+                        {"optionId":"reject-once","name":"拒绝","kind":"reject_once"}]}})
         decision = None
         for reply in sys.stdin:
             reply = reply.strip()
@@ -78,7 +82,14 @@ for line in sys.stdin:
                 continue
             msg = json.loads(reply)
             if msg.get("id") == 9001:
-                decision = msg.get("result", {}).get("outcome", {}).get("outcome")
+                out = msg.get("result", {}).get("outcome", {})
+                decision = out.get("outcome")
+                oid = out.get("optionId")
+                # 真实 Agent 只认自己给出的 optionId；编的一律视为协议违规
+                if decision == "selected" and oid not in ("allow-once","allow-always","reject-once"):
+                    decision = "PROTOCOL_VIOLATION:" + str(oid)
+                elif decision == "selected":
+                    decision = decision + ":" + str(oid)
                 break
         w({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":sid,
            "update":{"sessionUpdate":"agent_message_chunk",
@@ -198,12 +209,18 @@ async def test_streaming_updates_reach_handler(tmp_path: Path) -> None:
     assert len(seen) >= 3, seen
     text = summarize_updates(seen)
     assert "正在分析" in text and "素材" in text
-    # 我们回了「允许」，Agent 应如实收到
-    assert "权限结果=selected" in text
+    # optionId 必须取自 Agent 给出的 options；编一个会被判协议违规
+    assert "PROTOCOL_VIOLATION" not in text, text
+    # 允许时优先选 allow_once，绝不替用户选 allow_always（那等于长期授权）
+    assert "权限结果=selected:allow-once" in text, text
 
 
 async def test_permission_denied_is_conveyed(tmp_path: Path) -> None:
-    """拒绝时 Agent 必须收到 cancelled，而不是超时或静默。"""
+    """拒绝要走 ``selected`` + reject_once 选项，**不是** ``cancelled``。
+
+    协议里 ``cancelled`` 的语义是「整轮对话被取消」。用它表示「这次操作被
+    拒绝」会让真实 Agent 以为用户中止了整轮，直接停掉后续工作。
+    """
     cmd = _write_agent(tmp_path, _AGENT, "agent.py")
 
     async def deny(_params: dict[str, Any]) -> bool:
@@ -216,7 +233,9 @@ async def test_permission_denied_is_conveyed(tmp_path: Path) -> None:
         await session.prompt("删点东西")
     finally:
         await session.close()
-    assert "权限结果=cancelled" in summarize_updates(session.updates)
+    text = summarize_updates(session.updates)
+    assert "权限结果=selected:reject-once" in text, text
+    assert "PROTOCOL_VIOLATION" not in text
 
 
 async def test_no_permission_handler_defaults_to_deny(tmp_path: Path) -> None:
@@ -229,7 +248,7 @@ async def test_no_permission_handler_defaults_to_deny(tmp_path: Path) -> None:
         await session.prompt("删点东西")
     finally:
         await session.close()
-    assert "权限结果=cancelled" in summarize_updates(session.updates)
+    assert "权限结果=selected:reject-once" in summarize_updates(session.updates)
 
 
 async def test_unsupported_reverse_request_gets_error(tmp_path: Path) -> None:
@@ -359,8 +378,8 @@ async def test_prompt_streams_and_files_permission_for_review(tmp_path: Path) ->
         assert res["ok"] is True, res
         assert res["detail"]["stop_reason"] == "end_turn"
         assert "正在分析" in res["detail"]["text"]
-        # 未经人工批准 → Agent 收到的是 cancelled
-        assert "权限结果=cancelled" in res["detail"]["text"]
+        # 未经人工批准 → Agent 收到的是「明确拒绝」，而不是「整轮取消」
+        assert "权限结果=selected:reject-once" in res["detail"]["text"]
         assert res["detail"]["pending_approvals"] == 1
 
         approval = conn.execute(
@@ -470,3 +489,54 @@ def test_external_agents_cannot_start_local_agents(tmp_path: Path) -> None:
         assert conn.execute("SELECT COUNT(*) n FROM agent_connections").fetchone()["n"] == 0
     finally:
         conn.close()
+
+
+# ----- 权限 outcome 构造（对齐 agentclientprotocol.com 的 schema） -----
+
+
+def test_outcome_picks_option_id_from_agent_options() -> None:
+    """optionId 必须来自对方给的 options，不能自己编。"""
+    params = {
+        "options": [
+            {"optionId": "yes-1", "name": "允许一次", "kind": "allow_once"},
+            {"optionId": "no-1", "name": "拒绝", "kind": "reject_once"},
+        ]
+    }
+    assert build_permission_outcome(params, True) == {
+        "outcome": "selected",
+        "optionId": "yes-1",
+    }
+    assert build_permission_outcome(params, False) == {
+        "outcome": "selected",
+        "optionId": "no-1",
+    }
+
+
+def test_outcome_prefers_once_over_always() -> None:
+    """绝不替用户选 *_always —— 那等于替他做了长期授权。"""
+    params = {
+        "options": [
+            {"optionId": "always", "kind": "allow_always"},
+            {"optionId": "once", "kind": "allow_once"},
+            {"optionId": "rej-always", "kind": "reject_always"},
+            {"optionId": "rej-once", "kind": "reject_once"},
+        ]
+    }
+    assert build_permission_outcome(params, True)["optionId"] == "once"
+    assert build_permission_outcome(params, False)["optionId"] == "rej-once"
+
+
+def test_outcome_falls_back_to_always_when_only_choice() -> None:
+    """对方只给了 always 选项时才用它 —— 否则无法表达意图。"""
+    params = {"options": [{"optionId": "aa", "kind": "allow_always"}]}
+    assert build_permission_outcome(params, True)["optionId"] == "aa"
+
+
+def test_outcome_cancelled_only_when_no_matching_option() -> None:
+    """没有能表达该意图的选项时才回 cancelled（此时确实没得选）。"""
+    only_allow = {"options": [{"optionId": "a", "kind": "allow_once"}]}
+    assert build_permission_outcome(only_allow, False) == {"outcome": "cancelled"}
+    assert build_permission_outcome({}, True) == {"outcome": "cancelled"}
+    # 缺 optionId 的坏选项要跳过，不能构造出没有 optionId 的 selected
+    broken = {"options": [{"kind": "allow_once"}]}
+    assert build_permission_outcome(broken, True) == {"outcome": "cancelled"}

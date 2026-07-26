@@ -42,9 +42,35 @@ DEFAULT_TIMEOUT = 120.0
 #: 单行响应上限（同 MCP：asyncio 默认 64KB 对 Agent 输出远远不够）
 MAX_LINE_BYTES = 4 * 1024 * 1024
 
-#: 权限请求的结果取值
-OUTCOME_ALLOW = "selected"
-OUTCOME_DENY = "cancelled"
+#: 权限响应的 outcome 取值。
+#:
+#: 注意 ``cancelled`` 的语义是「**整轮对话被取消**」，不是「这次操作被拒绝」——
+#: 协议要求拒绝也走 ``selected``，只是挑一个 ``kind`` 为 reject_* 的选项。
+#: 早先把拒绝写成 cancelled 是错的：真实 Agent 会以为用户中止了整轮。
+OUTCOME_SELECTED = "selected"
+OUTCOME_CANCELLED = "cancelled"
+
+#: PermissionOption.kind 的取值，按「优先级从高到低」分组。
+#: 一律优先选 *_once：allow_always / reject_always 会让 Agent **记住**决定，
+#: 相当于替用户做了长期授权，不能由我们单方面替他选。
+_ALLOW_KINDS = ("allow_once", "allow_always")
+_REJECT_KINDS = ("reject_once", "reject_always")
+
+
+def build_permission_outcome(params: dict[str, Any], allowed: bool) -> dict[str, Any]:
+    """按 Agent 给出的 ``options`` 构造权限响应。
+
+    ``optionId`` **必须**取自对方提供的选项列表 —— 自己编一个（早先硬写
+    ``"allow"``）真实 Agent 认不出来。按 ``kind`` 匹配意图，找不到合适选项
+    时才退回 ``cancelled``（此时确实没有能表达该意图的选项）。
+    """
+    options = [o for o in (params.get("options") or []) if isinstance(o, dict)]
+    wanted = _ALLOW_KINDS if allowed else _REJECT_KINDS
+    for kind in wanted:
+        for option in options:
+            if option.get("kind") == kind and option.get("optionId"):
+                return {"outcome": OUTCOME_SELECTED, "optionId": str(option["optionId"])}
+    return {"outcome": OUTCOME_CANCELLED}
 
 #: ``session/update`` 里我们关心的进度种类
 UpdateHandler = Callable[[dict[str, Any]], Awaitable[None]]
@@ -258,10 +284,11 @@ class AcpSession:
 
         # 3) Agent 主动发来的请求（有 id）：权限
         if method == "session/request_permission" and msg_id is not None:
+            params = msg.get("params") or {}
             allowed = False
             if self._on_permission is not None:
                 try:
-                    allowed = await self._on_permission(msg.get("params") or {})
+                    allowed = await self._on_permission(params)
                 except Exception:  # noqa: BLE001 - 处理器出错按拒绝处理
                     logger.exception("acp permission handler failed")
                     allowed = False
@@ -269,12 +296,7 @@ class AcpSession:
                 {
                     "jsonrpc": "2.0",
                     "id": msg_id,
-                    "result": {
-                        "outcome": {
-                            "outcome": OUTCOME_ALLOW if allowed else OUTCOME_DENY,
-                            **({"optionId": "allow"} if allowed else {}),
-                        }
-                    },
+                    "result": {"outcome": build_permission_outcome(params, allowed)},
                 }
             )
             return
