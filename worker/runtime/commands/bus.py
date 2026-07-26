@@ -59,6 +59,10 @@ _ROUTES: dict[str, str] = {
     "ListAgentTasks": "worker.runtime.handlers.agent",
     "ListAgentArtifacts": "worker.runtime.handlers.agent",
     "GetAgentTask": "worker.runtime.handlers.agent",
+    # PRD-AGT-007：Agent 连接管理（启停 / 删除）
+    "ListAgentConnections": "worker.runtime.handlers.agent",
+    "SetAgentConnectionStatus": "worker.runtime.handlers.agent",
+    "DeleteAgentConnection": "worker.runtime.handlers.agent",
     "ExportDiagnosticsBundle": "worker.runtime.handlers.diagnostics",
     # W9: 集成 / 数据迁移 / 种子测试（Layer 0 路由先行，handler 由各支线补齐）
     "ExportProject": "worker.runtime.handlers.project_io",
@@ -171,6 +175,25 @@ def is_agent_caller(env: CommandEnvelope) -> bool:
     return actor_type in _AGENT_ACTOR_TYPES or env.source in _AGENT_SOURCES
 
 
+def _connection_disabled(env: CommandEnvelope, deps: Any) -> bool:
+    """该协议通道是否已被用户停用（PRD-AGT-007）。
+
+    连接行不存在时视为**未停用** —— 首次调用时行尚未创建（由
+    ``agent_record.ensure_connection`` 在成功后补建），不能因此拒绝。
+    """
+    conn = getattr(getattr(deps, "repos", None), "conn", None)
+    if conn is None:
+        return False
+    try:
+        row = conn.execute(
+            "SELECT status FROM agent_connections WHERE id=?",
+            (f"conn_{env.source}",),
+        ).fetchone()
+    except Exception:  # noqa: BLE001 - 查询失败不改变默认放行语义
+        return False
+    return row is not None and str(row["status"]) == "inactive"
+
+
 def _create_preparation_task(env: CommandEnvelope, deps: Any) -> str | None:
     """把被拒的 agent 请求降级为待审批准备任务（§9.1）；失败返回 None。
 
@@ -228,6 +251,17 @@ async def dispatch(raw: dict[str, Any], deps: Any) -> dict[str, Any]:
         return CommandResult(
             ok=False, commandId=env.commandId,
             error=f"unknown commandType: {env.commandType}",
+        ).model_dump()
+
+    # PRD-AGT-007「可启停连接」：停用的通道一律拒绝，否则「停用」只是
+    # UI 上的装饰。放在允许清单校验之前——停用意味着连读也不给。
+    if is_agent_caller(env) and _connection_disabled(env, deps):
+        return CommandResult(
+            ok=False, commandId=env.commandId,
+            error=(
+                f"FORBIDDEN_ACTOR: 协议通道 {env.source} 已被停用，"
+                f"请在「Agent 连接」页重新启用"
+            ),
         ).model_dump()
 
     # PRD §9.1：外部 Agent 默认禁止直接执行，只放行允许清单内的命令。

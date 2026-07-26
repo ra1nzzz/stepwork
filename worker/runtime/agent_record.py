@@ -107,7 +107,14 @@ def record_agent_activity(
 
     纯读调用不登记；产物归属项目从信封或产物反查（见 ``_resolve_project_id``）。
     """
+    # 连接行代表「这条协议通道被用过」，独立于任务登记：纯读也要建，
+    # 否则 Agent 连接页看不到只做过查询的通道，也就无从启停它。
     if _is_pure_read(env.commandType, artifact_ids, ok):
+        try:
+            ensure_connection(conn, env.source)
+            conn.commit()
+        except Exception:  # noqa: BLE001 - 登记失败不影响业务
+            logger.exception("ensure_connection failed for %s", env.source)
         return None
     try:
         now = _now()

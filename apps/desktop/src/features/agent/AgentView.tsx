@@ -36,6 +36,18 @@ function trustClass(level: string | null | undefined): string {
   return "warning";
 }
 
+/** PRD-AGT-007：Agent 协议连接 */
+interface AgentConnection {
+  id: string;
+  protocol: string;
+  endpoint_or_command: string;
+  local_or_remote: string;
+  trust_level: string;
+  status: string;
+  task_count: number;
+  created_at: string;
+}
+
 interface AgentArtifact {
   id: string;
   /** 信任等级（PRD-AGT-003 / §10.4） */
@@ -50,6 +62,47 @@ interface AgentArtifact {
 export function AgentView() {
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [artifacts, setArtifacts] = useState<AgentArtifact[]>([]);
+  // PRD-AGT-007：连接列表（可启停 / 删除）
+  const [connections, setConnections] = useState<AgentConnection[]>([]);
+  const [connBusy, setConnBusy] = useState<string | null>(null);
+
+  async function loadConnections() {
+    const env = buildEnvelope("ListAgentConnections", getWorkspaceId(), null, {});
+    const res = await dispatchCommand(env);
+    if (res.ok) {
+      const d = (res.detail ?? {}) as { connections?: AgentConnection[] };
+      setConnections(d.connections ?? []);
+    }
+  }
+
+  async function setConnStatus(id: string, status: "active" | "inactive") {
+    setConnBusy(id);
+    try {
+      const env = buildEnvelope(
+        "SetAgentConnectionStatus",
+        getWorkspaceId(),
+        null,
+        { connectionId: id, status },
+      );
+      await dispatchCommand(env);
+      await loadConnections();
+    } finally {
+      setConnBusy(null);
+    }
+  }
+
+  async function deleteConn(id: string) {
+    setConnBusy(id);
+    try {
+      const env = buildEnvelope("DeleteAgentConnection", getWorkspaceId(), null, {
+        connectionId: id,
+      });
+      await dispatchCommand(env);
+      await loadConnections();
+    } finally {
+      setConnBusy(null);
+    }
+  }
   const [isBusy, setIsBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -69,6 +122,7 @@ export function AgentView() {
           setError(taskRes.error ?? "加载任务失败");
         }
 
+        void loadConnections();
         const artEnv = buildEnvelope("ListAgentArtifacts", getWorkspaceId(), null, {});
         const artRes: CommandResult = await dispatchCommand(artEnv);
         if (cancelled) return;
@@ -127,6 +181,56 @@ export function AgentView() {
           </ul>
         </div>
       )}
+
+      {/* PRD-AGT-007：连接管理（启停 / 删除；停用后该通道调用会被拒） */}
+      <div className="agent-section">
+        <h2>协议连接</h2>
+        {connections.length === 0 ? (
+          <p className="panel-meta">
+            尚无连接记录。外部 Agent（MCP / A2A / ACP）首次调用后会出现在这里。
+          </p>
+        ) : (
+          <ul className="agent-list">
+            {connections.map((c) => (
+              <li key={c.id} className="agent-item">
+                <span className="agent-kind">{c.protocol}</span>
+                <span className={`status ${c.status === "active" ? "success" : "warning"}`}>
+                  {c.status === "active" ? "已启用" : "已停用"}
+                </span>
+                <span className={`status ${trustClass(c.trust_level)}`}>
+                  {TRUST_LABELS[c.trust_level] ?? c.trust_level}
+                </span>
+                <span className="agent-meta">
+                  {c.local_or_remote} · {c.task_count} 个任务
+                </span>
+                <span className="inline-actions">
+                  <button
+                    type="button"
+                    className="btn small ghost"
+                    disabled={connBusy === c.id}
+                    onClick={() =>
+                      void setConnStatus(
+                        c.id,
+                        c.status === "active" ? "inactive" : "active",
+                      )
+                    }
+                  >
+                    {c.status === "active" ? "停用" : "启用"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn small ghost"
+                    disabled={connBusy === c.id}
+                    onClick={() => void deleteConn(c.id)}
+                  >
+                    删除
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
 
       {artifacts.length > 0 && (
         <div className="agent-section">

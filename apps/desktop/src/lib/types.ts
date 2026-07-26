@@ -155,7 +155,10 @@ export interface CommandEnvelope {
     | "ImportBrandScript"
     | "ListBrandScripts"
     | "DeleteBrandScript"
-    | "RecordPreference";
+    | "RecordPreference"
+    | "ListAgentConnections"
+    | "SetAgentConnectionStatus"
+    | "DeleteAgentConnection";
   schemaVersion: string;
   actor: { type: "user" | "agent" | "plugin" | "system" | "desktop"; id: string };
   source: string;

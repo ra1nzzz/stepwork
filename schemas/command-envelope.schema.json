@@ -85,7 +85,10 @@
         "ImportBrandScript",
         "ListBrandScripts",
         "DeleteBrandScript",
-        "RecordPreference"
+        "RecordPreference",
+        "ListAgentConnections",
+        "SetAgentConnectionStatus",
+        "DeleteAgentConnection"
       ],
       "description": "Command type identifier. See SYSTEM_SPEC §7.2 for the canonical list."
     },

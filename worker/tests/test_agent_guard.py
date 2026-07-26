@@ -256,3 +256,67 @@ def test_mcp_tool_commands_subset_of_allowlist() -> None:
     assert not exposed - _AGENT_ALLOWED_COMMANDS, (
         f"MCP 暴露了允许清单之外的命令: {sorted(exposed - _AGENT_ALLOWED_COMMANDS)}"
     )
+
+
+# ----- PRD-AGT-007：停用的连接必须真的拒绝调用 -----
+
+
+async def test_disabled_connection_blocks_even_allowed_commands() -> None:
+    """停用通道后连只读命令也不给——否则「停用」只是 UI 装饰。"""
+    from worker.runtime.db.connection import in_memory
+    from worker.runtime.db.migrations import run_migrations
+
+    c = in_memory()
+    run_migrations(c, _MIG_DIR)
+    deps = Deps(repos=Repos(c), ingest=ingest)
+
+    # 先正常调一次（会自动建连接行）
+    ok_first = await dispatch(
+        _env("ListProjects", actor_type="agent", source="mcp"), deps
+    )
+    assert ok_first["ok"] is True
+
+    # 停用该通道
+    disabled = await dispatch(
+        _env(
+            "SetAgentConnectionStatus",
+            actor_type="user",
+            source="ui",
+            payload={"connectionId": "conn_mcp", "status": "inactive"},
+        ),
+        deps,
+    )
+    assert disabled["ok"] is True, disabled.get("error")
+
+    blocked = await dispatch(
+        _env("ListProjects", actor_type="agent", source="mcp"), deps
+    )
+    assert blocked["ok"] is False
+    assert "已被停用" in blocked["error"]
+
+    # 重新启用后恢复
+    await dispatch(
+        _env(
+            "SetAgentConnectionStatus",
+            actor_type="user",
+            source="ui",
+            payload={"connectionId": "conn_mcp", "status": "active"},
+        ),
+        deps,
+    )
+    restored = await dispatch(
+        _env("ListProjects", actor_type="agent", source="mcp"), deps
+    )
+    assert restored["ok"] is True
+
+
+async def test_missing_connection_row_does_not_block() -> None:
+    """首次调用时连接行还不存在，不能因此拒绝。"""
+    from worker.runtime.db.connection import in_memory
+    from worker.runtime.db.migrations import run_migrations
+
+    c = in_memory()
+    run_migrations(c, _MIG_DIR)
+    deps = Deps(repos=Repos(c), ingest=ingest)
+    res = await dispatch(_env("ListProjects", actor_type="agent", source="mcp"), deps)
+    assert res["ok"] is True

@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 from worker.runtime.commands.bus import DispatchError
@@ -25,6 +26,9 @@ from worker.runtime.deps import Deps
 from worker.runtime.models import CommandEnvelope, CommandResult
 
 _NOTE = "Agent 互操作 V0.2 启用"
+
+#: PRD-AGT-007 连接状态：active 可用 / inactive 停用（该通道调用被拒）
+_CONNECTION_STATUSES: frozenset[str] = frozenset({"active", "inactive"})
 
 
 def _row_to_dict(row: Any) -> dict[str, Any]:
@@ -80,6 +84,66 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             ok=True,
             commandId=env.commandId,
             detail={"task": _row_to_dict(row)},
+        )
+
+    if env.commandType == "ListAgentConnections":
+        # PRD-AGT-007「Agent Connections 页面：可启停、测试、授权和删除连接」。
+        # agent_connections 表 0003 就建好了，此前无任何命令与页面；
+        # 现在 agent_record 会为每条协议通道自动建行（见 ensure_connection）。
+        rows = deps.repos.conn.execute(
+            "SELECT * FROM agent_connections ORDER BY created_at DESC"
+        ).fetchall()
+        connections = [_row_to_dict(r) for r in rows]
+        # 附上每条连接的任务数，便于页面显示活跃度
+        for item in connections:
+            item["task_count"] = deps.repos.conn.execute(
+                "SELECT COUNT(*) n FROM agent_tasks WHERE target_agent_id=?",
+                (item["id"],),
+            ).fetchone()["n"]
+        return CommandResult(
+            ok=True, commandId=env.commandId, detail={"connections": connections}
+        )
+
+    if env.commandType == "SetAgentConnectionStatus":
+        # 启停连接（PRD-AGT-007）：停用后该通道的调用会被 bus 拒绝
+        payload = env.payload or {}
+        conn_id = payload.get("connectionId") or payload.get("connection_id")
+        status = str(payload.get("status") or "")
+        if not conn_id:
+            raise DispatchError("INVALID_ARGUMENT", "connectionId required")
+        if status not in _CONNECTION_STATUSES:
+            raise DispatchError(
+                "INVALID_ARGUMENT",
+                f"status must be one of {sorted(_CONNECTION_STATUSES)}",
+            )
+        cur = deps.repos.conn.execute(
+            "UPDATE agent_connections SET status=?, updated_at=? WHERE id=?",
+            (status, datetime.now(UTC).isoformat(), str(conn_id)),
+        )
+        deps.repos.conn.commit()
+        if cur.rowcount == 0:
+            raise DispatchError("NOT_FOUND", f"connection {conn_id!r} not found")
+        row = deps.repos.conn.execute(
+            "SELECT * FROM agent_connections WHERE id=?", (str(conn_id),)
+        ).fetchone()
+        return CommandResult(
+            ok=True, commandId=env.commandId, detail={"connection": _row_to_dict(row)}
+        )
+
+    if env.commandType == "DeleteAgentConnection":
+        payload = env.payload or {}
+        conn_id = payload.get("connectionId") or payload.get("connection_id")
+        if not conn_id:
+            raise DispatchError("INVALID_ARGUMENT", "connectionId required")
+        cur = deps.repos.conn.execute(
+            "DELETE FROM agent_connections WHERE id=?", (str(conn_id),)
+        )
+        deps.repos.conn.commit()
+        if cur.rowcount == 0:
+            raise DispatchError("NOT_FOUND", f"connection {conn_id!r} not found")
+        # agent_tasks.target_agent_id 有 ON DELETE CASCADE，历史任务随之清理
+        return CommandResult(
+            ok=True, commandId=env.commandId, detail={"deleted": str(conn_id)}
         )
 
     raise DispatchError(
