@@ -282,6 +282,76 @@ def test_project_list_and_get_build_query_envelopes(
     assert env["payload"] == {"project_id": "proj-7"}
 
 
+def test_project_create_builds_createproject_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True, "detail": {}})
+    rc = main(["project", "create", "--title", "新项目"])
+
+    assert rc == 0
+    env = captured["env"]
+    assert env["commandType"] == "CreateProject"
+    assert env["source"] == "cli"
+    # 契约（worker projects handler）：payload 仅含 title
+    assert env["payload"] == {"title": "新项目"}
+
+
+def test_project_create_requires_title() -> None:
+    with pytest.raises(SystemExit) as ei:
+        main(["project", "create"])
+    assert ei.value.code == 2
+
+
+# ----- 全局 --workspace-id（信封 workspaceId 作用域） -----
+
+
+def test_workspace_id_defaults_to_ws_local(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    rc = main(["project", "list"])
+
+    assert rc == 0
+    assert captured["env"]["workspaceId"] == "ws-local"
+
+
+def test_workspace_id_threads_into_every_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+
+    # 查询命令
+    rc = main(["--workspace-id", "ws-9", "project", "list"])
+    assert rc == 0
+    assert captured["env"]["workspaceId"] == "ws-9"
+
+    # 写命令（project create → CreateProject 落在指定工作区）
+    rc = main(["--workspace-id", "ws-9", "project", "create", "--title", "t"])
+    assert rc == 0
+    assert captured["env"]["commandType"] == "CreateProject"
+    assert captured["env"]["workspaceId"] == "ws-9"
+
+    # config 子命令同样生效
+    rc = main(["--workspace-id", "ws-9", "config", "get"])
+    assert rc == 0
+    assert captured["env"]["commandType"] == "GetConfig"
+    assert captured["env"]["workspaceId"] == "ws-9"
+
+
+def test_workspace_positional_targets_named_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # workspace rename / archive 的位置参数与全局 --workspace-id 同名（dest
+    # 冲突时位置参数胜出）：信封 workspaceId 即被操作的目标工作区 id
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+
+    rc = main(["workspace", "rename", "ws-2", "--name", "新名字"])
+    assert rc == 0
+    assert captured["env"]["workspaceId"] == "ws-2"
+
+    rc = main(["workspace", "archive", "ws-2"])
+    assert rc == 0
+    assert captured["env"]["workspaceId"] == "ws-2"
+
+
 # ----- Tranche 2：brand / workspace / versions / publish / analysis -----
 
 

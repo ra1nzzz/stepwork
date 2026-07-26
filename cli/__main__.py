@@ -44,6 +44,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="可选：目标项目 id（部分命令在 project 作用域生效）",
     )
+    parser.add_argument(
+        "--workspace-id",
+        dest="workspace_id",
+        default=DEFAULT_WORKSPACE_ID,
+        help=f"可选：目标工作区 id（默认 {DEFAULT_WORKSPACE_ID}）→ 信封 workspaceId",
+    )
 
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -172,7 +178,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # ----- project -----
-    proj = sub.add_parser("project", help="项目查询命令")
+    proj = sub.add_parser("project", help="项目命令")
     proj_sub = proj.add_subparsers(dest="project_action", required=True)
 
     pl = proj_sub.add_parser("list", help="列出当前工作区项目（ListProjects）")
@@ -181,6 +187,10 @@ def build_parser() -> argparse.ArgumentParser:
     pg = proj_sub.add_parser("get", help="按 id 取单个项目（GetProject）")
     pg.set_defaults(command_type="GetProject")
     pg.add_argument("project_id", help="项目 id")
+
+    pc = proj_sub.add_parser("create", help="新建项目（CreateProject）")
+    pc.set_defaults(command_type="CreateProject")
+    pc.add_argument("--title", required=True, help="项目标题 → payload.title")
 
     # ----- brand（Tranche 2：BrandProfile） -----
     brand = sub.add_parser("brand", help="品牌档（BrandProfile）命令")
@@ -498,6 +508,10 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
             return {}
         if action == "get":
             return {"project_id": args.project_id}
+        if action == "create":
+            # 契约（worker/runtime/handlers/projects.py）：title 必填，
+            # brandProfileId 可选（CLI 暂不暴露）
+            return {"title": args.title}
         raise ValueError(f"unknown project action: {action!r}")
 
     if command == "brand":
@@ -582,12 +596,13 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
     raise ValueError(f"unknown command: {command!r}")
 
 
-def build_envelope_for(
-    args: argparse.Namespace,
-    *,
-    workspace_id: str = DEFAULT_WORKSPACE_ID,
-) -> dict[str, Any]:
-    """用 worker 的 ``build_envelope`` 构造命令信封。"""
+def build_envelope_for(args: argparse.Namespace) -> dict[str, Any]:
+    """用 worker 的 ``build_envelope`` 构造命令信封。
+
+    workspaceId 取全局 ``--workspace-id``（默认 ``ws-local``）；
+    ``workspace rename / archive`` 的位置参数与其同名（dest 冲突时位置参数
+    胜出），故这两个命令的信封 workspaceId 即目标工作区 id，语义一致。
+    """
     command_type = getattr(args, "command_type", None)
     if not command_type:
         raise ValueError("subcommand did not set command_type")
@@ -596,6 +611,7 @@ def build_envelope_for(
     project_id = (
         getattr(args, "project", None) or getattr(args, "project_id", None) or None
     )
+    workspace_id = getattr(args, "workspace_id", None) or DEFAULT_WORKSPACE_ID
     return build_envelope(
         command_type=command_type,
         source=SOURCE,
