@@ -75,6 +75,12 @@ _ROUTES: dict[str, str] = {
     "GetA2aServerStatus": "worker.runtime.handlers.a2a",
     "AddA2aAgent": "worker.runtime.handlers.a2a",
     "CallA2aSkill": "worker.runtime.handlers.a2a",
+    # PRD-AGT-006 ACP：本地 Agent 子进程会话
+    "AddAcpAgent": "worker.runtime.handlers.acp",
+    "StartAcpSession": "worker.runtime.handlers.acp",
+    "SendAcpPrompt": "worker.runtime.handlers.acp",
+    "EndAcpSession": "worker.runtime.handlers.acp",
+    "ListAcpSessions": "worker.runtime.handlers.acp",
     "ExportDiagnosticsBundle": "worker.runtime.handlers.diagnostics",
     # W9: 集成 / 数据迁移 / 种子测试（Layer 0 路由先行，handler 由各支线补齐）
     "ExportProject": "worker.runtime.handlers.project_io",

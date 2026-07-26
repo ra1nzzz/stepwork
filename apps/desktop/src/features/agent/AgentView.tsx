@@ -111,6 +111,10 @@ export function AgentView() {
   const [a2aError, setA2aError] = useState<string | null>(null);
   const [a2aPeerUrl, setA2aPeerUrl] = useState("");
   const [a2aPeerToken, setA2aPeerToken] = useState("");
+  // PRD-AGT-006：本地 ACP Agent
+  const [acpCommand, setAcpCommand] = useState("");
+  const [acpBusy, setAcpBusy] = useState(false);
+  const [acpError, setAcpError] = useState<string | null>(null);
 
   async function loadConnections() {
     const env = buildEnvelope("ListAgentConnections", getWorkspaceId(), null, {});
@@ -226,6 +230,28 @@ export function AgentView() {
       await loadConnections();
     } finally {
       setA2aBusy(false);
+    }
+  }
+
+  /* PRD-AGT-006：ACP —— 本地 Agent 子进程 */
+
+  async function addAcpAgent() {
+    const command = acpCommand.trim();
+    if (!command) return;
+    setAcpBusy(true);
+    setAcpError(null);
+    try {
+      const res = await dispatchCommand(
+        buildEnvelope("AddAcpAgent", getWorkspaceId(), null, { command }),
+      );
+      if (!res.ok) {
+        setAcpError(res.error ?? "启动失败");
+        return;
+      }
+      setAcpCommand("");
+      await loadConnections();
+    } finally {
+      setAcpBusy(false);
     }
   }
 
@@ -430,6 +456,43 @@ export function AgentView() {
         )}
         <p className="panel-meta">
           令牌只保存在内存中，worker 重启后需重填 —— 与 API Key 一样绝不落盘。
+        </p>
+      </div>
+
+      {/* PRD-AGT-006：本地 ACP Agent */}
+      <div className="agent-section" data-od-id="acp-panel">
+        <h2>本地 Agent（ACP）</h2>
+        <p className="panel-meta">
+          以子进程方式启动本地 Agent。会话绑定到具体项目，Agent 只能在
+          <strong>该项目的素材目录</strong>下活动，看不到整个工作区。
+        </p>
+        <div className="inline-actions">
+          <input
+            type="text"
+            className="text-input"
+            placeholder="Agent 启动命令，如：my-agent --acp"
+            value={acpCommand}
+            disabled={acpBusy}
+            onChange={(e) => setAcpCommand(e.target.value)}
+            data-od-id="acp-command-input"
+          />
+          <button
+            type="button"
+            className="btn small"
+            disabled={acpBusy || !acpCommand.trim()}
+            onClick={() => void addAcpAgent()}
+          >
+            {acpBusy ? "启动中…" : "添加并测试"}
+          </button>
+        </div>
+        {acpError && (
+          <p className="error-text" data-od-id="acp-error">
+            {acpError}
+          </p>
+        )}
+        <p className="panel-meta">
+          Agent 要执行危险操作时会先请求授权：该请求进入「审批中心」等你决定，
+          本轮一律先拒绝 —— 不会因为没人在看就自动放行。
         </p>
       </div>
 
