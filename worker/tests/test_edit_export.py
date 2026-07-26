@@ -213,12 +213,16 @@ def _seed(deps: Deps, tmp_path: Path, *, with_scenes: bool) -> str:
             metadata={"fps": 30.0},
         )
     )
+    # 逐字稿：**正文是纯文本，分段在 producer 里**（与 transcribe_source
+    # 的真实落库形态一致）。此前这里按自己的假设写成 JSON content，于是
+    # 测试通过而线上永远取不到 marker —— 测的是假设，不是系统。
     deps.repos.content_versions.insert(
         ContentVersion(
             project_id=pid,
             content_type="transcript",
-            content=json.dumps({"segments": _SEGMENTS}, ensure_ascii=False),
+            content="开场白\n正文内容",
             content_hash="h2",
+            producer={"kind": "asr", "provider": "local", "segments": _SEGMENTS},
         )
     )
     deps.repos.content_versions.insert(

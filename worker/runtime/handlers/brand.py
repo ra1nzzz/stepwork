@@ -259,7 +259,12 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         ).fetchone()
         if prj is None:
             raise DispatchError("NOT_FOUND", f"project {project_id!r} not found")
+        # 同时接受 brandProfileId：命令名与列名都是 brand_profile_id，
+        # 调用方很自然会写成那个。键名写错时这里会静默把画像**解绑**并返回
+        # ok —— 那是无声的数据丢失，收个别名比让人踩坑强。
         profile_id = p.get("profileId")
+        if profile_id is None:
+            profile_id = p.get("brandProfileId")
         if profile_id is not None:
             if _get_profile_row(repos.conn, profile_id) is None:
                 raise DispatchError(

@@ -580,3 +580,80 @@ async def test_record_preference_events() -> None:
     )
     assert bad["ok"] is False
     assert "INVALID_ARGUMENT" in bad["error"]
+
+
+async def test_one_profile_can_be_linked_to_multiple_projects() -> None:
+    """PRD-BRD-001 的验收是「**可关联多个项目**」。
+
+    此前只测了单个项目的绑定/解绑 —— 那证明不了一个画像能被多个项目共用，
+    而这正是 BrandProfile 存在的意义（同一账号下的所有项目共享定位与禁忌）。
+    顺带守住 PRD-SCR-004 依赖的前提：跨项目的历史检索靠的就是这层关联。
+    """
+    deps = _deps(_RecordingAIProvider())
+    created = await dispatch(_env("CreateBrandProfile", {"name": "共用画像"}), deps)
+    profile_id = created["detail"]["profile"]["id"]
+
+    project_ids = []
+    for title in ("项目甲", "项目乙", "项目丙"):
+        prj = await dispatch(_env("CreateProject", {"title": title}), deps)
+        pid = prj["detail"]["project"]["id"]
+        res = await dispatch(
+            _env("SetProjectBrandProfile", {"projectId": pid, "brandProfileId": profile_id}),
+            deps,
+        )
+        assert res["ok"] is True, res
+        project_ids.append(pid)
+
+    rows = deps.repos.conn.execute(
+        "SELECT id FROM content_projects WHERE brand_profile_id=? ORDER BY title",
+        (profile_id,),
+    ).fetchall()
+    assert sorted(r["id"] for r in rows) == sorted(project_ids)
+
+    # 解绑其中一个不应影响其它项目
+    await dispatch(
+        _env("SetProjectBrandProfile", {"projectId": project_ids[0], "brandProfileId": None}),
+        deps,
+    )
+    still = deps.repos.conn.execute(
+        "SELECT COUNT(*) n FROM content_projects WHERE brand_profile_id=?", (profile_id,)
+    ).fetchone()["n"]
+    assert still == 2
+
+
+async def test_set_profile_accepts_both_key_spellings() -> None:
+    """``profileId`` 与 ``brandProfileId`` 都要认。
+
+    键名写错时旧实现会静默解绑并返回 ok —— 无声的数据丢失。命令名和列名
+    都叫 brand_profile_id，调用方写成那个太自然了。
+    """
+    deps = _deps(_RecordingAIProvider())
+    profile_id = (
+        await dispatch(_env("CreateBrandProfile", {"name": "别名"}), deps)
+    )["detail"]["profile"]["id"]
+
+    for key in ("profileId", "brandProfileId"):
+        pid = (await dispatch(_env("CreateProject", {"title": key}), deps))["detail"][
+            "project"
+        ]["id"]
+        res = await dispatch(
+            _env("SetProjectBrandProfile", {"projectId": pid, key: profile_id}), deps
+        )
+        assert res["detail"]["brand_profile_id"] == profile_id, key
+        row = deps.repos.conn.execute(
+            "SELECT brand_profile_id FROM content_projects WHERE id=?", (pid,)
+        ).fetchone()
+        assert row["brand_profile_id"] == profile_id, key
+
+    # 显式不给 = 解绑，这条语义要保持
+    pid = (await dispatch(_env("CreateProject", {"title": "解绑"}), deps))["detail"][
+        "project"
+    ]["id"]
+    await dispatch(
+        _env("SetProjectBrandProfile", {"projectId": pid, "profileId": profile_id}), deps
+    )
+    await dispatch(_env("SetProjectBrandProfile", {"projectId": pid}), deps)
+    row = deps.repos.conn.execute(
+        "SELECT brand_profile_id FROM content_projects WHERE id=?", (pid,)
+    ).fetchone()
+    assert row["brand_profile_id"] is None

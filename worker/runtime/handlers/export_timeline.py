@@ -46,9 +46,14 @@ def _latest_analysis_scenes(conn: Any, project_id: str) -> list[dict[str, Any]]:
 
 
 def _latest_transcript_segments(conn: Any, project_id: str) -> list[dict[str, Any]]:
-    """取最近一版逐字稿的分段（用于生成时间线 marker）。"""
+    """取最近一版逐字稿的分段（用于生成时间线 marker）。
+
+    分段在 ``producer.segments`` 里，**不在 ``content``** —— transcript 版本
+    的 content 存的是纯文本正文（见 handlers/transcribe_source）。早先按
+    JSON 解析 content，结果永远解析失败、静默退化成没有 marker。
+    """
     row = conn.execute(
-        "SELECT content FROM content_versions "
+        "SELECT producer FROM content_versions "
         "WHERE project_id=? AND content_type='transcript' "
         "ORDER BY created_at DESC LIMIT 1",
         (project_id,),
@@ -56,10 +61,10 @@ def _latest_transcript_segments(conn: Any, project_id: str) -> list[dict[str, An
     if row is None:
         return []
     try:
-        parsed = json.loads(row["content"])
+        producer = json.loads(row["producer"]) if row["producer"] else {}
     except (TypeError, ValueError):
         return []
-    segments = parsed.get("segments") if isinstance(parsed, dict) else None
+    segments = producer.get("segments") if isinstance(producer, dict) else None
     return [s for s in (segments or []) if isinstance(s, dict)]
 
 
