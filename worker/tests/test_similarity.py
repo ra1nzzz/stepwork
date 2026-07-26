@@ -281,3 +281,150 @@ async def test_generate_topic_no_warning_when_novel() -> None:
     )
     assert res["ok"] is True
     assert res["detail"]["duplicate_warnings"] == []
+
+
+# ----- 开关必须真正被消费（此前是空开关）+ 阈值分档 -----
+
+
+def test_similarity_check_enabled_reads_setting() -> None:
+    """勾掉 check-similarity 就不该再做检查。"""
+    import json as _json
+
+    from worker.runtime.script.similarity import similarity_check_enabled
+
+    c = in_memory()
+    run_migrations(c, _MIG_DIR)
+    repos = Repos(c)
+    ws = repos.workspaces.insert(Workspace(name="ws-sw", root_path="/tmp/sw"))
+
+    # settings 为空 → 默认开启（旧工作区不该悄悄失去保护）
+    assert similarity_check_enabled(c, ws) is True
+
+    c.execute(
+        "UPDATE workspaces SET settings=? WHERE id=?",
+        (_json.dumps({"brand": {"mustExecute": ["cite-sources"]}}), ws),
+    )
+    c.commit()
+    assert similarity_check_enabled(c, ws) is False
+
+    c.execute(
+        "UPDATE workspaces SET settings=? WHERE id=?",
+        (_json.dumps({"brand": {"mustExecute": ["check-similarity"]}}), ws),
+    )
+    c.commit()
+    assert similarity_check_enabled(c, ws) is True
+
+
+async def test_disabled_switch_suppresses_warnings() -> None:
+    """端到端：关掉开关后，即便有几乎相同的历史选题也不再提醒。"""
+    import json as _json
+
+    c = in_memory()
+    run_migrations(c, _MIG_DIR)
+    repos, ws, prj = _seed(c)
+    c.execute(
+        "UPDATE workspaces SET settings=? WHERE id=?",
+        (_json.dumps({"brand": {"mustExecute": []}}), ws),
+    )
+    c.commit()
+
+    src = repos.content_versions.insert(
+        ContentVersion(
+            project_id=prj, content_type="transcript", content="素材", content_hash="h0"
+        )
+    )
+    repos.content_versions.insert(
+        ContentVersion(
+            project_id=prj,
+            content_type="topic_proposal",
+            content=json.dumps(
+                {"angles": [{"id": "old", "title": "自动化工作流入门", "rationale": "同样的理由"}]}
+            ),
+            content_hash="h1",
+        )
+    )
+    deps = Deps(repos=repos, ingest=ingest, ai=_FixedAI("自动化工作流入门", "正文"))
+
+    res = await dispatch(
+        _env("GenerateTopic", {"source_version_id": src, "count": 3}, ws, prj), deps
+    )
+    assert res["ok"] is True
+    assert res["detail"]["duplicate_warnings"] == [], "开关关闭时不该产生提醒"
+
+
+def test_containment_detects_reuse_that_jaccard_misses() -> None:
+    """原创性提醒要抓的是**整段复用**，而整篇 Jaccard 会被长度差稀释。
+
+    实测：同一段被搬进更长的稿子里，Jaccard 只有 ~0.77（够不到 0.5 以上的
+    稳定判定），containment 是 1.0。
+    """
+    from worker.runtime.script.similarity import (
+        SCRIPT_THRESHOLD,
+        containment,
+        jaccard,
+    )
+
+    reused = "今天我们聊聊自动化工作流。先把素材导进来，再做转写。" * 8
+    longer = "开场白不同。" * 3 + reused
+
+    assert containment(longer, reused) >= SCRIPT_THRESHOLD
+    # 同一对文本，Jaccard 明显更低——这就是换度量的原因
+    assert jaccard(longer, reused) < containment(longer, reused)
+
+
+def test_containment_does_not_flag_same_topic_rewrite() -> None:
+    """同题材不同表达属正常创作，不该报警（否则提醒变噪声）。"""
+    from worker.runtime.script.similarity import SCRIPT_THRESHOLD, containment
+
+    score = containment(
+        "今天我们聊聊自动化工作流。先把素材导进来，再做转写。" * 8,
+        "今天来说说自动化的工作流程。先导入素材，然后进行转写。" * 8,
+    )
+    assert score < SCRIPT_THRESHOLD, f"同题材改写 {score:.3f} 触发了误报"
+
+
+def test_containment_does_not_flag_unrelated_topics() -> None:
+    from worker.runtime.script.similarity import SCRIPT_THRESHOLD, containment
+
+    score = containment(
+        "今天我们聊聊自动化工作流的搭建与排错。" * 8,
+        "红烧肉要先焯水再炒糖色，最后小火慢炖。" * 8,
+    )
+    assert score < SCRIPT_THRESHOLD, f"不同题材 {score:.3f} 触发了误报"
+
+
+def test_history_does_not_leak_across_workspaces() -> None:
+    """同 BrandProfile 但不同工作区的项目不该被拉进比对。"""
+    c = in_memory()
+    run_migrations(c, _MIG_DIR)
+    repos = Repos(c)
+    ws_a = repos.workspaces.insert(Workspace(name="A", root_path="/tmp/a"))
+    ws_b = repos.workspaces.insert(Workspace(name="B", root_path="/tmp/b"))
+    profile_id = "bp_cross"
+    c.execute(
+        "INSERT INTO brand_profiles (id, workspace_id, name, positioning, audience, "
+        "tone, content_pillars, banned_expressions, created_at, updated_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (profile_id, ws_a, "品牌", "", "", "", "[]", "[]", "t", "t"),
+    )
+    prj_a = repos.projects.insert(ContentProject(workspace_id=ws_a, title="A 项目"))
+    prj_b = repos.projects.insert(ContentProject(workspace_id=ws_b, title="B 项目"))
+    for pid in (prj_a, prj_b):
+        c.execute(
+            "UPDATE content_projects SET brand_profile_id=? WHERE id=?",
+            (profile_id, pid),
+        )
+    c.commit()
+    repos.content_versions.insert(
+        ContentVersion(
+            project_id=prj_b,
+            content_type="topic_proposal",
+            content=json.dumps({"angles": [{"id": "x", "title": "另一个工作区的选题"}]}),
+            content_hash="h",
+        )
+    )
+
+    history = load_topic_history(c, prj_a)
+    assert not any("另一个工作区" in h["label"] for h in history), (
+        "跨工作区内容泄漏到了相似度比对里"
+    )

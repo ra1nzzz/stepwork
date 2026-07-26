@@ -29,7 +29,11 @@ from worker.runtime.models import (
 )
 from worker.runtime.providers.resolve import ai_provider_from_hint
 from worker.runtime.script.history import load_topic_history
-from worker.runtime.script.similarity import find_similar, hits_to_warnings
+from worker.runtime.script.similarity import (
+    find_similar,
+    hits_to_warnings,
+    similarity_check_enabled,
+)
 from worker.runtime.topic.parse import parse_topic_proposal
 from worker.runtime.topic.prompt import TOPIC_SCHEMA, build_topic_prompt
 
@@ -99,7 +103,11 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     # PRD-SCR-004「历史选题重复提醒」：与本项目 + 同 BrandProfile 其它项目的
     # 历史角度比对，超阈值即提示。只提醒、不拦截（用户可能就是要做续集）。
     duplicate_warnings: list[dict[str, Any]] = []
-    history = load_topic_history(repos.conn, ctx.project_id, exclude_version_id=cv_id)
+    history = (
+        load_topic_history(repos.conn, ctx.project_id, exclude_version_id=cv_id)
+        if similarity_check_enabled(repos.conn, env.workspaceId)
+        else []
+    )
     if history:
         for angle in proposal.angles:
             hits = find_similar(

@@ -23,7 +23,7 @@ import {
   type UrlImportStatus,
 } from "@/stores/useImportStore";
 import { useTranscriptStore } from "@/stores/useTranscriptStore";
-import { isTauri } from "@/lib/tauri";
+import { getWorkspaceId, isTauri } from "@/lib/tauri";
 import { useViewStore } from "@/stores/useViewStore";
 
 function statusLabel(s: string): string {
@@ -394,7 +394,7 @@ export function CreateImportView() {
               <dl className="provenance">
                 <div className="provenance-row">
                   <dt>工作区</dt>
-                  <dd className="mono">ws-local</dd>
+                  <dd className="mono">{getWorkspaceId()}</dd>
                 </div>
                 <div className="provenance-row">
                   <dt>去重策略</dt>

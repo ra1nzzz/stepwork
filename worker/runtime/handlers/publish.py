@@ -171,12 +171,46 @@ def _publish_job_to_dict(row: Any) -> dict[str, Any]:
     }
 
 
-def _approval_is_approved(conn: Any, approval_id: str) -> bool:
-    """授权是否处于 approved 状态（未过期、未用掉）。"""
+def _authorization_error(
+    conn: Any, approval_id: str | None, current_bound: dict[str, Any]
+) -> str | None:
+    """校验授权可用；不可用时返回原因，可用返回 ``None``。
+
+    PRD-PUB-004「授权与账号、内容哈希、插件版本绑定」的**绑定必须在发布
+    时真正生效**：只看 status 等于把哈希当装饰——申请授权 → 用户批准 →
+    偷偷改标题正文 → 照样能发。这里三项都查：
+
+    1. status 必须是 approved（未拒绝、未过期、未用掉）
+    2. **内容哈希必须与当前变体一致**（改了内容授权即失效）
+    3. 有效期必须未过（批准不等于永久有效）
+    """
+    if not approval_id:
+        return "publish requires an approved authorization"
     row = conn.execute(
-        "SELECT status FROM approval_requests WHERE id=?", (approval_id,)
+        "SELECT status, payload, expires_at FROM approval_requests WHERE id=?",
+        (approval_id,),
     ).fetchone()
-    return row is not None and str(row["status"]) == "approved"
+    if row is None:
+        return "authorization not found"
+    if str(row["status"]) != "approved":
+        return f"authorization is {row['status']}, not approved"
+
+    # 有效期：批准后同样受 expires_at 约束
+    expires_at = row["expires_at"]
+    if expires_at and str(expires_at) < _now():
+        return "authorization expired"
+
+    try:
+        bound = json.loads(row["payload"]) if row["payload"] else {}
+    except (TypeError, ValueError):
+        bound = {}
+    expected = bound.get("content_hash")
+    if expected and expected != approval_content_hash(current_bound):
+        return (
+            "content changed since authorization was granted; "
+            "please request a new authorization"
+        )
+    return None
 
 
 async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
@@ -427,13 +461,29 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         if job_row is None:
             raise DispatchError("NOT_FOUND", f"publish job {target_job!r} not found")
 
-        # 发布必须先获批（否则「一次性授权」形同虚设）
+        # 发布必须先获批，且授权仍与**当前**内容匹配（PRD-PUB-004）
         if state == "published":
-            approval_id = job_row["approval_id"]
-            if not approval_id or not _approval_is_approved(repos.conn, approval_id):
-                raise DispatchError(
-                    "FORBIDDEN", "publish requires an approved authorization"
-                )
+            variant_row = repos.conn.execute(
+                "SELECT * FROM platform_variants WHERE id=?",
+                (job_row["platform_variant_id"],),
+            ).fetchone()
+            if variant_row is None:
+                raise DispatchError("NOT_FOUND", "platform variant not found")
+            current_bound = {
+                "variant_id": str(job_row["platform_variant_id"]),
+                "platform": variant_row["platform"],
+                "title": variant_row["title"],
+                "body": variant_row["body"],
+                "tags": variant_row["tags"],
+                "social_account_id": job_row["social_account_id"],
+                "plugin_id": job_row["plugin_id"],
+                "plugin_version": job_row["plugin_version"],
+            }
+            reason = _authorization_error(
+                repos.conn, job_row["approval_id"], current_bound
+            )
+            if reason:
+                raise DispatchError("FORBIDDEN", reason)
 
         evidence = p.get("evidenceArtifactIds") or p.get("evidence_artifact_ids") or []
         if not isinstance(evidence, list) or not all(

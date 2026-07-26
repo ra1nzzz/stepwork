@@ -106,7 +106,7 @@ def _plugin_row_to_dict(row: Any) -> dict[str, Any]:
     keys = row.keys()
 
     def _col(name: str) -> Any:
-        # 兼容尚未跑 0006 迁移的旧库（测试里可能用旧 schema 建表）
+        # 读路径对旧库（未跑 0006）缺列返回 None；写路径见 _has_trust_columns
         return row[name] if name in keys else None
 
     return {
@@ -123,6 +123,20 @@ def _plugin_row_to_dict(row: Any) -> dict[str, Any]:
         "last_checked_at": _col("last_checked_at"),
         "last_check_result": _col("last_check_result"),
     }
+
+
+def _has_trust_columns(conn: Any) -> bool:
+    """installed_plugins 是否已有 0006 的新列。
+
+    读路径的 ``_col`` 兜底只解决「查出来没有这列」，写路径硬写新列在
+    pre-0006 的库上仍会 OperationalError。真实运行时 bootstrap 一定跑过
+    迁移，但测试/外部工具可能拿旧 schema 建表——这里让写路径也降级。
+    """
+    try:
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(installed_plugins)")}
+    except Exception:  # noqa: BLE001 - 查不到就按「没有新列」保守处理
+        return False
+    return {"trust_tier", "last_checked_at", "last_check_result"} <= cols
 
 
 def _resolve_plugin_id(env: CommandEnvelope) -> str | None:
@@ -229,19 +243,29 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         new_pid = str(manifest["id"])
         installed_at = datetime.now(UTC).isoformat()
         # 幂等安装：重复安装同 id 覆盖 manifest 并重置为未启用
-        deps.repos.conn.execute(
-            "INSERT OR REPLACE INTO installed_plugins "
-            "(id, manifest_json, enabled, installed_at, last_loaded_at, "
-            "status, error_message, trust_tier) "
-            "VALUES (?, ?, 0, ?, NULL, 'installed', NULL, ?)",
-            (
-                new_pid,
-                json.dumps(manifest, ensure_ascii=False),
-                installed_at,
-                # PRD-PLG-004：插件不可自封 official/verified
-                resolve_trust_tier(manifest),
-            ),
-        )
+        if _has_trust_columns(deps.repos.conn):
+            deps.repos.conn.execute(
+                "INSERT OR REPLACE INTO installed_plugins "
+                "(id, manifest_json, enabled, installed_at, last_loaded_at, "
+                "status, error_message, trust_tier) "
+                "VALUES (?, ?, 0, ?, NULL, 'installed', NULL, ?)",
+                (
+                    new_pid,
+                    json.dumps(manifest, ensure_ascii=False),
+                    installed_at,
+                    # PRD-PLG-004：插件不可自封 official/verified
+                    resolve_trust_tier(manifest),
+                ),
+            )
+        else:
+            # 旧 schema：不写新列，功能降级但不炸
+            deps.repos.conn.execute(
+                "INSERT OR REPLACE INTO installed_plugins "
+                "(id, manifest_json, enabled, installed_at, last_loaded_at, "
+                "status, error_message) "
+                "VALUES (?, ?, 0, ?, NULL, 'installed', NULL)",
+                (new_pid, json.dumps(manifest, ensure_ascii=False), installed_at),
+            )
         deps.repos.conn.commit()
         row = deps.repos.conn.execute(
             "SELECT * FROM installed_plugins WHERE id=?", (new_pid,)
@@ -366,16 +390,23 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             healthy, detail_msg = True, "ok"
 
         checked_at = datetime.now(UTC).isoformat()
-        deps.repos.conn.execute(
-            "UPDATE installed_plugins SET last_checked_at=?, last_check_result=?, "
-            "error_message=? WHERE id=?",
-            (
-                checked_at,
-                "ok" if healthy else "error",
-                None if healthy else detail_msg,
-                pid,
-            ),
-        )
+        if _has_trust_columns(deps.repos.conn):
+            deps.repos.conn.execute(
+                "UPDATE installed_plugins SET last_checked_at=?, last_check_result=?, "
+                "error_message=? WHERE id=?",
+                (
+                    checked_at,
+                    "ok" if healthy else "error",
+                    None if healthy else detail_msg,
+                    pid,
+                ),
+            )
+        else:
+            # 旧 schema（未跑 0006）：只落 error_message，健康结果不持久化
+            deps.repos.conn.execute(
+                "UPDATE installed_plugins SET error_message=? WHERE id=?",
+                (None if healthy else detail_msg, pid),
+            )
         deps.repos.conn.commit()
         updated = deps.repos.conn.execute(
             "SELECT * FROM installed_plugins WHERE id=?", (pid,)

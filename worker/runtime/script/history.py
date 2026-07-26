@@ -25,8 +25,13 @@ def _related_project_ids(conn: Any, project_id: str) -> list[str]:
     brand_id = row["brand_profile_id"]
     if not brand_id:
         return [project_id]
+    # 必须同时限定 workspace_id：同一 BrandProfile 理论上属于某个工作区，
+    # 但只按 brand_profile_id 过滤会把**其它工作区**的项目也拉进比对，
+    # 造成跨工作区内容泄漏到提醒里。
     rows = conn.execute(
-        "SELECT id FROM content_projects WHERE brand_profile_id=?", (brand_id,)
+        "SELECT id FROM content_projects "
+        "WHERE brand_profile_id=? AND workspace_id=?",
+        (brand_id, row["workspace_id"]),
     ).fetchall()
     ids = [str(r["id"]) for r in rows]
     return ids or [project_id]

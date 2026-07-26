@@ -100,8 +100,8 @@ def summarize(lines: list[dict[str, Any]]) -> dict[str, int]:
     }
 
 
-#: 视为「AI 初稿」的 producer.kind
-_AI_KINDS: frozenset[str] = frozenset({"ai-script", "ai-paragraph-edit"})
+#: 视为「AI 初稿」的 producer.kind。段落级改写（ai-paragraph-edit）产生的
+#: 是中间版本，不算初稿 —— 「初稿 vs 最终稿」里的初稿指 GenerateScript 那一版。
 _AI_DRAFT_KIND = "ai-script"
 
 

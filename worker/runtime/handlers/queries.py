@@ -78,6 +78,21 @@ def _asset_to_dict(asset: Any) -> dict[str, Any]:
     }
 
 
+#: LIKE 转义符（配合 SQL 的 ``ESCAPE`` 子句）
+_LIKE_ESCAPE = "\\"
+
+
+def _escape_like(value: str) -> str:
+    """转义 SQL LIKE 的通配符（``%`` / ``_``）与转义符本身。
+
+    调用方必须配 ``ESCAPE '\\'``。不转义的话用户搜 ``A_B`` 会匹到 ``AXB``、
+    搜 ``100%`` 会匹配一切。
+    """
+    escaped = value.replace(_LIKE_ESCAPE, _LIKE_ESCAPE * 2)
+    escaped = escaped.replace("%", f"{_LIKE_ESCAPE}%")
+    return escaped.replace("_", f"{_LIKE_ESCAPE}_")
+
+
 def _load_tags(row: Any) -> list[str]:
     """解析 ``tags`` JSON 列；缺列/畸形一律返回空列表。"""
     if "tags" not in row.keys():
@@ -150,8 +165,10 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         if keyword:
             if not isinstance(keyword, str):
                 raise DispatchError("INVALID_ARGUMENT", "keyword must be a string")
-            sql += " AND title LIKE ?"
-            args.append(f"%{keyword}%")
+            # 转义 LIKE 通配符：否则用户搜 "A_B" 会把 "AXB" 也搜出来，
+            # 搜 "100%" 更是匹配一切
+            sql += f" AND title LIKE ? ESCAPE '{_LIKE_ESCAPE}'"
+            args.append(f"%{_escape_like(keyword)}%")
 
         status_filter = payload.get("status")
         if status_filter:
@@ -169,8 +186,11 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             # tags 存 JSON 数组文本，用 LIKE 做包含匹配（本地单用户量级足够）；
             # 多标签为 AND 语义（同时含有）。
             for tag in tags:
-                sql += " AND tags LIKE ?"
-                args.append(f'%"{tag}"%')
+                sql += f" AND tags LIKE ? ESCAPE '{_LIKE_ESCAPE}'"
+                # 标签值在库里是 json.dumps 后的形态，故按同样规则转义后
+                # 再套通配符，避免含引号/反斜杠的标签永远匹配不到
+                encoded = json.dumps(str(tag), ensure_ascii=False)[1:-1]
+                args.append(f'%"{_escape_like(encoded)}"%')
 
         # PRD-WS-003「最近访问」：默认按最近访问排序，回落创建时间
         # （首页「最近项目」此前实为 created_at 倒序，访问过也不会靠前）

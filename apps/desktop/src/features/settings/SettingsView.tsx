@@ -155,7 +155,7 @@ export default function SettingsView() {
     <div className="settings-view">
       <section className="page-head">
         <div>
-          <p className="eyebrow">getWorkspaceId() SETTINGS</p>
+          <p className="eyebrow">WORKSPACE SETTINGS</p>
           <h1>品牌、模型与数据边界</h1>
           <p className="page-subtitle">
             BrandProfile 会约束角度和脚本生成；Provider 与数据保留策略在任务开始前始终可见。
@@ -909,8 +909,8 @@ function WorkspacesPanel() {
                     >
                       重命名
                     </button>
-                    {/* PRD-WS-001：此前能建能改名，却无法把新工作区设为当前
-                        上下文（getWorkspaceId 恒返回 ws-local）——功能是死的 */}
+                    {/* PRD-WS-001：切换当前工作区（此前 getWorkspaceId 恒返回
+                        默认值，新建的工作区无法成为当前上下文） */}
                     <button
                       className={`btn small ${currentWs === w.id ? "" : "primary"}`}
                       type="button"

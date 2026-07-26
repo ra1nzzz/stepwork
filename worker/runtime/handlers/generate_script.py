@@ -31,7 +31,12 @@ from worker.runtime.providers.resolve import ai_provider_from_hint
 from worker.runtime.script.history import load_script_history
 from worker.runtime.script.parse import parse_script
 from worker.runtime.script.prompt import SCRIPT_SCHEMA, build_script_prompt
-from worker.runtime.script.similarity import find_similar, hits_to_warnings
+from worker.runtime.script.similarity import (
+    SCRIPT_THRESHOLD,
+    find_similar,
+    hits_to_warnings,
+    similarity_check_enabled,
+)
 
 
 async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
@@ -112,11 +117,24 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     # PRD-SCR-005「相似度与原创性提醒」：与同账号历史脚本比对。
     # 措辞是「提醒」而非判定 —— PRD 明确要求不做法律结论。
     similarity_warnings: list[dict[str, Any]] = []
-    history = load_script_history(repos.conn, ctx.project_id, exclude_version_id=cv_id)
+    history = (
+        load_script_history(repos.conn, ctx.project_id, exclude_version_id=cv_id)
+        if similarity_check_enabled(repos.conn, env.workspaceId)
+        else []
+    )
     if history:
         body_text = str(script.get("body") or script.get("text") or "")
         similarity_warnings = hits_to_warnings(
-            find_similar(body_text, history, limit=3), "similar_script"
+            # 长文本用 containment 查重：目标是检测整段复用，而不是
+            # 检测同题材（同题材不同表达属正常创作，报警只是噪声）
+            find_similar(
+                body_text,
+                history,
+                threshold=SCRIPT_THRESHOLD,
+                limit=3,
+                metric="containment",
+            ),
+            "similar_script",
         )
 
     # 费用透明（Tranche 2）：detail.invocation + provider_invocation 审计行

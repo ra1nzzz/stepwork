@@ -190,3 +190,43 @@ async def test_unknown_sort_rejected() -> None:
     res = await dispatch(_env("ListProjects", {"sort": "random"}), deps)
     assert res["ok"] is False
     assert "unknown sort" in res["error"]
+
+
+# ----- LIKE 通配符必须转义（否则搜索语义被用户输入劫持） -----
+
+
+async def test_keyword_wildcards_are_escaped() -> None:
+    """未转义时 "A_B" 会匹到 "AXB"、"100%" 会匹配一切。"""
+    deps = _deps()
+    await _create(deps, "A_B 精确项目")
+    await _create(deps, "AXB 不该被匹到")
+    await _create(deps, "毫不相干")
+
+    res = await dispatch(_env("ListProjects", {"keyword": "A_B"}), deps)
+    titles = [p["title"] for p in res["detail"]["projects"]]
+    assert titles == ["A_B 精确项目"], titles
+
+    # "%" 不该退化成「匹配一切」
+    await _create(deps, "折扣 100% 达成")
+    pct = await dispatch(_env("ListProjects", {"keyword": "100%"}), deps)
+    pct_titles = [p["title"] for p in pct["detail"]["projects"]]
+    assert pct_titles == ["折扣 100% 达成"], pct_titles
+
+
+async def test_tag_with_wildcard_chars_matches_exactly() -> None:
+    deps = _deps()
+    await _create(deps, "甲", ["A_B"])
+    await _create(deps, "乙", ["AXB"])
+
+    res = await dispatch(_env("ListProjects", {"tags": ["A_B"]}), deps)
+    assert [p["title"] for p in res["detail"]["projects"]] == ["甲"]
+
+
+async def test_tag_with_quotes_is_matchable() -> None:
+    """含引号的标签在库里是转义形态，拼 pattern 时必须同样处理。"""
+    deps = _deps()
+    await _create(deps, "带引号", ['他说"你好"'])
+    await _create(deps, "无引号", ["普通"])
+
+    res = await dispatch(_env("ListProjects", {"tags": ['他说"你好"']}), deps)
+    assert [p["title"] for p in res["detail"]["projects"]] == ["带引号"]

@@ -525,3 +525,77 @@ def test_check_health_detects_broken_manifest(tmp_path: Path) -> None:
         assert res["detail"]["plugin"]["error_message"]
     finally:
         conn.close()
+
+
+# ----- 旧 schema（未跑 0006 迁移）降级 -----
+#
+# 读路径此前已用 ``_col`` 兜底缺列，但 InstallPlugin / CheckPluginHealth 的
+# 写路径仍硬写 trust_tier / last_checked_at，在 pre-0006 的库上直接
+# OperationalError。真实运行 bootstrap 一定跑过迁移，但外部工具或旧备份库
+# 打开时不该整个插件子系统崩掉。
+
+_LEGACY_PLUGIN_DDL = """
+CREATE TABLE installed_plugins (
+  id TEXT PRIMARY KEY,
+  manifest_json TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 0,
+  installed_at TEXT NOT NULL,
+  last_loaded_at TEXT,
+  status TEXT NOT NULL DEFAULT 'registered',
+  error_message TEXT
+)
+"""
+
+
+def _legacy_db(tmp_path: Path) -> tuple[sqlite3.Connection, Repos]:
+    """跑完迁移后把 installed_plugins 换成 0006 之前的形态。"""
+    conn, repos = _new_db(tmp_path)
+    conn.execute("DROP TABLE installed_plugins")
+    conn.execute(_LEGACY_PLUGIN_DDL)
+    conn.commit()
+    return conn, repos
+
+
+def test_install_plugin_on_legacy_schema(tmp_path: Path) -> None:
+    """旧库上 InstallPlugin 不写新列，仍应安装成功。"""
+    conn, repos = _legacy_db(tmp_path)
+    try:
+        res = _run(
+            _env("InstallPlugin", {"path": str(_EXAMPLE_PLUGIN_DIR)}),
+            Deps(repos=repos),
+        )
+        assert res["ok"] is True, res
+        rows = conn.execute("SELECT id, status FROM installed_plugins").fetchall()
+        assert len(rows) == 1
+        assert rows[0]["status"] == "installed"
+    finally:
+        conn.close()
+
+
+def test_check_health_on_legacy_schema(tmp_path: Path) -> None:
+    """旧库上健康检查不持久化 last_checked_at，但命令本身要成功。"""
+    conn, repos = _legacy_db(tmp_path)
+    try:
+        _insert_plugin(
+            conn,
+            pid="legacy",
+            manifest={"name": "legacy", "version": "1.0.0", "apiVersion": "1.0"},
+        )
+        res = _run(
+            _env("CheckPluginHealth", {"pluginId": "legacy"}), Deps(repos=repos)
+        )
+        assert res["ok"] is True, res
+    finally:
+        conn.close()
+
+
+def test_list_plugins_on_legacy_schema(tmp_path: Path) -> None:
+    """读路径在旧库上给出 None 而不是抛错。"""
+    conn, repos = _legacy_db(tmp_path)
+    try:
+        _insert_plugin(conn, pid="legacy")
+        res = _run(_env("ListPlugins"), Deps(repos=repos))
+        assert res["ok"] is True, res
+        assert len(res["detail"]["plugins"]) == 1
+    finally:
+        conn.close()

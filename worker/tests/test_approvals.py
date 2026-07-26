@@ -293,3 +293,59 @@ async def test_approval_payload_carries_content_hash() -> None:
     )
     payload = created["detail"]["approval"]["payload"]
     assert payload["content_hash"] == content_hash({"v": 1})
+
+
+# ----- 降级为准备任务必须有去重与限流（否则是本地 DoS） -----
+
+
+async def test_repeated_denials_reuse_one_pending_request() -> None:
+    """同一 actor 反复撞同一禁令，只应有一条待审批（而非灌满库）。"""
+    deps = _deps()
+    ids = set()
+    for _ in range(10):
+        res = await dispatch(
+            _env("DeleteAsset", {"assetId": "a1"}, actor_type="agent", source="mcp"),
+            deps,
+        )
+        assert res["ok"] is False
+        ids.add((res.get("detail") or {}).get("approval_id"))
+
+    n = deps.repos.conn.execute(
+        "SELECT COUNT(*) n FROM approval_requests"
+    ).fetchone()["n"]
+    assert n == 1, f"10 次被拒产生了 {n} 条审批请求"
+    assert len(ids) == 1, "重复请求应复用同一条准备任务"
+
+
+async def test_pending_approvals_are_capped_per_actor() -> None:
+    """用不同 target 绕过去重时，仍受单 actor 待审批上限约束。"""
+    from worker.runtime.commands.bus import _MAX_PENDING_APPROVALS_PER_ACTOR
+
+    deps = _deps()
+    over = _MAX_PENDING_APPROVALS_PER_ACTOR + 10
+    for i in range(over):
+        env = _env(
+            "DeleteAsset", {"assetId": f"a{i}"}, actor_type="agent", source="mcp"
+        )
+        env["projectId"] = f"prj-{i}"  # 每次换目标，绕开去重
+        await dispatch(env, deps)
+
+    n = deps.repos.conn.execute(
+        "SELECT COUNT(*) n FROM approval_requests WHERE status='pending'"
+    ).fetchone()["n"]
+    assert n <= _MAX_PENDING_APPROVALS_PER_ACTOR, f"待审批 {n} 条，超过上限"
+
+
+async def test_denial_still_rejects_when_cap_reached() -> None:
+    """达到上限后仍必须拒绝命令本身——限流只影响登记，不影响安全语义。"""
+    from worker.runtime.commands.bus import _MAX_PENDING_APPROVALS_PER_ACTOR
+
+    deps = _deps()
+    for i in range(_MAX_PENDING_APPROVALS_PER_ACTOR + 5):
+        env = _env(
+            "DeleteAsset", {"assetId": f"b{i}"}, actor_type="agent", source="mcp"
+        )
+        env["projectId"] = f"p-{i}"
+        res = await dispatch(env, deps)
+        assert res["ok"] is False
+        assert "FORBIDDEN_ACTOR" in res["error"]

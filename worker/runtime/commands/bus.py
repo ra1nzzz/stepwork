@@ -172,6 +172,9 @@ _AGENT_ALLOWED_COMMANDS: frozenset[str] = frozenset(
 
 # 视为「外部 Agent」的调用方特征：actor.type 或 source 任一命中即算。
 # plugin 一并纳入：插件适配器若复用同一条 dispatch，同样不该直达写命令。
+#: 单个 actor 的待审批请求上限（防止外部 agent 无限灌库）
+_MAX_PENDING_APPROVALS_PER_ACTOR = 50
+
 _AGENT_ACTOR_TYPES: frozenset[str] = frozenset({"agent", "plugin"})
 _AGENT_SOURCES: frozenset[str] = frozenset({"mcp", "a2a", "acp", "plugin"})
 
@@ -210,14 +213,44 @@ def _create_preparation_task(env: CommandEnvelope, deps: Any) -> str | None:
     if conn is None:
         return None
     try:
-        from worker.runtime.handlers.approvals import create_request
+        from worker.runtime.handlers.approvals import (
+            STATUS_PENDING,
+            create_request,
+        )
 
         actor = env.actor or {}
+        actor_id = f"{actor.get('type', 'agent')}:{actor.get('id', 'unknown')}"
+        target = env.projectId or env.workspaceId
+
+        # 去重：同一 actor 对同一 (命令, 目标) 已有待审批请求就复用，
+        # 否则 agent 循环调禁用命令即可无限灌满 approval_requests（本地 DoS，
+        # 且每条都全量落 payload）。
+        existing = conn.execute(
+            "SELECT id FROM approval_requests "
+            "WHERE actor=? AND action_type=? AND target=? AND status=? "
+            "ORDER BY created_at DESC LIMIT 1",
+            (actor_id, env.commandType, target, STATUS_PENDING),
+        ).fetchone()
+        if existing is not None:
+            return str(existing["id"])
+
+        # 限流：单个 actor 的待审批数量上限，防止用不同 target 绕过去重
+        pending_count = conn.execute(
+            "SELECT COUNT(*) n FROM approval_requests WHERE actor=? AND status=?",
+            (actor_id, STATUS_PENDING),
+        ).fetchone()["n"]
+        if pending_count >= _MAX_PENDING_APPROVALS_PER_ACTOR:
+            logger.warning(
+                "actor %s reached pending approval cap (%s); dropping request for %s",
+                actor_id, _MAX_PENDING_APPROVALS_PER_ACTOR, env.commandType,
+            )
+            return None
+
         return create_request(
             conn,
-            actor=f"{actor.get('type', 'agent')}:{actor.get('id', 'unknown')}",
+            actor=actor_id,
             action_type=env.commandType,
-            target=env.projectId or env.workspaceId,
+            target=target,
             risk_summary=(
                 f"外部 {env.source} 调用方请求执行 {env.commandType}，"
                 f"该操作按 PRD §9.1 需用户确认"

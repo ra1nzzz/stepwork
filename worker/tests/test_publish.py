@@ -503,3 +503,107 @@ async def test_invalid_publish_state_rejected() -> None:
     )
     assert res["ok"] is False
     assert "INVALID_ARGUMENT" in res["error"]
+
+
+async def test_publish_rejected_after_content_changed() -> None:
+    """PRD-PUB-004 绑定必须在**发布时**真正生效。
+
+    此前只在申请时把内容哈希写进 payload，发布时从不比对 —— 等于把哈希
+    当装饰：申请授权 → 用户批准 → 偷偷改标题正文 → 照样能发。
+    """
+    deps, _ws, prj = _setup()
+    variant_id = await _make_variant(deps, prj)
+    auth = await dispatch(
+        _env("RequestPublishAuthorization", {"variantId": variant_id}, project_id=prj),
+        deps,
+    )
+    await dispatch(
+        _env(
+            "DecideApprovalRequest",
+            {"approvalId": auth["detail"]["approval_id"], "decision": "approve"},
+            project_id=prj,
+        ),
+        deps,
+    )
+
+    # 获批之后偷偷改正文
+    deps.repos.conn.execute(
+        "UPDATE platform_variants SET body=? WHERE id=?",
+        ("被偷偷改过的正文", variant_id),
+    )
+    deps.repos.conn.commit()
+
+    blocked = await dispatch(
+        _env(
+            "RecordPublishResult",
+            {"publishJobId": auth["detail"]["publish_job_id"], "state": "published"},
+            project_id=prj,
+        ),
+        deps,
+    )
+    assert blocked["ok"] is False
+    assert "content changed" in blocked["error"], blocked["error"]
+
+
+async def test_publish_rejected_when_authorization_expired() -> None:
+    """批准 != 永久有效：过期的授权不能再用来发布。"""
+    deps, _ws, prj = _setup()
+    variant_id = await _make_variant(deps, prj)
+    auth = await dispatch(
+        _env("RequestPublishAuthorization", {"variantId": variant_id}, project_id=prj),
+        deps,
+    )
+    approval_id = auth["detail"]["approval_id"]
+    await dispatch(
+        _env(
+            "DecideApprovalRequest",
+            {"approvalId": approval_id, "decision": "approve"},
+            project_id=prj,
+        ),
+        deps,
+    )
+    # 把有效期拨到过去（_expire_stale 只处理 pending，approved 需在发布时校验）
+    deps.repos.conn.execute(
+        "UPDATE approval_requests SET expires_at='2020-01-01T00:00:00+00:00' "
+        "WHERE id=?",
+        (approval_id,),
+    )
+    deps.repos.conn.commit()
+
+    blocked = await dispatch(
+        _env(
+            "RecordPublishResult",
+            {"publishJobId": auth["detail"]["publish_job_id"], "state": "published"},
+            project_id=prj,
+        ),
+        deps,
+    )
+    assert blocked["ok"] is False
+    assert "expired" in blocked["error"], blocked["error"]
+
+
+async def test_publish_allowed_when_content_unchanged() -> None:
+    """守卫不得误伤：内容未变、未过期时正常放行。"""
+    deps, _ws, prj = _setup()
+    variant_id = await _make_variant(deps, prj)
+    auth = await dispatch(
+        _env("RequestPublishAuthorization", {"variantId": variant_id}, project_id=prj),
+        deps,
+    )
+    await dispatch(
+        _env(
+            "DecideApprovalRequest",
+            {"approvalId": auth["detail"]["approval_id"], "decision": "approve"},
+            project_id=prj,
+        ),
+        deps,
+    )
+    ok = await dispatch(
+        _env(
+            "RecordPublishResult",
+            {"publishJobId": auth["detail"]["publish_job_id"], "state": "published"},
+            project_id=prj,
+        ),
+        deps,
+    )
+    assert ok["ok"] is True, ok.get("error")
