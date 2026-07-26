@@ -88,7 +88,10 @@
         "RecordPreference",
         "ListAgentConnections",
         "SetAgentConnectionStatus",
-        "DeleteAgentConnection"
+        "DeleteAgentConnection",
+        "RequestPublishAuthorization",
+        "RecordPublishResult",
+        "ListPublishJobs"
       ],
       "description": "Command type identifier. See SYSTEM_SPEC §7.2 for the canonical list."
     },

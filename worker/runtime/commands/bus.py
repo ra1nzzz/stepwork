@@ -98,6 +98,10 @@ _ROUTES: dict[str, str] = {
     "CreatePlatformVariant": "worker.runtime.handlers.publish",
     "ListPlatformVariants": "worker.runtime.handlers.publish",
     "ExportBundle": "worker.runtime.handlers.publish",
+    # PRD-PUB-004 一次性发布授权 / PRD-PUB-005 发布结果与证据
+    "RequestPublishAuthorization": "worker.runtime.handlers.publish",
+    "RecordPublishResult": "worker.runtime.handlers.publish",
+    "ListPublishJobs": "worker.runtime.handlers.publish",
     # PRD-AGT-008 / §9.1 §9.2：审批中心
     "CreateApprovalRequest": "worker.runtime.handlers.approvals",
     "ListApprovalRequests": "worker.runtime.handlers.approvals",

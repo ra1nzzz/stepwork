@@ -45,6 +45,7 @@ def _env(
     command_type: str,
     payload: dict[str, Any] | None = None,
     workspace_id: str = "ws-pub",
+    project_id: str | None = None,
 ) -> dict[str, Any]:
     return {
         "commandId": f"cid-{command_type}",
@@ -53,6 +54,7 @@ def _env(
         "actor": {"type": "user", "id": "u1"},
         "source": "ui",
         "workspaceId": workspace_id,
+        "projectId": project_id,
         "payload": payload or {},
         "requestedAt": datetime.now(UTC).isoformat(),
     }
@@ -269,3 +271,235 @@ async def test_export_bundle_not_found() -> None:
     res = await dispatch(_env("ExportBundle", {"variantId": "pv_nope"}), deps)
     assert res["ok"] is False
     assert "NOT_FOUND" in res["error"]
+
+
+# ----- PRD-PUB-004 一次性发布授权 / PRD-PUB-005 发布结果与证据 -----
+
+
+def _setup() -> tuple[Deps, str, str]:
+    """建库 + workspace + project + 一条内容版本（variant 需要锚点）。"""
+    deps = _deps()
+    repos = deps.repos
+    ws_id = repos.workspaces.insert(Workspace(name="ws-pub", root_path="/tmp/pub"))
+    prj_id = repos.projects.insert(ContentProject(workspace_id=ws_id, title="发布项目"))
+    repos.content_versions.insert(
+        ContentVersion(
+            project_id=prj_id,
+            content_type="script",
+            content="主稿",
+            content_hash="anchor",
+        )
+    )
+    return deps, ws_id, prj_id
+
+
+async def _make_variant(deps: Deps, prj: str) -> str:
+    res = await dispatch(
+        _env(
+            "CreatePlatformVariant",
+            {
+                "projectId": prj,
+                "platform": "douyin",
+                "title": "标题",
+                "body": "正文",
+                "tags": ["标签"],
+            },
+            project_id=prj,
+        ),
+        deps,
+    )
+    assert res["ok"] is True, res.get("error")
+    return str(res["detail"]["variant"]["id"])
+
+
+async def test_request_authorization_binds_account_content_and_plugin() -> None:
+    """PRD-PUB-004：授权与账号、内容哈希、插件版本绑定。"""
+    deps, _ws, prj = _setup()
+    variant_id = await _make_variant(deps, prj)
+
+    res = await dispatch(
+        _env(
+            "RequestPublishAuthorization",
+            {
+                "variantId": variant_id,
+                "socialAccountId": "acct-1",
+                "pluginId": "douyin-publisher",
+                "pluginVersion": "1.2.3",
+            },
+            project_id=prj,
+        ),
+        deps,
+    )
+    assert res["ok"] is True, res.get("error")
+    assert res["detail"]["state"] == "awaiting_approval"
+    assert res["detail"]["content_hash"]
+
+    approval = deps.repos.conn.execute(
+        "SELECT * FROM approval_requests WHERE id=?",
+        (res["detail"]["approval_id"],),
+    ).fetchone()
+    assert approval is not None
+    assert approval["requested_scope"] == "once"
+    payload = json.loads(approval["payload"])
+    # 三要素都进了绑定内容
+    assert payload["social_account_id"] == "acct-1"
+    assert payload["plugin_version"] == "1.2.3"
+    assert payload["title"] == "标题"
+
+    job = deps.repos.conn.execute(
+        "SELECT * FROM publish_jobs WHERE id=?",
+        (res["detail"]["publish_job_id"],),
+    ).fetchone()
+    assert job is not None
+    assert job["approval_id"] == res["detail"]["approval_id"]
+
+
+async def test_publish_requires_approved_authorization() -> None:
+    """未获批不得标记为已发布——否则「一次性授权」形同虚设。"""
+    deps, _ws, prj = _setup()
+    variant_id = await _make_variant(deps, prj)
+    auth = await dispatch(
+        _env("RequestPublishAuthorization", {"variantId": variant_id}, project_id=prj),
+        deps,
+    )
+    job_id = auth["detail"]["publish_job_id"]
+
+    blocked = await dispatch(
+        _env(
+            "RecordPublishResult",
+            {"publishJobId": job_id, "state": "published"},
+            project_id=prj,
+        ),
+        deps,
+    )
+    assert blocked["ok"] is False
+    assert "FORBIDDEN" in blocked["error"]
+
+    # 批准后放行
+    await dispatch(
+        _env(
+            "DecideApprovalRequest",
+            {"approvalId": auth["detail"]["approval_id"], "decision": "approve"},
+            project_id=prj,
+        ),
+        deps,
+    )
+    ok = await dispatch(
+        _env(
+            "RecordPublishResult",
+            {
+                "publishJobId": job_id,
+                "state": "published",
+                "evidenceArtifactIds": ["shot-1"],
+                "remoteContentId": "remote-42",
+            },
+            project_id=prj,
+        ),
+        deps,
+    )
+    assert ok["ok"] is True, ok.get("error")
+    job = ok["detail"]["publish_job"]
+    # PRD-PUB-005：状态、时间、证据都留痕
+    assert job["state"] == "published"
+    assert job["evidence_artifact_ids"] == ["shot-1"]
+    assert job["remote_content_id"] == "remote-42"
+    assert job["updated_at"]
+
+
+async def test_once_authorization_is_consumed_after_publish() -> None:
+    """PRD-PUB-004「一次性」：用掉即作废，不能复用同一授权再发一次。"""
+    deps, _ws, prj = _setup()
+    variant_id = await _make_variant(deps, prj)
+    auth = await dispatch(
+        _env("RequestPublishAuthorization", {"variantId": variant_id}, project_id=prj),
+        deps,
+    )
+    approval_id = auth["detail"]["approval_id"]
+    await dispatch(
+        _env(
+            "DecideApprovalRequest",
+            {"approvalId": approval_id, "decision": "approve"},
+            project_id=prj,
+        ),
+        deps,
+    )
+    await dispatch(
+        _env(
+            "RecordPublishResult",
+            {"publishJobId": auth["detail"]["publish_job_id"], "state": "published"},
+            project_id=prj,
+        ),
+        deps,
+    )
+
+    status = deps.repos.conn.execute(
+        "SELECT status FROM approval_requests WHERE id=?", (approval_id,)
+    ).fetchone()["status"]
+    assert status == "consumed"
+
+    # 再次发布同一 job 应被拒（授权已不是 approved）
+    again = await dispatch(
+        _env(
+            "RecordPublishResult",
+            {"publishJobId": auth["detail"]["publish_job_id"], "state": "published"},
+            project_id=prj,
+        ),
+        deps,
+    )
+    assert again["ok"] is False
+    assert "FORBIDDEN" in again["error"]
+
+
+async def test_failed_state_does_not_require_approval() -> None:
+    """记录失败/取消不需要授权（只有真正「已发布」才需要）。"""
+    deps, _ws, prj = _setup()
+    variant_id = await _make_variant(deps, prj)
+    auth = await dispatch(
+        _env("RequestPublishAuthorization", {"variantId": variant_id}, project_id=prj),
+        deps,
+    )
+    res = await dispatch(
+        _env(
+            "RecordPublishResult",
+            {
+                "publishJobId": auth["detail"]["publish_job_id"],
+                "state": "failed",
+                "evidenceArtifactIds": ["err-shot"],
+            },
+            project_id=prj,
+        ),
+        deps,
+    )
+    assert res["ok"] is True, res.get("error")
+    assert res["detail"]["publish_job"]["state"] == "failed"
+
+
+async def test_list_publish_jobs_by_project() -> None:
+    deps, _ws, prj = _setup()
+    variant_id = await _make_variant(deps, prj)
+    await dispatch(
+        _env("RequestPublishAuthorization", {"variantId": variant_id}, project_id=prj),
+        deps,
+    )
+    res = await dispatch(_env("ListPublishJobs", {"projectId": prj}, project_id=prj), deps)
+    assert res["ok"] is True
+    assert len(res["detail"]["publish_jobs"]) == 1
+
+
+async def test_invalid_publish_state_rejected() -> None:
+    deps, _ws, prj = _setup()
+    variant_id = await _make_variant(deps, prj)
+    auth = await dispatch(
+        _env("RequestPublishAuthorization", {"variantId": variant_id}, project_id=prj),
+        deps,
+    )
+    res = await dispatch(
+        _env(
+            "RecordPublishResult",
+            {"publishJobId": auth["detail"]["publish_job_id"], "state": "done"},
+            project_id=prj,
+        ),
+        deps,
+    )
+    assert res["ok"] is False
+    assert "INVALID_ARGUMENT" in res["error"]

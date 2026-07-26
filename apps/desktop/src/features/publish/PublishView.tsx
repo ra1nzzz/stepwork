@@ -68,6 +68,9 @@ export function PublishView() {
   // 导出状态：variantId → bundle_path（导出成功后可打开目录）
   const [bundlePaths, setBundlePaths] = useState<Record<string, string>>({});
   const [exportingId, setExportingId] = useState<string | null>(null);
+  // PRD-PUB-004：发布授权申请
+  const [authorizingId, setAuthorizingId] = useState<string | null>(null);
+  const [authNotice, setAuthNotice] = useState<Record<string, string>>({});
 
   // 加载项目列表（进入发布页时）
   useEffect(() => {
@@ -180,6 +183,37 @@ export function PublishView() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setExportingId(null);
+    }
+  }
+
+  /**
+   * PRD-PUB-004「一次性发布授权」：授权与账号、内容哈希、插件版本绑定，
+   * 生成一条待审批请求（在「任务 → 审批中心」处理）。
+   * 批准本身不发布——PRD §10.6「默认不过度自动化」。
+   */
+  async function requestAuthorization(variantId: string) {
+    setAuthorizingId(variantId);
+    try {
+      const env = buildEnvelope(
+        "RequestPublishAuthorization",
+        getWorkspaceId(),
+        projectId,
+        { variantId },
+      );
+      const res = await dispatchCommand(env);
+      setAuthNotice((prev) => ({
+        ...prev,
+        [variantId]: res.ok
+          ? "已创建发布授权请求，请到「任务 → 审批中心」确认"
+          : (res.error ?? "申请失败"),
+      }));
+    } catch (e) {
+      setAuthNotice((prev) => ({
+        ...prev,
+        [variantId]: e instanceof Error ? e.message : String(e),
+      }));
+    } finally {
+      setAuthorizingId(null);
     }
   }
 
@@ -372,7 +406,22 @@ export function PublishView() {
                             打开目录
                           </button>
                         )}
+                        {/* PRD-PUB-004：申请一次性发布授权（与账号/内容/
+                            插件版本绑定；批准后仍需你自行发布） */}
+                        <button
+                          className="btn small ghost"
+                          type="button"
+                          onClick={() => void requestAuthorization(v.id)}
+                          disabled={authorizingId !== null}
+                        >
+                          {authorizingId === v.id ? "申请中…" : "申请发布授权"}
+                        </button>
                       </div>
+                      {authNotice[v.id] && (
+                        <p className="panel-meta" style={{ margin: "6px 0 0" }}>
+                          {authNotice[v.id]}
+                        </p>
+                      )}
                       {bundlePath && (
                         <p className="panel-meta mono" style={{ margin: "6px 0 0", fontSize: 11 }}>
                           {bundlePath}

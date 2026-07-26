@@ -158,7 +158,10 @@ export interface CommandEnvelope {
     | "RecordPreference"
     | "ListAgentConnections"
     | "SetAgentConnectionStatus"
-    | "DeleteAgentConnection";
+    | "DeleteAgentConnection"
+    | "RequestPublishAuthorization"
+    | "RecordPublishResult"
+    | "ListPublishJobs";
   schemaVersion: string;
   actor: { type: "user" | "agent" | "plugin" | "system" | "desktop"; id: string };
   source: string;
