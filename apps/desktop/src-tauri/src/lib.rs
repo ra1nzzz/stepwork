@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tokio::sync::mpsc;
 
 use crate::sidecar::{spawn_sidecar, HeartbeatWatchdog, SpawnConfig};
@@ -25,6 +25,7 @@ pub fn run() {
     tracing_subscriber::fmt::init();
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
             commands::health::get_worker_health,
@@ -72,14 +73,33 @@ async fn run_sidecar_monitor(app: tauri::AppHandle) {
                     }
                 });
 
-                // Route worker `runtime.heartbeat` notifications into the watchdog.
+                // Route worker notifications:
+                // - `runtime.heartbeat` 喂给 watchdog（维持现有自愈逻辑）
+                // - 其它所有 notification（如 `job.progress`）转发为 Tauri
+                //   事件 `worker-notification`，payload = {method, params}，
+                //   供前端 listen（契约「进度通知」）。emit 放在 spawn 里，
+                //   保证 handler 在 RPC 读循环内非阻塞。
                 let hb_for_handler = std::sync::Arc::clone(&hb_arc);
+                let app_for_notify = app.clone();
                 rpc.set_notify_handler(std::sync::Arc::new(
-                    move |method: String, _params: serde_json::Value| {
+                    move |method: String, params: serde_json::Value| {
                         if method == "runtime.heartbeat" {
                             let arc = std::sync::Arc::clone(&hb_for_handler);
                             tauri::async_runtime::spawn(async move {
                                 *arc.lock().await = Some(std::time::Instant::now());
+                            });
+                        } else {
+                            let app = app_for_notify.clone();
+                            tauri::async_runtime::spawn(async move {
+                                if let Err(e) = app.emit(
+                                    "worker-notification",
+                                    serde_json::json!({
+                                        "method": method,
+                                        "params": params,
+                                    }),
+                                ) {
+                                    tracing::warn!("forward worker notification failed: {e}");
+                                }
                             });
                         }
                     },
@@ -187,38 +207,49 @@ const TARGET_TRIPLE: &str = "x86_64-apple-darwin";
 
 /// 解析打包的 sidecar EXE 路径
 ///
-/// Tauri sidecar 文件名格式：`<name>-<target-triple><ext>`
-/// - 开发模式：`src-tauri/binaries/stepwork-worker-<target-triple>.exe`
-/// - 打包模式：`<exe_dir>/binaries/stepwork-worker-<target-triple>.exe`
+/// 候选文件名（按优先级）：
+/// 1. `stepwork-worker-<target-triple>.exe` —— externalBin 的源命名，
+///    开发模式下 `src-tauri/binaries/` 里就是这个名字
+/// 2. `stepwork-worker.exe` —— Tauri bundler 安装时会剥掉 target triple，
+///    装机目录里 sidecar 以裸名放在应用 EXE 旁（或 binaries/ 子目录）
+///
+/// 搜索位置：EXE 同目录（binaries/ 子目录与同级）→ cwd/binaries/
+/// （开发模式，cwd 是 src-tauri）→ cwd/src-tauri/binaries/（repo root 起步）
 fn resolve_sidecar_path(_app: &tauri::AppHandle) -> Option<PathBuf> {
-    let sidecar_name = format!("stepwork-worker-{}.exe", TARGET_TRIPLE);
+    let exe_suffix = std::env::consts::EXE_SUFFIX;
+    let candidates = [
+        format!("stepwork-worker-{}{}", TARGET_TRIPLE, exe_suffix),
+        format!("stepwork-worker{}", exe_suffix),
+    ];
 
-    // 1) 打包模式：EXE 同目录下的 binaries/
-    if let Ok(exe_dir) = std::env::current_exe() {
-        if let Some(parent) = exe_dir.parent() {
-            let packed = parent.join("binaries").join(&sidecar_name);
-            if packed.exists() {
-                return Some(packed);
-            }
-            // 某些 Tauri 版本放在 EXE 同级而非 binaries/ 子目录
-            let flat = parent.join(&sidecar_name);
-            if flat.exists() {
-                return Some(flat);
+    // 1) 打包模式：EXE 同目录下的 binaries/ 或 EXE 同级
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(parent) = exe_path.parent() {
+            for name in &candidates {
+                let packed = parent.join("binaries").join(name);
+                if packed.exists() {
+                    return Some(packed);
+                }
+                let flat = parent.join(name);
+                if flat.exists() {
+                    return Some(flat);
+                }
             }
         }
     }
 
-    // 2) 开发模式：cwd/binaries/（cwd 是 src-tauri）
+    // 2) 开发模式：cwd/binaries/（cwd 是 src-tauri），
+    //    以及从 repo root 起步的 src-tauri/binaries/
     let cwd = std::env::current_dir().unwrap_or_default();
-    let dev_candidate = cwd.join("binaries").join(&sidecar_name);
-    if dev_candidate.exists() {
-        return Some(dev_candidate);
-    }
-
-    // 3) 开发模式备选：从 repo root 找 src-tauri/binaries/
-    let repo_candidate = cwd.join("src-tauri").join("binaries").join(&sidecar_name);
-    if repo_candidate.exists() {
-        return Some(repo_candidate);
+    for name in &candidates {
+        let dev_candidate = cwd.join("binaries").join(name);
+        if dev_candidate.exists() {
+            return Some(dev_candidate);
+        }
+        let repo_candidate = cwd.join("src-tauri").join("binaries").join(name);
+        if repo_candidate.exists() {
+            return Some(repo_candidate);
+        }
     }
 
     None

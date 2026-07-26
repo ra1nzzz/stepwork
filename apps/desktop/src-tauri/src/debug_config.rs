@@ -47,14 +47,24 @@ impl Default for DebugConfig {
 }
 
 /// 解析 `$STEPWORK_HOME` 目录
+///
+/// 缺省值为 `~/STEPWORK`，与 Python worker 保持一致
+/// （worker/runtime/bootstrap.py: `os.environ.get("STEPWORK_HOME") or
+/// str(Path.home() / "STEPWORK")`）——shell 与 worker 必须解析出同一个
+/// 目录，否则 debug.json / stepwork.db / logs 会分家。
+/// 空字符串视同未设置（与 Python 的 falsy 语义对齐）。
 pub fn resolve_stepwork_home() -> PathBuf {
-    std::env::var("STEPWORK_HOME")
+    if let Ok(home) = std::env::var("STEPWORK_HOME") {
+        if !home.is_empty() {
+            return PathBuf::from(home);
+        }
+    }
+    // Path.home() 等价：Windows 用 USERPROFILE，Unix 用 HOME
+    let user_home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
         .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            let mut p = std::env::temp_dir();
-            p.push("stepwork-home");
-            p
-        })
+        .unwrap_or_else(|_| std::env::temp_dir());
+    user_home.join("STEPWORK")
 }
 
 /// debug.json 配置文件路径

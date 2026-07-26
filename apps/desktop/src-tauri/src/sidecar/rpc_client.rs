@@ -64,8 +64,21 @@ impl RpcClient {
         *self.notify_handler.lock().await = Some(handler);
     }
 
-    /// Send a JSON-RPC request and await the response.
+    /// Send a JSON-RPC request and await the response (default 10s timeout).
     pub async fn call(&self, method: &str, params: Value) -> Result<Value, SidecarError> {
+        self.call_with_timeout(method, params, CALL_TIMEOUT).await
+    }
+
+    /// Send a JSON-RPC request and await the response with a caller-supplied
+    /// timeout. Long-running dispatches (e.g. `command.dispatch` for
+    /// transcribe / render jobs) should pass a generous timeout; true
+    /// cancellation is handled by the worker-side CancelJob command.
+    pub async fn call_with_timeout(
+        &self,
+        method: &str,
+        params: Value,
+        call_timeout: Duration,
+    ) -> Result<Value, SidecarError> {
         let id = Uuid::new_v4().to_string();
         let (tx, rx) = oneshot::channel();
 
@@ -90,7 +103,7 @@ impl RpcClient {
             });
         })?;
 
-        match timeout(CALL_TIMEOUT, rx).await {
+        match timeout(call_timeout, rx).await {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err(SidecarError::new(
                 SidecarErrorKind::WorkerCrashed,
@@ -298,6 +311,23 @@ mod tests {
         let ids: Vec<String> = (0..5).map(|_| Uuid::new_v4().to_string()).collect();
         let unique: std::collections::HashSet<_> = ids.iter().collect();
         assert_eq!(unique.len(), 5);
+    }
+
+    #[tokio::test]
+    async fn call_with_timeout_times_out_when_unanswered() {
+        // No server answers: a short custom timeout must expire and
+        // surface as HandshakeTimeout (same kind as the default path).
+        let (r_rx, _r_tx) = duplex(4096);
+        let (_w_rx, w_tx) = duplex(4096);
+        let rpc = RpcClient::new(w_tx, r_rx);
+
+        let result = rpc
+            .call_with_timeout("command.dispatch", json!({}), Duration::from_millis(50))
+            .await;
+        let err = result.expect_err("expected timeout error");
+        assert_eq!(err.kind, SidecarErrorKind::HandshakeTimeout);
+        // Pending entry must have been cleaned up after the timeout.
+        assert!(rpc.pending.lock().await.is_empty());
     }
 
     #[tokio::test]
