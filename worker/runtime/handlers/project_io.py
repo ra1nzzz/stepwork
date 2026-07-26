@@ -215,6 +215,54 @@ def _validate_bundle_names(zf: zipfile.ZipFile) -> None:
             )
 
 
+def _asset_source_path(local_uri: str) -> Path | None:
+    """把 asset 的 ``local_uri`` 解析为本机存在的文件路径；不存在返回 ``None``。"""
+    if not local_uri:
+        return None
+    raw = local_uri.removeprefix("file://")
+    try:
+        path = Path(raw)
+        return path if path.is_file() else None
+    except (OSError, ValueError):
+        return None
+
+
+def _restore_asset_file(
+    zf: zipfile.ZipFile,
+    asset: dict[str, Any],
+    new_project_id: str,
+    new_asset_id: str,
+) -> str:
+    """把 bundle 内的媒体本体落到本机，返回新的 ``local_uri``。
+
+    bundle 未携带媒体（旧格式，或导出时源文件已缺失）时返回原 ``local_uri``，
+    保持向后兼容 —— 同机导入仍然可用，跨机则与修复前行为一致。
+
+    安全：只用归档名的最后一段拼路径，绝不直接用归档路径落盘
+    （``_validate_bundle_names`` 已挡 ``..``，这里再收一层）。
+    """
+    original = str(asset.get("local_uri") or "")
+    arcname = asset.get("bundle_file")
+    if not arcname or not isinstance(arcname, str):
+        return original
+    try:
+        info = zf.getinfo(arcname)
+    except KeyError:
+        return original
+
+    suffix = Path(info.filename).suffix
+    dest_dir = _resolve_stepwork_home() / "assets" / new_project_id
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / f"{new_asset_id}{suffix}"
+    try:
+        with zf.open(info) as src, open(dest, "wb") as out:
+            out.write(src.read())
+    except (OSError, zipfile.BadZipFile):
+        # 落盘失败不阻塞导入：数据行仍恢复，只是素材文件缺失
+        return original
+    return str(dest)
+
+
 def _new_id(prefix: str) -> str:
     """生成 ``<prefix>_<uuid4 hex>`` 形式的新主键（与 models._uid 风格一致）。"""
     return f"{prefix}_{uuid.uuid4().hex}"
@@ -302,9 +350,30 @@ async def _handle_export(env: CommandEnvelope, deps: Deps) -> CommandResult:
     if include_jobs:
         contents["jobs.json"] = jobs
 
+    # PRD-WS-004「在另一安装实例可恢复项目」：此前 bundle 只有 JSON 行数据，
+    # assets.json 里的 local_uri 是**导出机的绝对路径**，换台机器导入后素材
+    # 全部失效。这里把媒体本体一并打进 zip 的 assets/ 目录，并在每条 asset
+    # 上记下归档内文件名（bundle_file），导入侧据此落盘并重写 local_uri。
+    media_count = 0
+    if include_assets:
+        for asset in assets:
+            src = _asset_source_path(str(asset.get("local_uri") or ""))
+            if src is None:
+                continue  # 文件缺失（已被清理/移动）：只带数据行，不阻塞导出
+            arcname = f"assets/{asset['id']}{src.suffix}"
+            asset["bundle_file"] = arcname
+            media_count += 1
+
     with zipfile.ZipFile(bundle_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for name, obj in contents.items():
             zf.writestr(name, json.dumps(obj, ensure_ascii=False, indent=2))
+        if include_assets:
+            for asset in assets:
+                # 独立命名，避免与上文构造 arcname 的 str 变量复用同名（mypy）
+                member = asset.get("bundle_file")
+                src = _asset_source_path(str(asset.get("local_uri") or ""))
+                if member and src is not None:
+                    zf.write(src, str(member))
 
     size_bytes = bundle_path.stat().st_size
     return CommandResult(
@@ -413,26 +482,32 @@ async def _handle_import(env: CommandEnvelope, deps: Deps) -> CommandResult:
         ),
     )
 
-    # 插入 assets（project_id 用新 project_id）
-    for asset in assets:
-        old_aid = str(asset["id"])
-        new_aid = id_map.get(old_aid, old_aid)
-        conn.execute(
-            "INSERT INTO source_assets (id, project_id, kind, local_uri, "
-            "original_uri, content_hash, rights_declaration, metadata, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                new_aid,
-                new_project_id,
-                str(asset["kind"]),
-                str(asset["local_uri"]),
-                asset.get("original_uri"),
-                str(asset["content_hash"]),
-                asset.get("rights_declaration"),
-                _json_col(asset.get("metadata", {})),
-                str(asset.get("created_at")),
-            ),
-        )
+    # 插入 assets（project_id 用新 project_id）。
+    # PRD-WS-004：媒体本体要在此刻落盘（新 id 到这一步才算出），而上面的
+    # `with zf` 已把 zip 关掉，故重开一次；bundle 无媒体时也无妨。
+    with zipfile.ZipFile(bundle_path, "r") as media_zf:
+        for asset in assets:
+            old_aid = str(asset["id"])
+            new_aid = id_map.get(old_aid, old_aid)
+            conn.execute(
+                "INSERT INTO source_assets (id, project_id, kind, local_uri, "
+                "original_uri, content_hash, rights_declaration, metadata, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    new_aid,
+                    new_project_id,
+                    str(asset["kind"]),
+                    # PRD-WS-004：bundle 带了媒体本体就落到本机 assets 目录并改写
+                    # local_uri；没带（旧 bundle / 导出时文件缺失）则沿用原值，
+                    # 保持向后兼容。
+                    _restore_asset_file(media_zf, asset, new_project_id, new_aid),
+                    asset.get("original_uri"),
+                    str(asset["content_hash"]),
+                    asset.get("rights_declaration"),
+                    _json_col(asset.get("metadata", {})),
+                    str(asset.get("created_at")),
+                ),
+            )
 
     # 插入 versions（拓扑序：parent 先于 child；parent_version_id 用 id_map 翻译）
     for ver in _topo_sort_versions(versions):

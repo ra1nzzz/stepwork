@@ -7,7 +7,9 @@
 
 import { useRenderStore } from "@/stores/useRenderStore";
 
-const TEMPLATES = ["vertical-caption-v1"] as const;
+// 模板清单来自后端注册表（PRD-REN-005）。此前这里硬编码只有一个模板，
+// 与创作页的模板选择不一致。共用同一份来源避免再次漂移。
+import { RENDER_TEMPLATE_FALLBACK } from "@/lib/renderTemplates";
 
 export function RenderView() {
   const sourceVersionId = useRenderStore((s) => s.sourceVersionId);
@@ -46,7 +48,7 @@ export function RenderView() {
         <label>
           模板
           <select value={template} onChange={(e) => setTemplate(e.target.value)}>
-            {TEMPLATES.map((t) => (
+            {RENDER_TEMPLATE_FALLBACK.map((t) => (
               <option key={t} value={t}>
                 {t}
               </option>

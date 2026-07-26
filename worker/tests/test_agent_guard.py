@@ -14,7 +14,8 @@ import pytest
 
 from worker.runtime import ingest
 from worker.runtime.commands.bus import (
-    _AGENT_FORBIDDEN_COMMANDS,
+    _AGENT_ALLOWED_COMMANDS,
+    _ROUTES,
     dispatch,
     is_agent_caller,
 )
@@ -64,15 +65,25 @@ def test_is_agent_caller_by_actor_type_or_source() -> None:
     assert not is_agent_caller(parse_envelope(_env("ListJobs", source="cli")))
 
 
-@pytest.mark.parametrize("command_type", sorted(_AGENT_FORBIDDEN_COMMANDS))
-async def test_agent_cannot_execute_high_risk_commands(command_type: str) -> None:
-    """§9.1 全部高风险命令对 agent 一律拒绝（不依赖 payload 合法性）。"""
+@pytest.mark.parametrize(
+    "command_type", sorted(set(_ROUTES) - _AGENT_ALLOWED_COMMANDS)
+)
+async def test_agent_cannot_execute_non_allowlisted_commands(
+    command_type: str,
+) -> None:
+    """默认拒绝：允许清单之外的每一条命令对 agent 都不可达。
+
+    参数化覆盖 _ROUTES 全量，故日后新增任何命令都自动纳入本测试 ——
+    这正是黑名单做不到的（黑名单要靠人记得同步）。
+    """
     res = await dispatch(_env(command_type, actor_type="agent", source="mcp"), _deps())
     assert res["ok"] is False
     assert "FORBIDDEN_ACTOR" in res["error"]
 
 
-@pytest.mark.parametrize("command_type", sorted(_AGENT_FORBIDDEN_COMMANDS))
+@pytest.mark.parametrize(
+    "command_type", sorted(set(_ROUTES) - _AGENT_ALLOWED_COMMANDS)
+)
 async def test_guard_triggers_on_source_even_if_actor_masquerades(
     command_type: str,
 ) -> None:
@@ -183,3 +194,65 @@ async def test_user_command_not_recorded_as_agent_activity() -> None:
 
     assert c.execute("SELECT COUNT(*) n FROM agent_tasks").fetchone()["n"] == 0
     assert c.execute("SELECT COUNT(*) n FROM agent_artifacts").fetchone()["n"] == 0
+
+
+async def test_agent_artifact_recorded_without_project_id_in_envelope() -> None:
+    """回归（R3）：MCP 信封**不带 projectId**（见 mcp/server.py），
+    handler 内部才落到默认项目。此前 agent_record 只读 env.projectId，
+    导致 agent_artifacts 因 NOT NULL + FK 永远写不进去 —— AGT-003 名义
+    达成、实际是空表。现应从产物反查项目。
+    """
+    from worker.runtime.db.connection import in_memory
+    from worker.runtime.db.migrations import run_migrations
+
+    c = in_memory()
+    run_migrations(c, _MIG_DIR)
+    deps = Deps(repos=Repos(c), ingest=ingest, ai=_FakeAI())
+
+    env = _env("AnalyzeSource", actor_type="agent", source="mcp",
+               payload={"text": "MCP 请求分析"})
+    env["projectId"] = None  # 与真实 MCP 一致
+    res = await dispatch(env, deps)
+    assert res["ok"] is True, res.get("error")
+
+    art = c.execute("SELECT * FROM agent_artifacts").fetchone()
+    assert art is not None, "MCP 路径下外部产物必须登记（此前恒为空表）"
+    assert art["trust_level"] == "external-unverified"
+    # 项目从产物反查得到，与 content_versions 一致
+    cv = c.execute(
+        "SELECT project_id FROM content_versions WHERE id=?",
+        (res["artifact_ids"][0],),
+    ).fetchone()
+    assert art["project_id"] == cv["project_id"]
+
+
+async def test_pure_read_by_agent_not_recorded_as_task() -> None:
+    """纯读（List*/Get* 且无产物）不登记，避免读噪声撑大 agent_tasks。"""
+    from worker.runtime.db.connection import in_memory
+    from worker.runtime.db.migrations import run_migrations
+
+    c = in_memory()
+    run_migrations(c, _MIG_DIR)
+    deps = Deps(repos=Repos(c), ingest=ingest)
+
+    res = await dispatch(
+        _env("ListProjects", actor_type="agent", source="mcp"), deps
+    )
+    assert res["ok"] is True
+    assert c.execute("SELECT COUNT(*) n FROM agent_tasks").fetchone()["n"] == 0
+
+
+def test_mcp_tool_commands_subset_of_allowlist() -> None:
+    """MCP 暴露的每个工具都必须在 bus 允许清单内。
+
+    两层防线必须自洽：若 MCP 注册了清单外的工具，该工具在运行时会被 bus
+    拒绝（用户看到功能坏掉）；反过来若清单放开了 MCP 没暴露的写命令，
+    则是无谓的权限面。本测试让两层的错配在 CI 就暴露。
+    """
+    from mcp.server import _TOOL_COMMANDS
+
+    exposed = set(_TOOL_COMMANDS.values())
+    assert exposed, "MCP 工具表为空（导入路径变了？）"
+    assert not exposed - _AGENT_ALLOWED_COMMANDS, (
+        f"MCP 暴露了允许清单之外的命令: {sorted(exposed - _AGENT_ALLOWED_COMMANDS)}"
+    )

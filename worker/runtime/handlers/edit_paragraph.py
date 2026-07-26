@@ -37,28 +37,38 @@ from worker.runtime.script.paragraph import (
     split_paragraphs,
 )
 
+#: 脚本正文可能落在哪个键上。两条写入路径形状不同：
+#: - ``GenerateScript`` 产出 ``{"title", "body"}``
+#: - 编辑器自动保存（``SaveScript``）产出 ``{"text", "title"}``
+#: 只认其一会导致另一条路径回退成「整条 JSON 当正文」——正文里的换行已被
+#: ``json.dumps`` 转义成字面 ``\n``，切段只得 1 段，index≥1 全部越界，
+#: index=0 更会让模型改写整条 JSON 并丢掉 title。故两个键都要认。
+_BODY_KEYS: tuple[str, ...] = ("body", "text")
 
-def _load_body(content: str) -> tuple[str, dict[str, Any] | None]:
-    """解析脚本内容 → ``(正文, JSON 包装)``。
 
-    纯文本形态返回 ``(content, None)``；``{"title","body"}`` 形态返回
-    ``(body, 原始 dict)``，便于替换后按原形态写回。
+def _load_body(content: str) -> tuple[str, dict[str, Any] | None, str | None]:
+    """解析脚本内容 → ``(正文, JSON 包装, 正文所在键)``。
+
+    纯文本形态返回 ``(content, None, None)``；JSON 形态返回正文、原始 dict
+    与正文键名，便于替换后**按原键**写回（绝不把 text 改写成 body）。
     """
     try:
         parsed = json.loads(content)
     except (TypeError, ValueError):
-        return content, None
-    if isinstance(parsed, dict) and isinstance(parsed.get("body"), str):
-        return parsed["body"], parsed
-    return content, None
+        return content, None, None
+    if isinstance(parsed, dict):
+        for key in _BODY_KEYS:
+            if isinstance(parsed.get(key), str):
+                return parsed[key], parsed, key
+    return content, None, None
 
 
-def _dump_body(body: str, wrapper: dict[str, Any] | None) -> str:
-    """按原形态写回（JSON 形态保留 title 等同级字段）。"""
-    if wrapper is None:
+def _dump_body(body: str, wrapper: dict[str, Any] | None, key: str | None) -> str:
+    """按原形态与原键写回（保留 title 等同级字段）。"""
+    if wrapper is None or key is None:
         return body
     updated = dict(wrapper)
-    updated["body"] = body
+    updated[key] = body
     return json.dumps(updated, ensure_ascii=False)
 
 
@@ -96,7 +106,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     if src is None or src.project_id != project_id:
         raise DispatchError("NOT_FOUND", f"version {version_id!r} not found")
 
-    body, wrapper = _load_body(src.content or "")
+    body, wrapper, body_key = _load_body(src.content or "")
     paragraphs = split_paragraphs(body)
     if not paragraphs:
         raise DispatchError("INVALID_ARGUMENT", "source script has no paragraphs")
@@ -129,7 +139,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         raise DispatchError("EDIT_FAILED", f"paragraph edit failed: {e}") from None
 
     new_body = replace_paragraph(body, index, new_paragraph)
-    content_str = _dump_body(new_body, wrapper)
+    content_str = _dump_body(new_body, wrapper, body_key)
 
     cv = ContentVersion(
         project_id=project_id,

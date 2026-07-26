@@ -121,9 +121,15 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
 
     # 模板必须已注册：未知模板绝不静默回退（旧行为是全部渲成同一个画面）
     try:
-        resolve_template(spec.template)
+        template = resolve_template(spec.template)
     except KeyError as e:
         raise DispatchError("INVALID_ARGUMENT", str(e)) from None
+
+    # 调用方既没给 aspect 也没给 resolution 时，用**模板自己的默认画幅**，
+    # 而不是 RenderSpec 的全局默认 9:16 —— 否则选了横屏/方图模板仍会渲成
+    # 竖屏，模板形同虚设（default_aspect 只是展示用）。
+    if aspect is None and "resolution" not in payload:
+        spec.resolution = resolve_resolution(template.default_aspect)
 
     repos.workspaces.ensure(env.workspaceId)
     project_id = env.projectId or repos.projects.get_or_create_default(

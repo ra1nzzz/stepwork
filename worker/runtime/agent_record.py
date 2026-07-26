@@ -69,6 +69,33 @@ def ensure_connection(conn: Any, protocol: str) -> str:
     return conn_id
 
 
+def _resolve_project_id(
+    conn: Any, env: CommandEnvelope, artifact_ids: list[str]
+) -> str | None:
+    """解析产物应归属的项目 id。
+
+    **不能只看 ``env.projectId``**：MCP 适配器构造信封时不带 projectId
+    （见 ``mcp/server.py`` 的 ``build_envelope``），handler 内部才用
+    ``get_or_create_default`` 落到默认项目。若只读信封字段，
+    ``agent_artifacts.project_id`` 恒为 None → 因 NOT NULL + FK 而永远
+    写不进去，PRD-AGT-003 就成了空文。故回退到从产物反查真实项目。
+    """
+    if env.projectId:
+        return str(env.projectId)
+    for artifact_id in artifact_ids:
+        row = conn.execute(
+            "SELECT project_id FROM content_versions WHERE id=?", (artifact_id,)
+        ).fetchone()
+        if row is not None and row["project_id"]:
+            return str(row["project_id"])
+    return None
+
+
+def _is_pure_read(command_type: str, artifact_ids: list[str], ok: bool) -> bool:
+    """成功且无产物的 List*/Get* 视为纯读，不登记（否则读操作噪声撑大表）。"""
+    return ok and not artifact_ids and command_type.startswith(("List", "Get"))
+
+
 def record_agent_activity(
     conn: Any,
     env: CommandEnvelope,
@@ -78,11 +105,13 @@ def record_agent_activity(
 ) -> str | None:
     """登记一次外部 Agent 调用及其产物；返回 ``agent_tasks.id``。
 
-    ``project_id`` 为空时仍记录任务（列可空），只是产物无法归属项目 ——
-    ``agent_artifacts.project_id`` 非空且有 FK，故此时跳过产物登记。
+    纯读调用不登记；产物归属项目从信封或产物反查（见 ``_resolve_project_id``）。
     """
+    if _is_pure_read(env.commandType, artifact_ids, ok):
+        return None
     try:
         now = _now()
+        project_id = _resolve_project_id(conn, env, artifact_ids)
         connection_id = ensure_connection(conn, env.source)
         actor = env.actor or {}
         task_id = f"atask_{uuid.uuid4().hex}"
@@ -97,7 +126,7 @@ def record_agent_activity(
                 f"{actor.get('type', 'agent')}:{actor.get('id', 'unknown')}",
                 connection_id,
                 None,
-                env.projectId,
+                project_id,
                 env.commandType,
                 "[]",
                 "succeeded" if ok else "failed",
@@ -110,7 +139,7 @@ def record_agent_activity(
             ),
         )
 
-        if ok and env.projectId:
+        if ok and project_id:
             for artifact_id in artifact_ids:
                 conn.execute(
                     "INSERT INTO agent_artifacts "
@@ -120,7 +149,7 @@ def record_agent_activity(
                     "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                     (
                         f"aart_{uuid.uuid4().hex}",
-                        env.projectId,
+                        project_id,
                         task_id,
                         env.commandType,
                         "1",
@@ -136,5 +165,11 @@ def record_agent_activity(
         conn.commit()
         return task_id
     except Exception:  # noqa: BLE001 - 登记失败绝不影响业务结果
+        # 回滚未提交的部分写入（如 task 已插入但 artifact 失败），避免残留
+        # 事务被后续无关 commit 顺带提交
+        try:
+            conn.rollback()
+        except Exception:
+            logger.exception("agent activity rollback failed")
         logger.exception("agent activity record failed command=%s", env.commandType)
         return None

@@ -35,6 +35,14 @@ def register_task(job_id: str, task: asyncio.Task[object]) -> None:
     TASK_REGISTRY[job_id] = task
 
 
+_USER_CANCELLED: set[int] = set()
+"""被用户显式取消的 Task id 集合（区别于 worker 关停时的批量取消）。
+
+按 ``id(task)`` 记录而非持有引用，避免阻止 Task 被回收；条目在
+:func:`clear` 时移除。
+"""
+
+
 def request(job_id: str) -> bool:
     """请求取消某任务。返回是否找到该任务（两类注册表都查）。"""
     found = False
@@ -46,12 +54,21 @@ def request(job_id: str) -> bool:
     if task is not None:
         # 已完成的 task 再 cancel 无副作用，但不算「拦下了」
         if not task.done():
+            # 先标记再 cancel：cancel 可能立刻调度，标记晚了就读不到
+            _USER_CANCELLED.add(id(task))
             task.cancel()
             found = True
     return found
 
 
+def was_user_cancelled(task: asyncio.Task[object] | None) -> bool:
+    """该 Task 是否由用户经 ``CancelJob`` 取消（而非 worker 关停）。"""
+    return task is not None and id(task) in _USER_CANCELLED
+
+
 def clear(job_id: str) -> None:
-    """清除某任务的取消登记（两类注册表都清）。"""
+    """清除某任务的取消登记（两类注册表 + 用户取消标记都清）。"""
     CANCEL_REGISTRY.pop(job_id, None)
-    TASK_REGISTRY.pop(job_id, None)
+    task = TASK_REGISTRY.pop(job_id, None)
+    if task is not None:
+        _USER_CANCELLED.discard(id(task))

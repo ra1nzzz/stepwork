@@ -279,7 +279,13 @@ export function CreateRenderView() {
                   id="template"
                   className="select"
                   value={template}
-                  onChange={(e) => setTemplate(e.target.value)}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    setTemplate(id);
+                    // 切模板时联动其默认画幅（否则选横屏模板仍渲成 9:16）
+                    const tpl = templates.find((t) => t.id === id);
+                    if (tpl?.default_aspect) setAspect(tpl.default_aspect);
+                  }}
                   disabled={isBusy || templates.length === 0}
                 >
                   {/* PRD-REN-005：选项来自后端注册表，避免 UI 有选项、

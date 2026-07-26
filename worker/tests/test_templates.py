@@ -26,6 +26,7 @@ from worker.runtime.models import (
     Workspace,
 )
 from worker.runtime.providers.renderer.ffmpeg import FFmpegRenderer
+from worker.runtime.providers.tts.local import LocalTTSProvider
 from worker.runtime.render.templates import (
     ASPECT_PRESETS,
     TEMPLATES,
@@ -122,9 +123,14 @@ def _deps() -> tuple[Deps, str, str]:
             content_hash="h",
         )
     )
-    return Deps(repos=repos, ingest=ingest, renderer=FFmpegRenderer(
-        _CapturingRunner()  # type: ignore[arg-type]
-    )), prj, cv
+    deps = Deps(
+        repos=repos,
+        ingest=ingest,
+        # 渲染路径需要 TTS 合成旁白；本地 provider 零配置可用
+        tts=LocalTTSProvider(),
+        renderer=FFmpegRenderer(_CapturingRunner()),  # type: ignore[arg-type]
+    )
+    return deps, prj, cv
 
 
 def _env(payload: dict[str, Any], prj: str) -> dict[str, Any]:
@@ -170,3 +176,69 @@ async def test_list_render_templates_command() -> None:
     assert "vertical-caption-v1" in ids
     aspects = {a["id"] for a in res["detail"]["aspects"]}
     assert aspects == set(ASPECT_PRESETS)
+
+
+async def test_template_default_aspect_applies_when_not_specified() -> None:
+    """回归（R5）：未显式给 aspect/resolution 时用**模板自己的默认画幅**。
+
+    此前一律回落 RenderSpec 的全局默认 9:16，选横屏/方图模板仍渲成竖屏，
+    模板的 default_aspect 形同虚设。
+    """
+    deps, prj, cv = _deps()
+    runner = deps.renderer.runner
+
+    res = await dispatch(
+        _env({"source_version_id": cv, "template": "landscape-caption-v1"}, prj), deps
+    )
+    assert res["ok"] is True, res.get("error")
+    assert any("1920x1080" in a for a in runner.args), runner.args
+
+
+async def test_explicit_aspect_overrides_template_default() -> None:
+    """显式 aspect 优先于模板默认（用户明确选择不被覆盖）。"""
+    deps, prj, cv = _deps()
+    runner = deps.renderer.runner
+
+    res = await dispatch(
+        _env(
+            {
+                "source_version_id": cv,
+                "template": "landscape-caption-v1",
+                "aspect": "1:1",
+            },
+            prj,
+        ),
+        deps,
+    )
+    assert res["ok"] is True, res.get("error")
+    assert any("1080x1080" in a for a in runner.args), runner.args
+
+
+async def test_vertical_template_still_defaults_to_9_16() -> None:
+    """竖屏模板的默认画幅仍是 9:16（不得回归）。"""
+    deps, prj, cv = _deps()
+    runner = deps.renderer.runner
+    res = await dispatch(
+        _env({"source_version_id": cv, "template": "vertical-caption-v1"}, prj), deps
+    )
+    assert res["ok"] is True
+    assert any("1080x1920" in a for a in runner.args), runner.args
+
+
+def test_frontend_fallback_template_list_matches_backend() -> None:
+    """前端兜底模板清单必须与后端注册表同名（否则用户会选到后端不认的模板）。
+
+    复核发现旧渲染视图硬编码只有一个模板，与后端 4 个不一致。
+    """
+    import re
+
+    ts = (
+        Path(__file__).resolve().parents[2]
+        / "apps/desktop/src/lib/renderTemplates.ts"
+    ).read_text(encoding="utf-8")
+    block = ts.split("RENDER_TEMPLATE_FALLBACK")[1]
+    frontend = set(re.findall(r'"([a-z0-9-]+)"', block))
+    assert frontend == set(TEMPLATES), (
+        f"前端兜底清单与后端注册表漂移：前端={sorted(frontend)} "
+        f"后端={sorted(TEMPLATES)}"
+    )

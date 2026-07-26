@@ -288,10 +288,21 @@ class JobRepo:
                 (to_state.value, progress, error, stage.value if stage else None, now, job_id),
             )
         else:
+            # 终态不可回退（WHERE 里带守卫，避免竞态）：取消渲染时主协程已把
+            # job 落 CANCELLED，但 ffmpeg 工作线程可能还在跑，其进度回调会
+            # 继续提交 RUNNING —— 若不守卫，终态会被改回 RUNNING，任务永久
+            # 悬挂。守卫放在 SQL 的 WHERE 而非 Python 判断，避免 check-then-act
+            # 之间的窗口。
+            placeholders = ",".join(["?"] * len(self._TERMINAL_STATES))
             self.conn.execute(
                 "UPDATE jobs SET state=?, progress=COALESCE(?,progress), "
-                "error_code=?, stage=COALESCE(?,stage), updated_at=? WHERE id=?",
-                (to_state.value, progress, error, stage.value if stage else None, now, job_id),
+                "error_code=?, stage=COALESCE(?,stage), updated_at=? "
+                f"WHERE id=? AND state NOT IN ({placeholders})",
+                (
+                    to_state.value, progress, error,
+                    stage.value if stage else None, now, job_id,
+                    *[s.value for s in self._TERMINAL_STATES],
+                ),
             )
         self.conn.commit()
         got = self.get(job_id)

@@ -287,3 +287,96 @@ async def test_cancel_interrupts_async_job_and_marks_cancelled() -> None:
     assert row["state"] == "cancelled"
     versions = c.execute("SELECT COUNT(*) n FROM content_versions").fetchone()["n"]
     assert versions == 0
+
+
+async def test_editor_saved_shape_text_key_is_supported() -> None:
+    """回归：编辑器自动保存落的是 {text,title}（不是 {title,body}）。
+
+    此前 _load_body 只认 body 键 → 整条 JSON 被当正文，其中换行已被
+    json.dumps 转义成字面 \n，切段只得 1 段：index>=1 全部越界，
+    index=0 让模型改写整条 JSON 且丢掉 title。
+    """
+    content = json.dumps({"text": _BODY, "title": "编辑器标题"}, ensure_ascii=False)
+    deps, ws, prj, cv, _ai = _setup(content)
+
+    # 切段数必须与纯文本一致（3 段），而不是退化成 1 段
+    res = await dispatch(
+        _env({"version_id": cv, "paragraph_index": 2, "operation": "rewrite"}, ws, prj),
+        deps,
+    )
+    assert res["ok"] is True, res.get("error")
+    assert res["detail"]["paragraph_count"] == 3
+
+    new_cv = deps.repos.content_versions.get(res["artifact_ids"][0])
+    assert new_cv is not None
+    parsed = json.loads(new_cv.content)
+    # 按原键写回（不能把 text 改名成 body），且标题不丢
+    assert "text" in parsed
+    assert parsed["title"] == "编辑器标题"
+    paras = split_paragraphs(parsed["text"])
+    assert paras[2] == "改写后的段落"
+    assert paras[0] == "第一段内容。\n第一段第二行。"
+
+
+async def test_editor_saved_shape_index_zero_does_not_corrupt() -> None:
+    """index=0 也只改第一段，绝不把整条 JSON 交给模型改写。"""
+    content = json.dumps({"text": _BODY, "title": "保留我"}, ensure_ascii=False)
+    deps, ws, prj, cv, ai = _setup(content)
+    res = await dispatch(
+        _env({"version_id": cv, "paragraph_index": 0, "operation": "condense"}, ws, prj),
+        deps,
+    )
+    assert res["ok"] is True
+    edited = deps.repos.content_versions.get(res["artifact_ids"][0])
+    assert edited is not None
+    parsed = json.loads(edited.content)
+    assert parsed["title"] == "保留我"
+    paras = split_paragraphs(parsed["text"])
+    assert paras[1] == "第二段内容。"
+    assert paras[2] == "第三段内容。"
+    # 送给模型的是「一段」，不是整条 JSON
+    assert "编辑器标题" not in ai.prompts[0]
+    assert '"text"' not in ai.prompts[0]
+
+
+async def test_terminal_state_cannot_be_reverted_to_running() -> None:
+    """回归（R2）：取消渲染后，ffmpeg 线程的进度回调不得把终态改回 RUNNING。
+
+    真实场景：主协程被 cancel → content_job 落 CANCELLED，但 ffmpeg 工作
+    线程还活着，其进度回调仍会提交 transition(RUNNING)。若无终态守卫，
+    任务会被改回 RUNNING 并永久悬挂。
+    """
+    from worker.runtime.jobs.engine import create_job, transition
+    from worker.runtime.models import JobState
+
+    c = in_memory()
+    run_migrations(c, _MIG_DIR)
+    repos = Repos(c)
+    repos.workspaces.ensure("ws-term")
+    job = create_job(repos, "render_source", {})
+
+    transition(repos, job.id, JobState.RUNNING, progress=0.3)
+    transition(repos, job.id, JobState.CANCELLED)
+    # 迟到的进度回调
+    after = transition(repos, job.id, JobState.RUNNING, progress=0.9)
+
+    assert after.state == JobState.CANCELLED, "终态被迟到的进度回调改回了 RUNNING"
+    row = c.execute("SELECT state FROM jobs WHERE id=?", (job.id,)).fetchone()
+    assert row["state"] == "cancelled"
+
+
+async def test_terminal_state_guard_allows_normal_progress() -> None:
+    """守卫不得误伤正常进度推进（非终态 → RUNNING 仍可更新）。"""
+    from worker.runtime.jobs.engine import create_job, transition
+    from worker.runtime.models import JobState
+
+    c = in_memory()
+    run_migrations(c, _MIG_DIR)
+    repos = Repos(c)
+    repos.workspaces.ensure("ws-ok")
+    job = create_job(repos, "render_source", {})
+
+    transition(repos, job.id, JobState.RUNNING, progress=0.1)
+    updated = transition(repos, job.id, JobState.RUNNING, progress=0.8)
+    assert updated.state == JobState.RUNNING
+    assert updated.progress == 0.8

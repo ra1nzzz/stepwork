@@ -94,37 +94,52 @@ _ALLOWED_CONFIG_ACTORS: tuple[str, ...] = ("user", "desktop")
 # 同一条 dispatch，写命令会立刻可达且无告警。故在此再设一道按 commandType
 # 的黑名单，对 agent 类调用方一律拒绝，与工具集是否注册无关。
 #
-# 映射 §9.1 七项（未列出的 = 系统中尚无对应能力）：
-#   发布            → ExportBundle（写出导出包到磁盘）
-#   删除项目或资产  → DeleteAsset / ArchiveWorkspace
-#   覆盖原文件      → RestoreWorkspace / ImportProject（覆盖库与项目数据）
-#   向外部上传原素材→ TranscribeSource（cloud ASR 会上传媒体本体）
-#   安装插件        → InstallPlugin / EnablePlugin / DisablePlugin
-#   读取平台凭据    → GetConfig 已是掩码视图，无需拉黑
-#   使用高费用模型  → AnalyzeSource 按 PRD-AGT-002「外部 Agent 可发起分析」
-#                     显式允许，费用由 audit 记录；预算上限属后续能力
+# 采用**默认拒绝的允许清单**而非黑名单：PRD 该节标题就是「默认禁止」，
+# 且黑名单有结构性缺陷 —— 每加一个新写命令都得记得同步拉黑，漏一个就是
+# 静默的权限放大（复核确实发现漏了 ExportProject / BackupWorkspace /
+# ImportSource / SaveScript / EditParagraph / CreateRenderJob 等）。
+# 允许清单则相反：新命令**默认就是禁止的**，要放开必须显式加进来。
+#
+# 清单内容 = PRD-AGT-002 明示的「读取项目、发起分析和查询任务」：
+# 全部只读查询 + AnalyzeSource。其余一律拒绝，包括计费的 GenerateTopic /
+# GenerateScript / CreateRenderJob 与所有写命令。
 #
 # 注：UpdateConfig 另由 _ALLOWED_CONFIG_ACTORS 拦截（更严：仅 user/desktop）。
 # ---------------------------------------------------------------------------
-_AGENT_FORBIDDEN_COMMANDS: frozenset[str] = frozenset(
+_AGENT_ALLOWED_COMMANDS: frozenset[str] = frozenset(
     {
-        "ExportBundle",
-        "DeleteAsset",
-        "ArchiveWorkspace",
-        "RestoreWorkspace",
-        "ImportProject",
-        "TranscribeSource",
-        "InstallPlugin",
-        "EnablePlugin",
-        "DisablePlugin",
-        # 手动清理会真实删除磁盘文件，归入「删除资产」类
-        "RunCleanup",
+        # 读项目 / 查任务（PRD-AGT-002 明示的 MCP 能力）
+        "ListProjects",
+        "GetProject",
+        "GetJobStatus",
+        "ListJobs",
+        "ListContentVersions",
+        "GetContentVersion",
+        "ListSourceAssets",
+        "GetSourceAsset",
+        "ListBrandProfiles",
+        "ListWorkspaces",
+        "ListPlatformVariants",
+        "ListRenderTemplates",
+        "ListAuditEvents",
+        "GetProvenance",
+        "ListAgentTasks",
+        "ListAgentArtifacts",
+        "GetAgentTask",
+        "ListPlugins",
+        "GetPluginManifest",
+        "PreviewPluginManifest",  # 只读预览，不写库
+        # 读配置：GetConfig 返回掩码视图（``••••`` + hasKey），无密钥外泄
+        "GetConfig",
+        # 发起分析：PRD-AGT-002 唯一显式豁免的写命令（费用由 audit 记录）
+        "AnalyzeSource",
     }
 )
 
 # 视为「外部 Agent」的调用方特征：actor.type 或 source 任一命中即算。
-_AGENT_ACTOR_TYPES: frozenset[str] = frozenset({"agent"})
-_AGENT_SOURCES: frozenset[str] = frozenset({"mcp", "a2a", "acp"})
+# plugin 一并纳入：插件适配器若复用同一条 dispatch，同样不该直达写命令。
+_AGENT_ACTOR_TYPES: frozenset[str] = frozenset({"agent", "plugin"})
+_AGENT_SOURCES: frozenset[str] = frozenset({"mcp", "a2a", "acp", "plugin"})
 
 
 def is_agent_caller(env: CommandEnvelope) -> bool:
@@ -164,14 +179,14 @@ async def dispatch(raw: dict[str, Any], deps: Any) -> dict[str, Any]:
             error=f"unknown commandType: {env.commandType}",
         ).model_dump()
 
-    # PRD §9.1：外部 Agent 默认不得直接执行发布/删除/覆盖/外传/装插件类命令。
+    # PRD §9.1：外部 Agent 默认禁止直接执行，只放行允许清单内的命令。
     # 与 MCP 工具集边界互为冗余——即便某天工具被误注册，这里仍然拒绝。
-    if env.commandType in _AGENT_FORBIDDEN_COMMANDS and is_agent_caller(env):
+    if is_agent_caller(env) and env.commandType not in _AGENT_ALLOWED_COMMANDS:
         return CommandResult(
             ok=False, commandId=env.commandId,
             error=(
-                f"FORBIDDEN_ACTOR: {env.commandType} 属 PRD §9.1 高风险操作，"
-                f"外部 Agent 不可直接执行，需由用户在桌面端确认后发起"
+                f"FORBIDDEN_ACTOR: {env.commandType} 不在外部 Agent 允许清单内"
+                f"（PRD §9.1 默认禁止直接执行），需由用户在桌面端确认后发起"
             ),
         ).model_dump()
 
@@ -190,12 +205,22 @@ async def dispatch(raw: dict[str, Any], deps: Any) -> dict[str, Any]:
     try:
         result: CommandResult = await handler(env, deps)
     except asyncio.CancelledError:
-        # 用户取消（CancelJob 打断了本任务）。必须在此边界转成正常结果：
-        # CancelledError 是 BaseException，若继续向上抛，RPC 循环不会写回
-        # 任何响应帧，调用方只能一直等到超时（Rust 侧 30 分钟）。
-        # job 终态已由 content_job 落为 CANCELLED。
+        # 取消。必须在此边界转成正常结果：CancelledError 是 BaseException，
+        # 若继续向上抛，RPC 循环不会写回任何响应帧，调用方只能一直等到超时
+        # （Rust 侧 30 分钟）。job 终态已由 content_job 落为 CANCELLED。
+        #
+        # 区分两种取消：CancelJob 会先把 job 登记为「用户请求取消」；
+        # worker 关停时批量 cancel in-flight 任务则没有这个登记，若一律
+        # 报「已被用户取消」会误导用户。
+        from worker.runtime.jobs.cancel import was_user_cancelled
+
+        reason = (
+            "任务已被用户取消"
+            if was_user_cancelled(asyncio.current_task())
+            else "任务因 worker 关停而中止"
+        )
         return CommandResult(
-            ok=False, commandId=env.commandId, error="CANCELLED: 任务已被用户取消"
+            ok=False, commandId=env.commandId, error=f"CANCELLED: {reason}"
         ).model_dump()
     except DispatchError as e:
         return CommandResult(
