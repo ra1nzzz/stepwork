@@ -81,7 +81,11 @@
         "ListApprovalRequests",
         "DecideApprovalRequest",
         "SetProjectTags",
-        "DiffContentVersions"
+        "DiffContentVersions",
+        "ImportBrandScript",
+        "ListBrandScripts",
+        "DeleteBrandScript",
+        "RecordPreference"
       ],
       "description": "Command type identifier. See SYSTEM_SPEC §7.2 for the canonical list."
     },

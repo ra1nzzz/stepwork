@@ -70,6 +70,11 @@ _ROUTES: dict[str, str] = {
     "UpdateBrandProfile": "worker.runtime.handlers.brand",
     "ListBrandProfiles": "worker.runtime.handlers.brand",
     "SetProjectBrandProfile": "worker.runtime.handlers.brand",
+    # PRD-BRD-003 历史脚本（风格参考）/ PRD-BRD-004 偏好记录
+    "ImportBrandScript": "worker.runtime.handlers.brand",
+    "ListBrandScripts": "worker.runtime.handlers.brand",
+    "DeleteBrandScript": "worker.runtime.handlers.brand",
+    "RecordPreference": "worker.runtime.handlers.brand",
     "SaveAnalysis": "worker.runtime.handlers.save_analysis",
     "ListContentVersions": "worker.runtime.handlers.queries",
     "GetContentVersion": "worker.runtime.handlers.queries",

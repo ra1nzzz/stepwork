@@ -151,7 +151,11 @@ export interface CommandEnvelope {
     | "ListApprovalRequests"
     | "DecideApprovalRequest"
     | "SetProjectTags"
-    | "DiffContentVersions";
+    | "DiffContentVersions"
+    | "ImportBrandScript"
+    | "ListBrandScripts"
+    | "DeleteBrandScript"
+    | "RecordPreference";
   schemaVersion: string;
   actor: { type: "user" | "agent" | "plugin" | "system" | "desktop"; id: string };
   source: string;

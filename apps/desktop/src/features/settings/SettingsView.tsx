@@ -389,6 +389,70 @@ function BrandProfilesPanel() {
   /** 正在编辑的档案 id；null = 新建；undefined = 未打开表单 */
   const [editingId, setEditingId] = useState<string | null | undefined>(undefined);
   const [form, setForm] = useState<BrandProfileForm>(emptyBrandForm());
+  // PRD-BRD-003：历史脚本（风格参考）
+  const [scriptsFor, setScriptsFor] = useState<string | null>(null);
+  const [scripts, setScripts] = useState<
+    { id: string; title: string; content: string }[]
+  >([]);
+  const [scriptTitle, setScriptTitle] = useState("");
+  const [scriptBody, setScriptBody] = useState("");
+  const [scriptKeyword, setScriptKeyword] = useState("");
+  const [scriptBusy, setScriptBusy] = useState(false);
+
+  async function loadScripts(profileId: string, keyword = "") {
+    const env = buildEnvelope("ListBrandScripts", getWorkspaceId(), null, {
+      profileId,
+      ...(keyword ? { keyword } : {}),
+    });
+    const res = await dispatchCommand(env);
+    if (res.ok) {
+      const detail = (res.detail ?? {}) as {
+        scripts?: { id: string; title: string; content: string }[];
+      };
+      setScripts(detail.scripts ?? []);
+    }
+  }
+
+  async function openScripts(profileId: string) {
+    if (scriptsFor === profileId) {
+      setScriptsFor(null);
+      return;
+    }
+    setScriptsFor(profileId);
+    setScriptKeyword("");
+    await loadScripts(profileId);
+  }
+
+  async function importScript(profileId: string) {
+    setScriptBusy(true);
+    try {
+      const env = buildEnvelope("ImportBrandScript", getWorkspaceId(), null, {
+        profileId,
+        title: scriptTitle,
+        content: scriptBody,
+        source: "manual",
+      });
+      const res = await dispatchCommand(env);
+      if (!res.ok) {
+        setError(res.error ?? "导入历史脚本失败");
+        return;
+      }
+      setScriptTitle("");
+      setScriptBody("");
+      await loadScripts(profileId, scriptKeyword);
+    } finally {
+      setScriptBusy(false);
+    }
+  }
+
+  async function deleteScript(scriptId: string, profileId: string) {
+    const env = buildEnvelope("DeleteBrandScript", getWorkspaceId(), null, {
+      scriptId,
+    });
+    const res = await dispatchCommand(env);
+    if (!res.ok) setError(res.error ?? "删除失败");
+    await loadScripts(profileId, scriptKeyword);
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -480,14 +544,90 @@ function BrandProfilesPanel() {
                         {p.audience ? ` · 受众：${p.audience}` : ""}
                       </div>
                     </div>
-                    <button
-                      className="btn small ghost"
-                      type="button"
-                      onClick={() => startEdit(p)}
-                    >
-                      编辑
-                    </button>
+                    <div className="inline-actions">
+                      <button
+                        className="btn small ghost"
+                        type="button"
+                        onClick={() => startEdit(p)}
+                      >
+                        编辑
+                      </button>
+                      {/* PRD-BRD-003：导入历史脚本作为风格参考 */}
+                      <button
+                        className="btn small ghost"
+                        type="button"
+                        onClick={() => void openScripts(p.id)}
+                      >
+                        历史脚本
+                      </button>
+                    </div>
                   </div>
+                  {scriptsFor === p.id && (
+                    <div className="section-gap">
+                      <p className="panel-meta" style={{ marginTop: 0 }}>
+                        导入的历史脚本会作为**风格范文**注入生成提示词
+                        （最多 3 篇，各截取开头部分）。
+                      </p>
+                      <div className="form-group">
+                        <input
+                          className="field"
+                          placeholder="脚本标题（可空）"
+                          value={scriptTitle}
+                          onChange={(e) => setScriptTitle(e.target.value)}
+                        />
+                        <textarea
+                          className="field"
+                          rows={4}
+                          placeholder="粘贴历史脚本正文"
+                          value={scriptBody}
+                          onChange={(e) => setScriptBody(e.target.value)}
+                          style={{ width: "100%", marginTop: 6 }}
+                        />
+                        <div className="inline-actions" style={{ marginTop: 6 }}>
+                          <button
+                            className="btn small primary"
+                            type="button"
+                            disabled={!scriptBody.trim() || scriptBusy}
+                            onClick={() => void importScript(p.id)}
+                          >
+                            {scriptBusy ? "导入中…" : "导入为范文"}
+                          </button>
+                          <input
+                            className="field"
+                            placeholder="检索历史脚本"
+                            value={scriptKeyword}
+                            onChange={(e) => {
+                              setScriptKeyword(e.target.value);
+                              void loadScripts(p.id, e.target.value);
+                            }}
+                            style={{ maxWidth: 200 }}
+                          />
+                        </div>
+                      </div>
+                      {scripts.length === 0 ? (
+                        <p className="panel-meta">尚无历史脚本。</p>
+                      ) : (
+                        <ul className="report-list">
+                          {scripts.map((sc) => (
+                            <li key={sc.id}>
+                              <strong>{sc.title || "无标题"}</strong>
+                              {" · "}
+                              {sc.content.slice(0, 40)}
+                              {sc.content.length > 40 ? "…" : ""}
+                              <button
+                                className="btn small ghost"
+                                type="button"
+                                style={{ marginLeft: 8 }}
+                                onClick={() => void deleteScript(sc.id, p.id)}
+                              >
+                                删除
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
                   {(p.contentPillars?.length > 0 || p.bannedExpressions?.length > 0) && (
                     <p className="panel-meta" style={{ margin: "6px 0 0" }}>
                       {p.contentPillars?.length > 0

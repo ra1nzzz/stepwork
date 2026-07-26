@@ -407,3 +407,176 @@ async def test_generate_script_can_opt_out_of_brand_profile() -> None:
     )
     assert res["ok"] is True, res.get("error")
     assert "克制第一人称" not in ai.prompts[-1]
+
+
+# ----- PRD-BRD-003 历史脚本（风格参考）/ PRD-BRD-004 偏好记录 -----
+
+
+async def test_import_and_list_brand_scripts() -> None:
+    """PRD-BRD-003：导入历史脚本并可检索。"""
+    deps = _deps(_RecordingAIProvider())
+    ws_id, _prj_id, _cv_id, profile_id = await _setup_linked_project(deps)
+
+    imported = await dispatch(
+        _env(
+            "ImportBrandScript",
+            {
+                "profileId": profile_id,
+                "title": "旧脚本一",
+                "content": "这是我以前写的口播脚本，风格克制。",
+                "source": "manual",
+            },
+            workspace_id=ws_id,
+        ),
+        deps,
+    )
+    assert imported["ok"] is True, imported.get("error")
+    assert imported["artifact_ids"]
+
+    listed = await dispatch(
+        _env("ListBrandScripts", {"profileId": profile_id}, workspace_id=ws_id),
+        deps,
+    )
+    assert listed["ok"] is True
+    assert listed["detail"]["count"] == 1
+    assert listed["detail"]["scripts"][0]["title"] == "旧脚本一"
+
+    # 检索：命中与不命中
+    hit = await dispatch(
+        _env(
+            "ListBrandScripts",
+            {"profileId": profile_id, "keyword": "克制"},
+            workspace_id=ws_id,
+        ),
+        deps,
+    )
+    assert hit["detail"]["count"] == 1
+    miss = await dispatch(
+        _env(
+            "ListBrandScripts",
+            {"profileId": profile_id, "keyword": "红烧肉"},
+            workspace_id=ws_id,
+        ),
+        deps,
+    )
+    assert miss["detail"]["count"] == 0
+
+
+async def test_reference_scripts_injected_into_prompt() -> None:
+    """PRD-BRD-003「用于风格参考」：范文必须真的进 prompt。"""
+    ai = _RecordingAIProvider()
+    deps = _deps(ai)
+    ws_id, prj_id, cv_id, profile_id = await _setup_linked_project(deps)
+    await dispatch(
+        _env(
+            "ImportBrandScript",
+            {
+                "profileId": profile_id,
+                "title": "范文标题",
+                "content": "范文正文特征串-ABC",
+            },
+            workspace_id=ws_id,
+        ),
+        deps,
+    )
+
+    res = await dispatch(
+        _env(
+            "GenerateTopic",
+            {"source_version_id": cv_id, "count": 3},
+            workspace_id=ws_id,
+            project_id=prj_id,
+        ),
+        deps,
+    )
+    assert res["ok"] is True, res.get("error")
+    prompt = ai.prompts[-1]
+    assert "范文正文特征串-ABC" in prompt, "历史脚本范文应注入 prompt"
+    assert "模仿其文风" in prompt
+    assert "不要照抄内容" in prompt
+
+
+async def test_delete_brand_script() -> None:
+    deps = _deps(_RecordingAIProvider())
+    ws_id, _prj, _cv, profile_id = await _setup_linked_project(deps)
+    imported = await dispatch(
+        _env(
+            "ImportBrandScript",
+            {"profileId": profile_id, "content": "待删除"},
+            workspace_id=ws_id,
+        ),
+        deps,
+    )
+    script_id = imported["artifact_ids"][0]
+
+    deleted = await dispatch(
+        _env("DeleteBrandScript", {"scriptId": script_id}, workspace_id=ws_id), deps
+    )
+    assert deleted["ok"] is True
+
+    listed = await dispatch(
+        _env("ListBrandScripts", {"profileId": profile_id}, workspace_id=ws_id), deps
+    )
+    assert listed["detail"]["count"] == 0
+
+    again = await dispatch(
+        _env("DeleteBrandScript", {"scriptId": script_id}, workspace_id=ws_id), deps
+    )
+    assert again["ok"] is False
+    assert "NOT_FOUND" in again["error"]
+
+
+async def test_import_brand_script_validates() -> None:
+    deps = _deps(_RecordingAIProvider())
+    ws_id, _prj, _cv, profile_id = await _setup_linked_project(deps)
+
+    no_content = await dispatch(
+        _env("ImportBrandScript", {"profileId": profile_id}, workspace_id=ws_id), deps
+    )
+    assert no_content["ok"] is False
+    assert "INVALID_ARGUMENT" in no_content["error"]
+
+    bad_profile = await dispatch(
+        _env(
+            "ImportBrandScript",
+            {"profileId": "bp_nope", "content": "x"},
+            workspace_id=ws_id,
+        ),
+        deps,
+    )
+    assert bad_profile["ok"] is False
+    assert "NOT_FOUND" in bad_profile["error"]
+
+
+async def test_record_preference_events() -> None:
+    """PRD-BRD-004：记录采纳/修改/丢弃（此前完全没有记录）。"""
+    deps = _deps(_RecordingAIProvider())
+    ws_id, prj_id, _cv, profile_id = await _setup_linked_project(deps)
+
+    for action in ("accepted", "modified", "discarded"):
+        res = await dispatch(
+            _env(
+                "RecordPreference",
+                {"profileId": profile_id, "action": action, "versionId": "cv-x"},
+                workspace_id=ws_id,
+                project_id=prj_id,
+            ),
+            deps,
+        )
+        assert res["ok"] is True, res.get("error")
+
+    rows = deps.repos.conn.execute(
+        "SELECT action FROM user_preference_events ORDER BY created_at"
+    ).fetchall()
+    assert {r["action"] for r in rows} == {"accepted", "modified", "discarded"}
+
+    bad = await dispatch(
+        _env(
+            "RecordPreference",
+            {"profileId": profile_id, "action": "loved"},
+            workspace_id=ws_id,
+        ),
+        deps,
+    )
+    assert bad["ok"] is False
+    assert "INVALID_ARGUMENT" in bad["error"]

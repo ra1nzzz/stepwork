@@ -95,7 +95,37 @@ def load_project_brand(repos: Any, project_id: str) -> dict[str, Any] | None:
     profile_row = _get_profile_row(repos.conn, str(row["brand_profile_id"]))
     if profile_row is None:
         return None
-    return _row_to_profile(profile_row)
+    profile = _row_to_profile(profile_row)
+    # PRD-BRD-003：历史脚本随画像一并加载，供 prompt 做风格参考
+    profile["referenceScripts"] = load_reference_scripts(repos.conn, profile["id"])
+    return profile
+
+
+#: PRD-BRD-004 偏好动作：采纳 / 修改 / 丢弃
+_PREFERENCE_ACTIONS: frozenset[str] = frozenset({"accepted", "modified", "discarded"})
+
+#: prompt 里最多注入几篇范文、每篇截多长（防止把上下文撑爆）
+_MAX_PROMPT_SAMPLES = 3
+_SAMPLE_EXCERPT_CHARS = 600
+
+
+def load_reference_scripts(conn: Any, profile_id: str) -> list[dict[str, Any]]:
+    """取某画像下的历史脚本范文（最近优先）。"""
+    rows = conn.execute(
+        "SELECT id, title, content, source, created_at FROM brand_reference_scripts "
+        "WHERE brand_profile_id=? ORDER BY created_at DESC",
+        (profile_id,),
+    ).fetchall()
+    return [
+        {
+            "id": str(r["id"]),
+            "title": str(r["title"] or ""),
+            "content": str(r["content"] or ""),
+            "source": r["source"],
+            "created_at": str(r["created_at"]),
+        }
+        for r in rows
+    ]
 
 
 def format_brand_prompt_block(profile: dict[str, Any]) -> str:
@@ -113,6 +143,17 @@ def format_brand_prompt_block(profile: dict[str, Any]) -> str:
     banned = profile.get("bannedExpressions") or []
     if banned:
         lines.append(f"- 不得使用以下表达：{'、'.join(banned)}")
+    # PRD-BRD-003「用于风格参考」：范文比标量描述更能传达文风。此前只注入
+    # 5 个标量字段、不含任何范文，「风格参考」无从谈起。
+    samples = profile.get("referenceScripts") or []
+    if samples:
+        lines.append(
+            "\n以下是该账号的历史脚本片段，请模仿其文风与节奏（不要照抄内容）："
+        )
+        for sample in samples[:_MAX_PROMPT_SAMPLES]:
+            excerpt = str(sample.get("content") or "")[:_SAMPLE_EXCERPT_CHARS]
+            title = sample.get("title") or "无标题"
+            lines.append(f"---\n【{title}】\n{excerpt}")
     return "\n".join(lines)
 
 
@@ -232,6 +273,105 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         return CommandResult(
             ok=True, commandId=env.commandId,
             detail={"project_id": project_id, "brand_profile_id": profile_id},
+        )
+
+    if env.commandType == "ImportBrandScript":
+        # PRD-BRD-003「导入历史脚本」
+        ref_profile_id = p.get("profileId") or p.get("profile_id")
+        content = p.get("content")
+        if not ref_profile_id:
+            raise DispatchError("INVALID_ARGUMENT", "profileId required")
+        if not content or not isinstance(content, str) or not content.strip():
+            raise DispatchError("INVALID_ARGUMENT", "content required")
+        if _get_profile_row(repos.conn, str(ref_profile_id)) is None:
+            raise DispatchError(
+                "NOT_FOUND", f"brand profile {ref_profile_id!r} not found"
+            )
+        script_id = f"brs_{uuid.uuid4().hex}"
+        repos.conn.execute(
+            "INSERT INTO brand_reference_scripts "
+            "(id, brand_profile_id, title, content, source, created_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (
+                script_id,
+                str(ref_profile_id),
+                str(p.get("title") or ""),
+                content.strip(),
+                p.get("source"),
+                _now(),
+            ),
+        )
+        repos.conn.commit()
+        return CommandResult(
+            ok=True,
+            commandId=env.commandId,
+            artifact_ids=[script_id],
+            detail={"script_id": script_id, "profile_id": str(ref_profile_id)},
+        )
+
+    if env.commandType == "ListBrandScripts":
+        # PRD-BRD-003「可检索」：支持 keyword 过滤（标题 + 正文）
+        list_profile_id = p.get("profileId") or p.get("profile_id")
+        if not list_profile_id:
+            raise DispatchError("INVALID_ARGUMENT", "profileId required")
+        scripts = load_reference_scripts(repos.conn, str(list_profile_id))
+        keyword = p.get("keyword")
+        if keyword:
+            if not isinstance(keyword, str):
+                raise DispatchError("INVALID_ARGUMENT", "keyword must be a string")
+            needle = keyword.lower()
+            scripts = [
+                sc
+                for sc in scripts
+                if needle in sc["title"].lower() or needle in sc["content"].lower()
+            ]
+        return CommandResult(
+            ok=True,
+            commandId=env.commandId,
+            detail={"scripts": scripts, "count": len(scripts)},
+        )
+
+    if env.commandType == "DeleteBrandScript":
+        script_ref = p.get("scriptId") or p.get("script_id")
+        if not script_ref:
+            raise DispatchError("INVALID_ARGUMENT", "scriptId required")
+        cur = repos.conn.execute(
+            "DELETE FROM brand_reference_scripts WHERE id=?", (str(script_ref),)
+        )
+        repos.conn.commit()
+        if cur.rowcount == 0:
+            raise DispatchError("NOT_FOUND", f"script {script_ref!r} not found")
+        return CommandResult(
+            ok=True, commandId=env.commandId, detail={"deleted": str(script_ref)}
+        )
+
+    if env.commandType == "RecordPreference":
+        # PRD-BRD-004（P2）「记录用户接受、修改和删除偏好」：此前对 AI 产出的
+        # 采纳/改写/丢弃完全没有记录（audit_events 只记 provider 调用）。
+        action = str(p.get("action") or "")
+        if action not in _PREFERENCE_ACTIONS:
+            raise DispatchError(
+                "INVALID_ARGUMENT",
+                f"action must be one of {sorted(_PREFERENCE_ACTIONS)}",
+            )
+        event_id = f"pref_{uuid.uuid4().hex}"
+        repos.conn.execute(
+            "INSERT INTO user_preference_events "
+            "(id, brand_profile_id, project_id, version_id, action, detail, "
+            "created_at) VALUES (?,?,?,?,?,?,?)",
+            (
+                event_id,
+                p.get("profileId") or p.get("profile_id"),
+                env.projectId,
+                p.get("versionId") or p.get("version_id"),
+                action,
+                json.dumps(p.get("detail") or {}, ensure_ascii=False),
+                _now(),
+            ),
+        )
+        repos.conn.commit()
+        return CommandResult(
+            ok=True, commandId=env.commandId, detail={"event_id": event_id}
         )
 
     raise DispatchError(
