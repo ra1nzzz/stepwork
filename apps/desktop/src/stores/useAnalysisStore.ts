@@ -17,6 +17,7 @@ import { buildEnvelope, dispatchCommand } from "@/lib/tauri";
 import { useSettingsStore } from "@/stores/useSettingsStore";
 import { useViewStore } from "@/stores/useViewStore";
 import type {
+  AnalysisMode,
   AnalysisReport,
   AnalysisReportData,
   AnalysisStatus,
@@ -36,7 +37,15 @@ interface AnalysisStoreState {
   isBusy: boolean;
   isSaving: boolean;
   error: string | null;
-  analyze: (transcriptVersionId: string, brand?: string) => Promise<void>;
+  /**
+   * 分析转写稿。mode='precise'（PRD-ANA-003）在转写文本之上叠加场景切分/
+   * 关键帧，需提供媒体源 assetId；ffmpeg 不可用时后端回 UNAVAILABLE。
+   */
+  analyze: (
+    transcriptVersionId: string,
+    brand?: string,
+    opts?: { mode?: AnalysisMode; assetId?: string | null },
+  ) => Promise<void>;
   /** 编辑保存：以当前报告为 parent 生成新的 analysis 版本（绝不覆盖） */
   saveAnalysis: (data: AnalysisReportData) => Promise<void>;
   reset: () => void;
@@ -45,6 +54,8 @@ interface AnalysisStoreState {
 function blankReport(): AnalysisReport {
   return {
     status: "pending" as AnalysisStatus,
+    mode: "quick" as AnalysisMode,
+    sceneCount: 0,
     versionId: null,
     data: null,
     invocation: null,
@@ -126,7 +137,8 @@ export const useAnalysisStore = create<AnalysisStoreState>((set, get) => ({
   isSaving: false,
   error: null,
 
-  analyze: async (transcriptVersionId, brand) => {
+  analyze: async (transcriptVersionId, brand, opts) => {
+    const mode: AnalysisMode = opts?.mode ?? "quick";
     const cfg = readProviderFromSettings();
     // ollama 一般不要求 key；cloud / openai-compatible 需要
     if (cfg.kind !== "ollama" && !cfg.api_key) {
@@ -135,7 +147,7 @@ export const useAnalysisStore = create<AnalysisStoreState>((set, get) => ({
     }
     const report = blankReport();
     set({
-      reports: [...get().reports, { ...report, provider: cfg.kind }],
+      reports: [...get().reports, { ...report, mode, provider: cfg.kind }],
       isBusy: true,
       error: null,
     });
@@ -150,7 +162,7 @@ export const useAnalysisStore = create<AnalysisStoreState>((set, get) => ({
       }));
 
     try {
-      const env = buildEnvelope("AnalyzeSource", WORKSPACE, currentProjectId(), {
+      const payload: Record<string, unknown> = {
         transcript_version_id: transcriptVersionId,
         brand: brand ?? null,
         provider: {
@@ -159,7 +171,18 @@ export const useAnalysisStore = create<AnalysisStoreState>((set, get) => ({
           api_key: cfg.api_key,
           model: cfg.model,
         },
-      });
+      };
+      // 精确模式才下发 mode + 媒体源，quick 信封保持与旧版一致
+      if (mode === "precise") {
+        payload.mode = "precise";
+        if (opts?.assetId) payload.asset_id = opts.assetId;
+      }
+      const env = buildEnvelope(
+        "AnalyzeSource",
+        WORKSPACE,
+        currentProjectId(),
+        payload,
+      );
       const res = await dispatchCommand(env);
       if (!res.ok) {
         throw new Error(res.error ?? "ANALYSIS_FAILED");
@@ -174,6 +197,7 @@ export const useAnalysisStore = create<AnalysisStoreState>((set, get) => ({
       }
       apply({
         status: "succeeded" as AnalysisStatus,
+        sceneCount: (detail.scene_count as number | undefined) ?? 0,
         versionId,
         data,
         invocation:

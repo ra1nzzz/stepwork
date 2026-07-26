@@ -679,3 +679,57 @@ def test_analysis_save_rejects_bad_file(
     arr = tmp_path / "arr.json"
     arr.write_text("[1, 2]", encoding="utf-8")
     assert main(["analysis", "save", "--file", str(arr)]) == 2
+
+
+# ----- Tranche 3：analyze --mode（PRD-ANA-003 精确分析） -----
+
+
+def test_analyze_quick_is_default_and_omits_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True, "detail": {}})
+    rc = main(["analyze", "--text", "转写内容"])
+
+    assert rc == 0
+    env = captured["env"]
+    assert env["commandType"] == "AnalyzeSource"
+    # 默认 quick：信封与旧版一致，不下发 mode/媒体源
+    assert env["payload"] == {"text": "转写内容"}
+
+
+def test_analyze_precise_with_asset_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True, "detail": {}})
+    rc = main(
+        ["analyze", "--text", "转写内容", "--mode", "precise", "--asset-id", "as-1"]
+    )
+
+    assert rc == 0
+    assert captured["env"]["payload"] == {
+        "text": "转写内容",
+        "mode": "precise",
+        "asset_id": "as-1",
+    }
+
+
+def test_analyze_precise_with_media_uri(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True, "detail": {}})
+    rc = main(
+        [
+            "analyze", "--source-id", "cv-1",
+            "--mode", "precise",
+            "--media-uri", "file:///tmp/v.mp4",
+        ]
+    )
+
+    assert rc == 0
+    assert captured["env"]["payload"] == {
+        "transcript_version_id": "cv-1",
+        "mode": "precise",
+        "media_uri": "file:///tmp/v.mp4",
+    }
+
+
+def test_analyze_rejects_unknown_mode() -> None:
+    with pytest.raises(SystemExit) as ei:
+        main(["analyze", "--text", "x", "--mode", "ultra"])
+    assert ei.value.code == 2

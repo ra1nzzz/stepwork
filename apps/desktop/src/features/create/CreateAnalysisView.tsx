@@ -25,6 +25,7 @@ import { useViewStore } from "@/stores/useViewStore";
 import { buildEnvelope, dispatchCommand, getWorkspaceId } from "@/lib/tauri";
 import { estimateCost, formatCost, useProviderInfo } from "@/lib/useProviderInfo";
 import type {
+  AnalysisMode,
   AnalysisReportData,
   ContentVersionDetail,
   ContentVersionSummary,
@@ -165,6 +166,9 @@ export function CreateAnalysisView() {
   const [transcriptText, setTranscriptText] = useState<string | null>(null);
   const [transcriptExpanded, setTranscriptExpanded] = useState(false);
 
+  // 分析模式（PRD 8.2「选择快速或精确分析」）：精确需媒体源 + 可用 ffmpeg
+  const [analysisMode, setAnalysisMode] = useState<AnalysisMode>("quick");
+
   // 编辑模式
   const [editModel, setEditModel] = useState<EditModel | null>(null);
 
@@ -246,7 +250,11 @@ export function CreateAnalysisView() {
   function handleAnalyze() {
     if (!latestTranscriptVersion) return;
     setEditModel(null);
-    void analyze(latestTranscriptVersion);
+    // 精确模式（PRD-ANA-003）带上媒体源素材，后端据此做场景切分/关键帧
+    void analyze(latestTranscriptVersion, undefined, {
+      mode: analysisMode,
+      assetId: selectedAssetId,
+    });
   }
 
   function enterEdit() {
@@ -460,9 +468,49 @@ export function CreateAnalysisView() {
             </button>
           </div>
 
+          {/* 分析模式切换（PRD 8.2 / PRD-ANA-003） */}
+          <div className="panel-body" style={{ paddingBottom: 0 }}>
+            <div className="segmented" role="group" aria-label="分析模式">
+              <button
+                type="button"
+                className={`btn small ${analysisMode === "quick" ? "primary" : ""}`}
+                onClick={() => setAnalysisMode("quick")}
+                disabled={isAnalyzing}
+                aria-pressed={analysisMode === "quick"}
+              >
+                快速分析
+              </button>
+              <button
+                type="button"
+                className={`btn small ${analysisMode === "precise" ? "primary" : ""}`}
+                onClick={() => setAnalysisMode("precise")}
+                disabled={isAnalyzing || !selectedAssetId}
+                aria-pressed={analysisMode === "precise"}
+                title={
+                  selectedAssetId
+                    ? "结合场景切分与关键帧，需本机可用的 ffmpeg"
+                    : "请先选择素材"
+                }
+              >
+                精确分析
+              </button>
+            </div>
+            <p className="panel-meta" style={{ marginTop: 8 }}>
+              {analysisMode === "precise"
+                ? "精确模式：结合转写稿与视频场景切分/关键帧时间线（需 ffmpeg）。"
+                : "快速模式：仅基于转写文本分析。"}
+            </p>
+          </div>
+
           {/* 费用透明：执行前 provider/model/预计费用（PRD-ANA-006） */}
           <div className="panel-body provenance-bar" style={{ paddingBottom: 0 }}>
             <dl className="provenance">
+              {latestReport && latestReport.mode === "precise" && (
+                <div className="provenance-row">
+                  <dt>场景切分</dt>
+                  <dd>{latestReport.sceneCount} 个场景（含关键帧时间戳）</dd>
+                </div>
+              )}
               <div className="provenance-row">
                 <dt>将使用模型</dt>
                 <dd className="mono">

@@ -229,8 +229,15 @@ export interface AnalysisReportData {
 }
 
 /** 一次分析任务的 UI 侧包装（store 内条目） */
+/** 分析模式（PRD-ANA-002 快速 / PRD-ANA-003 精确） */
+export type AnalysisMode = "quick" | "precise";
+
 export interface AnalysisReport {
   status: AnalysisStatus;
+  /** 本次分析所用模式（精确模式结合场景切分/关键帧） */
+  mode: AnalysisMode;
+  /** 精确模式检出的场景数（quick 恒为 0） */
+  sceneCount: number;
   /** 分析产物 content_versions(analysis) 的版本 id */
   versionId: string | null;
   /** 完整报告数据（GetContentVersion 拉取解析；失败时为 null） */

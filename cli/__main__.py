@@ -66,6 +66,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     an.add_argument("--text", help="直接传入待分析的文本")
     an.add_argument("--brand", help="可选：品牌档 id")
+    # PRD-ANA-003：精确分析（结合场景切分/关键帧），需媒体源 + 可用 ffmpeg
+    an.add_argument(
+        "--mode",
+        choices=("quick", "precise"),
+        default="quick",
+        help="分析模式：quick 仅转写文本（默认）；precise 结合场景切分/关键帧",
+    )
+    an.add_argument(
+        "--asset-id",
+        dest="asset_id",
+        help="precise 模式的媒体源素材 id → payload.asset_id",
+    )
+    an.add_argument(
+        "--media-uri",
+        dest="media_uri",
+        help="precise 模式的媒体源直连 uri → payload.media_uri",
+    )
     an.add_argument(
         "--provider",
         help="可选：per-request provider 提示，JSON 字符串（如 '{\"name\":\"cloud\"}'）",
@@ -431,6 +448,13 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
             payload["text"] = args.text
         if args.brand:
             payload["brand"] = args.brand
+        # 仅在 precise 时下发 mode 与媒体源，保持 quick 的信封与旧版一致
+        if getattr(args, "mode", "quick") == "precise":
+            payload["mode"] = "precise"
+            if args.asset_id:
+                payload["asset_id"] = args.asset_id
+            if args.media_uri:
+                payload["media_uri"] = args.media_uri
         provider = _parse_provider(getattr(args, "provider", None))
         if provider is not None:
             payload["provider"] = provider
