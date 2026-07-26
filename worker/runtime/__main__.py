@@ -33,6 +33,7 @@ import os
 import sys
 import threading
 import time
+from io import BufferedReader
 from typing import IO, Any
 
 from worker.runtime.handlers import commands, health, lifecycle
@@ -72,11 +73,11 @@ _SESSION_TOKEN_KEY: str = "_session_token"
 """请求 params 中携带 session token 的保留字段名。"""
 
 
-def _stdin_binary() -> IO[bytes]:
+def _stdin_binary() -> BufferedReader:
     """返回 stdin 的二进制缓冲对象。
 
-    Returns:
-        ``sys.stdin.buffer``（存在时），否则回退到 ``sys.stdin`` 本身。
+    返回 ``sys.stdin.buffer``（``BufferedReader``，支持 ``read1``）；缺省时
+    回退 ``sys.stdin`` 本身（类型不符，仅在无 buffer 的异常环境走到）。
     """
     buffer = getattr(sys.stdin, "buffer", None)
     return buffer if buffer is not None else sys.stdin  # type: ignore[return-value]

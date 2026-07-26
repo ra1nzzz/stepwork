@@ -180,7 +180,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             "SELECT id, content_type, parent_version_id, created_at, "
             "producer, content FROM content_versions WHERE project_id=?"
         )
-        args: list[Any] = [pid]
+        args = [pid]  # 复用上文 list[Any]（避免同作用域重复注解 no-redef）
         if content_type is not None:
             if not isinstance(content_type, str):
                 raise DispatchError(

@@ -6,6 +6,7 @@ import struct
 import subprocess
 import sys
 import threading
+from typing import Any
 
 os.environ["STEPWORK_HOME"] = os.path.join(
     os.environ.get("TEMP", "/tmp"), "stepwork-test-sidecar"
@@ -27,8 +28,13 @@ proc = subprocess.Popen(
 )
 
 
-def send(method, params=None, req_id=None):
-    req = {"jsonrpc": "2.0", "method": method, "params": params or {}}
+def send(
+    method: str,
+    params: dict[str, Any] | None = None,
+    req_id: str | None = None,
+) -> None:
+    assert proc.stdin is not None  # Popen(stdin=PIPE) 保证非 None
+    req: dict[str, Any] = {"jsonrpc": "2.0", "method": method, "params": params or {}}
     if req_id is not None:
         req["id"] = req_id
     body = json.dumps(req).encode("utf-8")
@@ -36,7 +42,8 @@ def send(method, params=None, req_id=None):
     proc.stdin.flush()
 
 
-def read_stdout():
+def read_stdout() -> None:
+    assert proc.stdout is not None  # Popen(stdout=PIPE) 保证非 None
     try:
         while True:
             header = proc.stdout.read(4)
@@ -63,7 +70,8 @@ def read_stdout():
         print(f"STDOUT ERROR: {e}")
 
 
-def read_stderr():
+def read_stderr() -> None:
+    assert proc.stderr is not None  # Popen(stderr=PIPE) 保证非 None
     try:
         while True:
             line = proc.stderr.readline()

@@ -299,7 +299,8 @@ async def test_restore_workspace_then_dispatch_still_works(
     async def _dispatch_via_state(raw: dict[str, Any]) -> dict[str, Any]:
         ret = await handle_command({"envelope": raw}, state)
         assert "result" in ret, ret
-        return ret["result"]
+        result: dict[str, Any] = ret["result"]
+        return result
 
     # 写数据 → 备份 → 恢复（全部走 handle_command，即真实常驻 worker 路径）
     imp = await _dispatch_via_state(

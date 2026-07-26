@@ -169,7 +169,8 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         video_version_id = p.get("videoVersionId")
         anchor_id = _resolve_anchor_version(repos, project_id, video_version_id)
 
-        variant_id = f"pv_{uuid.uuid4().hex}"
+        # 独立命名，避免与后续分支的 p.get("variantId")（Any|None）复用同名
+        new_variant_id = f"pv_{uuid.uuid4().hex}"
         now = _now()
         repos.conn.execute(
             "INSERT INTO platform_variants "
@@ -177,7 +178,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             "validation_status, created_at, updated_at, project_id, video_version_id) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                variant_id, anchor_id, platform, title,
+                new_variant_id, anchor_id, platform, title,
                 str(p.get("body") or ""),
                 json.dumps(tags, ensure_ascii=False),
                 None, "draft", now, now,
@@ -186,7 +187,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         )
         repos.conn.commit()
         row = repos.conn.execute(
-            "SELECT * FROM platform_variants WHERE id=?", (variant_id,)
+            "SELECT * FROM platform_variants WHERE id=?", (new_variant_id,)
         ).fetchone()
         return CommandResult(
             ok=True, commandId=env.commandId,

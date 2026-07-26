@@ -171,7 +171,8 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         if not plugin_dir or not isinstance(plugin_dir, str):
             raise DispatchError("INVALID_ARGUMENT", "missing path")
         manifest = _load_manifest_from_dir(plugin_dir)
-        pid = str(manifest["id"])
+        # 独立命名，避免与后续分支的 _resolve_plugin_id()（str|None）复用同名
+        new_pid = str(manifest["id"])
         installed_at = datetime.now(UTC).isoformat()
         # 幂等安装：重复安装同 id 覆盖 manifest 并重置为未启用
         deps.repos.conn.execute(
@@ -179,11 +180,11 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             "(id, manifest_json, enabled, installed_at, last_loaded_at, "
             "status, error_message) "
             "VALUES (?, ?, 0, ?, NULL, 'installed', NULL)",
-            (pid, json.dumps(manifest, ensure_ascii=False), installed_at),
+            (new_pid, json.dumps(manifest, ensure_ascii=False), installed_at),
         )
         deps.repos.conn.commit()
         row = deps.repos.conn.execute(
-            "SELECT * FROM installed_plugins WHERE id=?", (pid,)
+            "SELECT * FROM installed_plugins WHERE id=?", (new_pid,)
         ).fetchone()
         assert row is not None  # INSERT 刚落库，行必然存在
         return CommandResult(

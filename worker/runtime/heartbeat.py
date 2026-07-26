@@ -9,7 +9,7 @@ import asyncio
 import contextlib
 
 from worker.runtime.handlers import lifecycle
-from worker.runtime.rpc import make_notification, write_frame
+from worker.runtime.rpc import FrameWriter, make_notification, write_frame
 from worker.runtime.state import WorkerState
 
 DEFAULT_HEARTBEAT_INTERVAL: float = 5.0
@@ -17,7 +17,7 @@ DEFAULT_HEARTBEAT_INTERVAL: float = 5.0
 
 
 async def heartbeat_loop(
-    writer: asyncio.StreamWriter,
+    writer: FrameWriter,
     state: WorkerState,
     shutdown_event: asyncio.Event,
     interval: float = DEFAULT_HEARTBEAT_INTERVAL,

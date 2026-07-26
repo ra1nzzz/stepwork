@@ -134,7 +134,8 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         if not name or not isinstance(name, str):
             raise DispatchError("INVALID_ARGUMENT", "name required")
         repos.workspaces.ensure(env.workspaceId)
-        profile_id = f"bp_{uuid.uuid4().hex}"
+        # 独立命名，避免与后续分支的 p.get("profileId")（Any|None）复用同名
+        new_profile_id = f"bp_{uuid.uuid4().hex}"
         now = _now()
         pillars = _validate_list(p, "contentPillars") or []
         banned = _validate_list(p, "bannedExpressions") or []
@@ -144,7 +145,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             "content_pillars, banned_expressions, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                profile_id, env.workspaceId, name,
+                new_profile_id, env.workspaceId, name,
                 str(p.get("positioning") or ""),
                 str(p.get("audience") or ""),
                 str(p.get("tone") or ""),
@@ -154,7 +155,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             ),
         )
         repos.conn.commit()
-        row = _get_profile_row(repos.conn, profile_id)
+        row = _get_profile_row(repos.conn, new_profile_id)
         return CommandResult(
             ok=True, commandId=env.commandId,
             detail={"profile": _row_to_profile(row)},
