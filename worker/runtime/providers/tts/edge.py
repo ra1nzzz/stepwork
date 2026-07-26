@@ -41,7 +41,7 @@ class EdgeTTSProvider:
     ) -> str:
         opts = opts or {}
         # 延迟导入：缺包时由 resolve 侧提前拦截，此处不会被走到
-        import edge_tts  # type: ignore[import-not-found]
+        import edge_tts
 
         out_dir = opts.get("out_dir") or self.out_dir
         voice = opts.get("voice") or self.voice

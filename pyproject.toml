@@ -74,6 +74,13 @@ warn_unused_ignores = true
 warn_no_return = true
 warn_unreachable = true
 
+# 可选真实引擎（Tranche 3 extras .[asr]/.[tts]）：无类型 stub，且 CI 通常
+# 不安装。声明 ignore_missing_imports，使「装了/没装」两种环境都不报
+# 缺导入 / 未使用 ignore（避免 warn_unused_ignores 的环境相关抖动）。
+[[tool.mypy.overrides]]
+module = ["edge_tts.*", "faster_whisper.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

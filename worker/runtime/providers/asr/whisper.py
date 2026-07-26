@@ -42,7 +42,7 @@ class FasterWhisperASRProvider:
     def _load(self) -> Any:
         """惰性加载模型（重量级：进程内复用同一实例）。"""
         if self._model is None:
-            from faster_whisper import WhisperModel  # type: ignore[import-not-found]
+            from faster_whisper import WhisperModel
 
             self._model = WhisperModel(
                 self.model_size,
