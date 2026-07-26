@@ -47,6 +47,9 @@ _ROUTES: dict[str, str] = {
     "InstallPlugin": "worker.runtime.handlers.plugins",
     "EnablePlugin": "worker.runtime.handlers.plugins",
     "DisablePlugin": "worker.runtime.handlers.plugins",
+    # PRD-PLG-003 卸载 / PRD-PLG-005 健康检查
+    "UninstallPlugin": "worker.runtime.handlers.plugins",
+    "CheckPluginHealth": "worker.runtime.handlers.plugins",
     "GetProvenance": "worker.runtime.handlers.provenance",
     "ListAgentTasks": "worker.runtime.handlers.agent",
     "ListAgentArtifacts": "worker.runtime.handlers.agent",

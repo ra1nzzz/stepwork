@@ -67,6 +67,24 @@ def _parse_manifest(raw: str) -> tuple[dict[str, Any] | None, str | None]:
     return parsed, None
 
 
+#: PRD-PLG-004 信任分级。official/verified 由分发方背书，community 为默认，
+#: experimental 表示作者自述实验性。manifest 里非法取值一律降级为 community
+#: （绝不让插件自称 official 就获得更高展示等级）。
+TRUST_TIERS: tuple[str, ...] = ("official", "verified", "community", "experimental")
+DEFAULT_TRUST_TIER = "community"
+
+#: 允许插件自行声明的等级：official/verified 需分发方背书，不可自封。
+_SELF_DECLARABLE_TIERS: frozenset[str] = frozenset({"community", "experimental"})
+
+
+def resolve_trust_tier(manifest: dict[str, Any]) -> str:
+    """从 manifest 解析信任等级；不可自封 official/verified。"""
+    raw = str(manifest.get("trustTier") or "").lower()
+    if raw in _SELF_DECLARABLE_TIERS:
+        return raw
+    return DEFAULT_TRUST_TIER
+
+
 def _plugin_row_to_dict(row: Any) -> dict[str, Any]:
     """把 ``installed_plugins`` 行转为可序列化的 dict。
 
@@ -85,6 +103,12 @@ def _plugin_row_to_dict(row: Any) -> dict[str, Any]:
     else:
         status = str(row["status"])
         error_message = db_error
+    keys = row.keys()
+
+    def _col(name: str) -> Any:
+        # 兼容尚未跑 0006 迁移的旧库（测试里可能用旧 schema 建表）
+        return row[name] if name in keys else None
+
     return {
         "id": str(row["id"]),
         "enabled": bool(row["enabled"]),
@@ -92,6 +116,12 @@ def _plugin_row_to_dict(row: Any) -> dict[str, Any]:
         "manifest": manifest,
         "installed_at": str(row["installed_at"]),
         "error_message": error_message,
+        # PRD-PLG-004：信任分级（UI 明确显示）
+        "trust_tier": str(_col("trust_tier") or DEFAULT_TRUST_TIER),
+        # PRD-PLG-005：最近加载 / 最近测试时间与结果
+        "last_loaded_at": _col("last_loaded_at"),
+        "last_checked_at": _col("last_checked_at"),
+        "last_check_result": _col("last_check_result"),
     }
 
 
@@ -202,9 +232,15 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         deps.repos.conn.execute(
             "INSERT OR REPLACE INTO installed_plugins "
             "(id, manifest_json, enabled, installed_at, last_loaded_at, "
-            "status, error_message) "
-            "VALUES (?, ?, 0, ?, NULL, 'installed', NULL)",
-            (new_pid, json.dumps(manifest, ensure_ascii=False), installed_at),
+            "status, error_message, trust_tier) "
+            "VALUES (?, ?, 0, ?, NULL, 'installed', NULL, ?)",
+            (
+                new_pid,
+                json.dumps(manifest, ensure_ascii=False),
+                installed_at,
+                # PRD-PLG-004：插件不可自封 official/verified
+                resolve_trust_tier(manifest),
+            ),
         )
         deps.repos.conn.commit()
         row = deps.repos.conn.execute(
@@ -247,8 +283,10 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             raise DispatchError("INVALID_ARGUMENT", "missing pluginId")
         # 不真起子进程（ADR-009 V0.2 范围）；仅切换 DB 状态。
         cur = deps.repos.conn.execute(
-            "UPDATE installed_plugins SET enabled=1, status='registered' WHERE id=?",
-            (pid,),
+            # PRD-PLG-005：启用即记一次加载时间（此前 last_loaded_at 恒为 NULL）
+            "UPDATE installed_plugins SET enabled=1, status='registered', "
+            "last_loaded_at=? WHERE id=?",
+            (datetime.now(UTC).isoformat(), pid),
         )
         deps.repos.conn.commit()
         if cur.rowcount == 0:
@@ -282,6 +320,75 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             ok=True,
             commandId=env.commandId,
             detail={"plugin": _plugin_row_to_dict(row)},
+        )
+
+    if env.commandType == "UninstallPlugin":
+        # PRD-PLG-003「启用、禁用、升级和卸载 · 不影响项目数据完整性」：
+        # 此前只有装/启/停，**没有卸载**。卸载只删注册表行，绝不碰
+        # content_versions / source_assets 等项目数据。
+        pid = _resolve_plugin_id(env)
+        if not pid:
+            raise DispatchError("INVALID_ARGUMENT", "missing pluginId")
+        cur = deps.repos.conn.execute(
+            "DELETE FROM installed_plugins WHERE id=?", (pid,)
+        )
+        deps.repos.conn.commit()
+        if cur.rowcount == 0:
+            raise DispatchError("NOT_FOUND", f"plugin {pid!r} not found")
+        return CommandResult(
+            ok=True,
+            commandId=env.commandId,
+            detail={"uninstalled": pid},
+        )
+
+    if env.commandType == "CheckPluginHealth":
+        # PRD-PLG-005「显示最近测试时间和错误」：此前 last_loaded_at 恒为
+        # NULL，且没有「测试」这个概念。这里做一次可复现的健康检查：
+        # manifest 能否解析 + apiVersion 是否兼容，结果落库供 UI 展示。
+        pid = _resolve_plugin_id(env)
+        if not pid:
+            raise DispatchError("INVALID_ARGUMENT", "missing pluginId")
+        row = deps.repos.conn.execute(
+            "SELECT * FROM installed_plugins WHERE id=?", (pid,)
+        ).fetchone()
+        if row is None:
+            raise DispatchError("NOT_FOUND", f"plugin {pid!r} not found")
+
+        # 独立命名，避免与上文 InstallPlugin 分支的 dict 变量复用同名（mypy）
+        health_manifest, parse_err = _parse_manifest(str(row["manifest_json"]))
+        if health_manifest is None:
+            healthy, detail_msg = False, parse_err or "manifest parse failed"
+        elif _api_version_major(health_manifest.get("apiVersion")) != (
+            _SUPPORTED_PLUGIN_API_MAJOR
+        ):
+            healthy, detail_msg = False, "incompatible apiVersion"
+        else:
+            healthy, detail_msg = True, "ok"
+
+        checked_at = datetime.now(UTC).isoformat()
+        deps.repos.conn.execute(
+            "UPDATE installed_plugins SET last_checked_at=?, last_check_result=?, "
+            "error_message=? WHERE id=?",
+            (
+                checked_at,
+                "ok" if healthy else "error",
+                None if healthy else detail_msg,
+                pid,
+            ),
+        )
+        deps.repos.conn.commit()
+        updated = deps.repos.conn.execute(
+            "SELECT * FROM installed_plugins WHERE id=?", (pid,)
+        ).fetchone()
+        return CommandResult(
+            ok=True,
+            commandId=env.commandId,
+            detail={
+                "healthy": healthy,
+                "checked_at": checked_at,
+                "message": detail_msg,
+                "plugin": _plugin_row_to_dict(updated),
+            },
         )
 
     raise DispatchError(

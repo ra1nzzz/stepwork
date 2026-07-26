@@ -144,7 +144,9 @@ export interface CommandEnvelope {
     | "RunCleanup"
     | "ListAuditEvents"
     | "EditParagraph"
-    | "PreviewPluginManifest";
+    | "PreviewPluginManifest"
+    | "UninstallPlugin"
+    | "CheckPluginHealth";
   schemaVersion: string;
   actor: { type: "user" | "agent" | "plugin" | "system" | "desktop"; id: string };
   source: string;
@@ -430,6 +432,13 @@ export interface PluginManifest {
 
 /** ListPlugins / InstallPlugin 返回的单条插件行
  *  （manifest 解析失败时为 null，status 覆盖为 'error'） */
+/** PRD-PLG-004 插件信任分级 */
+export type PluginTrustTier =
+  | "official"
+  | "verified"
+  | "community"
+  | "experimental";
+
 export interface InstalledPlugin {
   id: string;
   enabled: boolean;
@@ -437,6 +446,12 @@ export interface InstalledPlugin {
   manifest: PluginManifest | null;
   installed_at: string;
   error_message: string | null;
+  /** PRD-PLG-004：信任等级（UI 必须明确显示） */
+  trust_tier: PluginTrustTier;
+  /** PRD-PLG-005：最近加载 / 最近测试时间与结果 */
+  last_loaded_at: string | null;
+  last_checked_at: string | null;
+  last_check_result: string | null;
 }
 
 /** worker → Rust → 前端的 job.progress 通知 params */

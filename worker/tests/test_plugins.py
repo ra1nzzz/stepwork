@@ -388,3 +388,140 @@ def test_preview_manifest_rejects_incompatible_before_install(
         assert "INCOMPATIBLE_API_VERSION" in res["error"]
     finally:
         conn.close()
+
+
+# ----- PRD-PLG-003 卸载 / PLG-004 信任分级 / PLG-005 健康状态 -----
+
+
+def _install(tmp_path: Path, repos: Repos, pid: str, **manifest: Any) -> None:
+    plugin_dir = tmp_path / pid
+    plugin_dir.mkdir(exist_ok=True)
+    base = {
+        "id": pid,
+        "name": pid,
+        "version": "1.0.0",
+        "apiVersion": "1.0",
+        "permissions": [],
+    }
+    base.update(manifest)
+    (plugin_dir / "manifest.json").write_text(
+        json.dumps(base), encoding="utf-8"
+    )
+    res = _run(_env("InstallPlugin", {"path": str(plugin_dir)}), Deps(repos=repos))
+    assert res["ok"] is True, res.get("error")
+
+
+def test_uninstall_removes_plugin_only(tmp_path: Path) -> None:
+    """PRD-PLG-003：卸载删注册表行，绝不影响项目数据。"""
+    conn, repos = _new_db(tmp_path)
+    try:
+        _install(tmp_path, repos, "to-remove")
+        # 播一条项目数据，验证卸载不碰它
+        conn.execute(
+            "INSERT INTO workspaces (id, name, root_path, settings, created_at) "
+            "VALUES ('ws-p','w','/tmp','{}','t')"
+        )
+        conn.execute(
+            "INSERT INTO content_projects (id, workspace_id, title, status, "
+            "created_at, updated_at) VALUES ('prj-p','ws-p','t','draft','t','t')"
+        )
+        conn.commit()
+
+        res = _run(
+            _env("UninstallPlugin", {"pluginId": "to-remove"}), Deps(repos=repos)
+        )
+        assert res["ok"] is True, res.get("error")
+        assert res["detail"]["uninstalled"] == "to-remove"
+
+        n = conn.execute("SELECT COUNT(*) n FROM installed_plugins").fetchone()["n"]
+        assert n == 0
+        # 项目数据完整性不受影响
+        projects = conn.execute(
+            "SELECT COUNT(*) n FROM content_projects"
+        ).fetchone()["n"]
+        assert projects == 1
+    finally:
+        conn.close()
+
+
+def test_uninstall_unknown_plugin_not_found(tmp_path: Path) -> None:
+    conn, repos = _new_db(tmp_path)
+    try:
+        res = _run(_env("UninstallPlugin", {"pluginId": "nope"}), Deps(repos=repos))
+        assert res["ok"] is False
+        assert "NOT_FOUND" in res["error"]
+    finally:
+        conn.close()
+
+
+def test_trust_tier_defaults_and_cannot_self_declare_official(
+    tmp_path: Path,
+) -> None:
+    """PRD-PLG-004：默认 community；插件不得自封 official/verified。"""
+    conn, repos = _new_db(tmp_path)
+    try:
+        _install(tmp_path, repos, "plain")
+        _install(tmp_path, repos, "exp", trustTier="experimental")
+        _install(tmp_path, repos, "liar", trustTier="official")
+
+        res = _run(_env("ListPlugins", {}), Deps(repos=repos))
+        tiers = {p["id"]: p["trust_tier"] for p in res["detail"]["plugins"]}
+        assert tiers["plain"] == "community"
+        assert tiers["exp"] == "experimental"
+        # 自称 official 一律降级
+        assert tiers["liar"] == "community"
+    finally:
+        conn.close()
+
+
+def test_enable_records_last_loaded_at(tmp_path: Path) -> None:
+    """PRD-PLG-005：启用即记加载时间（此前 last_loaded_at 恒为 NULL）。"""
+    conn, repos = _new_db(tmp_path)
+    try:
+        _install(tmp_path, repos, "loadable")
+        before = _run(_env("ListPlugins", {}), Deps(repos=repos))
+        assert before["detail"]["plugins"][0]["last_loaded_at"] is None
+
+        _run(_env("EnablePlugin", {"pluginId": "loadable"}), Deps(repos=repos))
+        after = _run(_env("ListPlugins", {}), Deps(repos=repos))
+        assert after["detail"]["plugins"][0]["last_loaded_at"] is not None
+    finally:
+        conn.close()
+
+
+def test_check_health_ok_and_records_time(tmp_path: Path) -> None:
+    """PRD-PLG-005：健康检查落「最近测试时间和结果」。"""
+    conn, repos = _new_db(tmp_path)
+    try:
+        _install(tmp_path, repos, "healthy")
+        res = _run(
+            _env("CheckPluginHealth", {"pluginId": "healthy"}), Deps(repos=repos)
+        )
+        assert res["ok"] is True, res.get("error")
+        assert res["detail"]["healthy"] is True
+        plugin = res["detail"]["plugin"]
+        assert plugin["last_checked_at"]
+        assert plugin["last_check_result"] == "ok"
+    finally:
+        conn.close()
+
+
+def test_check_health_detects_broken_manifest(tmp_path: Path) -> None:
+    """manifest 损坏的已装插件，健康检查应报错并记录原因。"""
+    conn, repos = _new_db(tmp_path)
+    try:
+        _install(tmp_path, repos, "broken")
+        conn.execute(
+            "UPDATE installed_plugins SET manifest_json='{not json' WHERE id='broken'"
+        )
+        conn.commit()
+
+        res = _run(
+            _env("CheckPluginHealth", {"pluginId": "broken"}), Deps(repos=repos)
+        )
+        assert res["ok"] is True
+        assert res["detail"]["healthy"] is False
+        assert res["detail"]["plugin"]["last_check_result"] == "error"
+        assert res["detail"]["plugin"]["error_message"]
+    finally:
+        conn.close()

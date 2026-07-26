@@ -11,6 +11,22 @@
  */
 
 import { useEffect, useState } from "react";
+
+/** PRD-PLG-004 信任分级展示（Official/Verified/Community/Experimental） */
+const TRUST_TIER_LABELS: Record<string, string> = {
+  official: "官方",
+  verified: "已验证",
+  community: "社区",
+  experimental: "实验性",
+};
+
+/** 越不可信越显眼，提醒用户谨慎授权 */
+function trustClass(tier: string): string {
+  if (tier === "official") return "success";
+  if (tier === "verified") return "ai";
+  if (tier === "experimental") return "danger";
+  return "warning";
+}
 import { buildEnvelope, dispatchCommand, getWorkspaceId, isTauri } from "@/lib/tauri";
 import type { CommandResult, InstalledPlugin, InstallPluginPayload } from "@/lib/types";
 
@@ -20,6 +36,8 @@ export function PluginsView() {
   const [error, setError] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [installing, setInstalling] = useState(false);
+  // PRD-PLG-003：卸载不可逆，需二次确认
+  const [pendingUninstall, setPendingUninstall] = useState<string | null>(null);
   // PRD-PLG-002：待确认的安装（读到 manifest 权限后、真正安装前）
   const [pendingInstall, setPendingInstall] = useState<{
     path: string;
@@ -72,6 +90,46 @@ export function PluginsView() {
       } else {
         setError(res.error ?? "切换失败");
       }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setTogglingId(null);
+    }
+  }
+
+  /** PRD-PLG-005：健康检查 → 落最近测试时间与结果 */
+  async function checkHealth(pluginId: string) {
+    setTogglingId(pluginId);
+    setError(null);
+    try {
+      const env = buildEnvelope("CheckPluginHealth", getWorkspaceId(), null, {
+        pluginId,
+      });
+      const res: CommandResult = await dispatchCommand(env);
+      if (!res.ok) setError(res.error ?? "健康检查失败");
+      await load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setTogglingId(null);
+    }
+  }
+
+  /** PRD-PLG-003：卸载（只删注册表行，项目数据完整性不受影响） */
+  async function uninstall(pluginId: string) {
+    setTogglingId(pluginId);
+    setError(null);
+    try {
+      const env = buildEnvelope("UninstallPlugin", getWorkspaceId(), null, {
+        pluginId,
+      });
+      const res: CommandResult = await dispatchCommand(env);
+      if (!res.ok) {
+        setError(res.error ?? "卸载失败");
+        return;
+      }
+      setPendingUninstall(null);
+      await load();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -252,11 +310,26 @@ export function PluginsView() {
                   <span className="status-badge" data-status={p.status}>
                     {p.status}
                   </span>
+                  {/* PRD-PLG-004：UI 明确显示信任等级 */}
+                  <span
+                    className={`status ${trustClass(p.trust_tier)}`}
+                    title="插件信任等级"
+                  >
+                    {TRUST_TIER_LABELS[p.trust_tier] ?? p.trust_tier}
+                  </span>
                 </div>
                 <p className="plugin-meta">
                   id {p.id}
                   {version ? ` · v${version}` : " · 版本未知"} ·{" "}
                   {p.enabled ? "已启用" : "已禁用"}
+                  {/* PRD-PLG-005：最近测试时间与结果 */}
+                  {p.last_checked_at && (
+                    <>
+                      {" · 最近检测 "}
+                      {new Date(p.last_checked_at).toLocaleString()}
+                      {p.last_check_result === "ok" ? "（正常）" : "（异常）"}
+                    </>
+                  )}
                 </p>
                 {p.error_message && (
                   <p className="error-text" style={{ color: "var(--danger)" }}>
@@ -292,7 +365,47 @@ export function PluginsView() {
                   >
                     禁用
                   </button>
+                  {/* PRD-PLG-005：健康检查（写入最近测试时间与结果） */}
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    disabled={togglingId === p.id}
+                    onClick={() => void checkHealth(p.id)}
+                  >
+                    检测
+                  </button>
+                  {/* PRD-PLG-003：卸载（只删注册表，不动项目数据） */}
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    disabled={togglingId === p.id}
+                    onClick={() => setPendingUninstall(p.id)}
+                  >
+                    卸载
+                  </button>
                 </div>
+                {/* 卸载是不可逆操作 → 二次确认（PRD §10.5 高风险操作减速） */}
+                {pendingUninstall === p.id && (
+                  <div className="inline-actions section-gap">
+                    <span className="panel-meta">
+                      确认卸载「{name}」？插件数据会被移除，项目内容不受影响。
+                    </span>
+                    <button
+                      type="button"
+                      className="btn small danger"
+                      onClick={() => void uninstall(p.id)}
+                    >
+                      确认卸载
+                    </button>
+                    <button
+                      type="button"
+                      className="btn small ghost"
+                      onClick={() => setPendingUninstall(null)}
+                    >
+                      取消
+                    </button>
+                  </div>
+                )}
               </li>
             );
           })}
