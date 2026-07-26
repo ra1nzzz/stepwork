@@ -74,7 +74,7 @@ export type JobState =
   | "succeeded"
   | "failed"
   | "cancelled"
-  | "cancelled-request-ed"
+  | "cancelled-requested"
   | "expired";
 
 export type JobStage =

@@ -162,10 +162,22 @@ impl RpcClient {
         Ok(())
     }
 
-    /// Shut down the read loop.
+    /// 关闭读循环并排空 pending 表。
+    ///
+    /// 中止 read_task 后，向所有在途调用者发送 `WorkerCrashed` 错误，
+    /// 使其立刻返回，而不是悬挂到调用方超时（长任务可能长达 30 分钟）。
+    /// 锁序说明：read_loop 的 Err 分支同样会 drain pending，但两处使用
+    /// 同一把 Mutex 顺序加锁，且此处 read_task 已先被 abort，不会死锁。
     pub async fn shutdown(&self) {
         if let Some(task) = self.read_task.lock().await.take() {
             task.abort();
+        }
+        let mut pending = self.pending.lock().await;
+        for (_, tx) in pending.drain() {
+            let _ = tx.send(Err(SidecarError::new(
+                SidecarErrorKind::WorkerCrashed,
+                "sidecar restarted",
+            )));
         }
     }
 }
@@ -327,6 +339,46 @@ mod tests {
         let err = result.expect_err("expected timeout error");
         assert_eq!(err.kind, SidecarErrorKind::HandshakeTimeout);
         // Pending entry must have been cleaned up after the timeout.
+        assert!(rpc.pending.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn shutdown_drains_pending_with_worker_crashed() {
+        // 保持 _r_tx / _w_rx 存活：前者防止读端 EOF 触发 read_loop 自行
+        // drain pending（掩盖被测路径），后者保证写入不报错。
+        let (r_rx, _r_tx) = duplex(4096);
+        let (_w_rx, w_tx) = duplex(4096);
+        let rpc = RpcClient::new(w_tx, r_rx);
+
+        // 发起一个永远不会被应答的调用，超时设得足够长（30s），
+        // 若 shutdown 未排空 pending，它只能等到超时才返回。
+        let rpc_clone = Arc::clone(&rpc);
+        let call = tokio::spawn(async move {
+            rpc_clone
+                .call_with_timeout("command.dispatch", json!({}), Duration::from_secs(30))
+                .await
+        });
+
+        // 等待调用把 pending 条目注册进 map（有界轮询）。
+        let mut registered = false;
+        for _ in 0..100 {
+            if !rpc.pending.lock().await.is_empty() {
+                registered = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(registered, "pending entry never registered");
+
+        rpc.shutdown().await;
+
+        // 调用必须立刻（远早于 30s 超时）以 WorkerCrashed 结束。
+        let result = timeout(Duration::from_millis(500), call)
+            .await
+            .expect("call must resolve promptly after shutdown, not hang until timeout")
+            .expect("join call task");
+        let err = result.expect_err("expected WorkerCrashed error");
+        assert_eq!(err.kind, SidecarErrorKind::WorkerCrashed);
         assert!(rpc.pending.lock().await.is_empty());
     }
 

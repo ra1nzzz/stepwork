@@ -194,7 +194,7 @@ export const useRenderStore = create<RenderStoreState>((set, get) => ({
   },
 
   applyJobProgress: (p) => {
-    if (p.job_type !== "render") return;
+    if (p.job_type !== "render_source") return;
     const s = get();
     // dispatch 返回前 jobId 为 null：渲染中的通知按 job_type 归属当前活动任务
     const isActive = s.jobId === p.job_id || (s.jobId === null && s.status === "running");

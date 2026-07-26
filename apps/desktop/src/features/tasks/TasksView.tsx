@@ -44,7 +44,7 @@ function jobStateLabel(s: JobState): string {
     case "succeeded": return "完成";
     case "failed": return "失败";
     case "cancelled": return "已取消";
-    case "cancelled-request-ed": return "取消中";
+    case "cancelled-requested": return "取消中";
     case "expired": return "已过期";
     default: return s;
   }
