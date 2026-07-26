@@ -2,7 +2,8 @@
 
 httpx 流式下载**直链文件**到目标目录；三态错误契约：
 
-- HTTP 401/403 → ``DispatchError("NEED_LOGIN", ...)``（需要登录）
+- HTTP 401/403，或最终响应 content-type 为 ``text/html``（登录墙/验证页）
+  → ``DispatchError("NEED_LOGIN", ...)``（需要登录）
 - 其它 4xx/5xx / 网络错误 / 超限 → ``DispatchError("DOWNLOAD_FAILED", ...)``
 - 成功 → :class:`DownloadResult`
 
@@ -77,12 +78,33 @@ def resolve_max_bytes(explicit: int | None = None) -> int:
     return DEFAULT_MAX_DOWNLOAD_BYTES
 
 
+def _base_content_type(content_type: str | None) -> str:
+    """取 content-type 主类型（去参数、去空白、小写）；``None`` 归空串。"""
+    return (content_type or "").split(";", 1)[0].strip().lower()
+
+
+def kind_for_content_type(content_type: str | None) -> str:
+    """按最终响应 content-type 推断资产 kind（PRD-SRC-002）。
+
+    ``video/*`` → video，``audio/*`` → audio，``image/*`` → image，
+    其余（含缺失）→ document。
+    """
+    base_ct = _base_content_type(content_type)
+    for prefix, kind in (
+        ("video/", "video"),
+        ("audio/", "audio"),
+        ("image/", "image"),
+    ):
+        if base_ct.startswith(prefix):
+            return kind
+    return "document"
+
+
 def _ext_for(content_type: str | None, url: str) -> str:
     """按 content-type 映射扩展名；未知类型回退 URL 路径后缀，再回退 ``.bin``。"""
-    if content_type:
-        base_ct = content_type.split(";", 1)[0].strip().lower()
-        if base_ct in _CT_EXT_MAP:
-            return _CT_EXT_MAP[base_ct]
+    base_ct = _base_content_type(content_type)
+    if base_ct in _CT_EXT_MAP:
+        return _CT_EXT_MAP[base_ct]
     path_ext = os.path.splitext(urlparse(url).path)[1]
     if path_ext and len(path_ext) <= 8:
         return path_ext.lower()
@@ -156,6 +178,12 @@ async def download_url(
                 )
 
             content_type = resp.headers.get("content-type")
+            # 登录墙识别：最终响应（重定向后）是 HTML 页面 → 不是直链媒体，
+            # 多半是登录/验证页；直接拒绝，绝不落一个伪装成媒体的 .html 资产
+            if _base_content_type(content_type) == "text/html":
+                raise DispatchError(
+                    "NEED_LOGIN", "目标返回了 HTML 页面，可能需要登录"
+                )
             declared = resp.headers.get("content-length")
             if declared is not None:
                 try:

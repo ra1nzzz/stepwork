@@ -62,6 +62,9 @@ JSONRPC_INVALID_REQUEST: int = -32600
 JSONRPC_METHOD_NOT_FOUND: int = -32601
 """JSON-RPC 2.0：Method not found。"""
 
+JSONRPC_INTERNAL_ERROR: int = -32603
+"""JSON-RPC 2.0：Internal error。"""
+
 JSONRPC_UNAUTHORIZED: int = -32001
 """自定义错误码：session token 校验失败。"""
 
@@ -286,8 +289,21 @@ async def amain() -> int:
                 await _write_locked(response)
         except ConnectionClosedError as exc:
             logger.info("response write failed (peer gone): %s", exc)
-        except Exception:
+        except Exception as exc:
             logger.exception("dispatch task crashed method=%s id=%s", frame.method, frame.id)
+            # 兜底响应：只记日志不回帧会让调用方一直等到超时（Rust 侧 30 分钟）。
+            # 尽力回一帧 -32603；写失败（对端已断等）自吞，绝不二次击垮任务。
+            if frame.id is not None:
+                try:
+                    await _write_locked(
+                        make_error_response(
+                            frame.id, JSONRPC_INTERNAL_ERROR, f"internal: {exc}"
+                        )
+                    )
+                except Exception:
+                    logger.exception(
+                        "failed to write internal-error response id=%s", frame.id
+                    )
 
     exit_code = 0
     try:

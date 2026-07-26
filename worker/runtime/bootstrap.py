@@ -54,11 +54,13 @@ def recover_orphan_jobs(conn: sqlite3.Connection) -> int:
     return cur.rowcount
 
 
-def _resolve_db_path() -> str:
+def _resolve_db_path(backup: bool = True) -> str:
     """解析数据库路径：``$STEPWORK_HOME/stepwork.db``，缺省落到用户主目录。
 
-    启动时自动备份现有数据库（回滚策略见 migrations/README）。
+    ``backup=True`` 时自动备份现有数据库（回滚策略见 migrations/README）。
     备份失败不阻塞启动（仅记录到 stderr），避免权限问题导致 worker 崩溃。
+    CLI/MCP 进程内门面每条命令都会 bootstrap，应传 ``backup=False``
+    以免每条命令都整库复制一份备份（备份洪水）。
     """
     import logging
     import os
@@ -67,7 +69,7 @@ def _resolve_db_path() -> str:
     home = os.environ.get("STEPWORK_HOME") or str(Path.home() / "STEPWORK")
     Path(home).mkdir(parents=True, exist_ok=True)
     db = Path(home) / "stepwork.db"
-    if db.exists():
+    if backup and db.exists():
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
         backup = Path(home) / "backups" / f"stepwork-{stamp}.db"
         backup.parent.mkdir(parents=True, exist_ok=True)
@@ -84,6 +86,7 @@ def bootstrap_db(
     db_path: str | None = None,
     conn: Any = None,
     recover_jobs: bool = True,
+    backup: bool = True,
 ) -> WorkerState:
     """初始化 Worker 的数据库层。
 
@@ -92,9 +95,14 @@ def bootstrap_db(
         db_path: 显式数据库路径；缺省解析自环境变量/主目录。
         conn: 测试注入的现成连接（优先，跳过文件打开与迁移文件查找）。
         recover_jobs: 迁移后执行启动任务恢复（T5：``sweep_expired`` +
-            :func:`recover_orphan_jobs`）。进程内门面（``app.run_command``）
-            每条命令都会 bootstrap，且可能与正在跑长任务的桌面 worker 并存，
-            应传 ``False`` 以免误杀在途 job。
+            :func:`recover_orphan_jobs`）与 retention 清扫（PRD-SRC-005）。
+            进程内门面（``app.run_command``）每条命令都会 bootstrap，且可能
+            与正在跑长任务的桌面 worker 并存，应传 ``False``——既不能把
+            在途 RUNNING/LEASED 误判为孤儿，也不能清掉并发 worker 正在写
+            的 ``.part`` 下载中间文件。
+        backup: 缺省路径解析时是否先备份现有数据库（透传
+            :func:`_resolve_db_path`）。进程内门面应传 ``False``，避免
+            每条命令整库复制一次的备份洪水；桌面 worker 路径保持 ``True``。
 
     Returns:
         同一 ``state`` 实例（便于链式）。
@@ -104,7 +112,7 @@ def bootstrap_db(
         state.db_path = ":memory:"
         return state
 
-    path = db_path or _resolve_db_path()
+    path = db_path or _resolve_db_path(backup=backup)
     connection = connect(path)
     run_migrations(connection, MIGRATIONS_DIR)
     if recover_jobs:
@@ -117,11 +125,13 @@ def bootstrap_db(
             logger.info(
                 "startup job recovery: swept=%s orphaned=%s", len(swept), orphaned
             )
-    # Tranche 2（PRD-SRC-005）：启动清扫 temp/下载中间文件
-    # （retentionDays + cleanupMode 策略；内部兜底，绝不阻塞启动）
-    from worker.runtime.cleanup import run_retention_sweep
+        # Tranche 2（PRD-SRC-005）：启动清扫 temp/下载中间文件
+        # （retentionDays + cleanupMode 策略；内部兜底，绝不阻塞启动）。
+        # 仅桌面 worker 路径执行：per-command 门面清扫可能删掉并发
+        # worker 正在写的 .part 中间文件。
+        from worker.runtime.cleanup import run_retention_sweep
 
-    run_retention_sweep(connection)
+        run_retention_sweep(connection)
     state.db_conn = connection
     state.db_path = path
     return state
