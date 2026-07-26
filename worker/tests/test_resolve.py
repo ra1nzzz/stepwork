@@ -8,12 +8,17 @@
 
 import os
 
+import pytest
+
 from worker.runtime.providers import resolve as resolve_mod
 from worker.runtime.providers.ai.cloud import CloudAIProvider
 from worker.runtime.providers.ai.openai_compatible import (
     OpenAICompatibleProvider,
 )
 from worker.runtime.providers.asr.local import LocalASRProvider
+from worker.runtime.providers.asr.whisper import FasterWhisperASRProvider
+from worker.runtime.providers.tts.edge import EdgeTTSProvider
+from worker.runtime.providers.tts.local import LocalTTSProvider
 
 
 def _clear_provider_env() -> None:
@@ -21,6 +26,11 @@ def _clear_provider_env() -> None:
         "STEPWORK_ASR_PROVIDER",
         "STEPWORK_ASR_API_KEY",
         "STEPWORK_ASR_BASE_URL",
+        "STEPWORK_ASR_MODEL",
+        "STEPWORK_TTS_PROVIDER",
+        "STEPWORK_TTS_API_KEY",
+        "STEPWORK_TTS_BASE_URL",
+        "STEPWORK_TTS_VOICE",
         "STEPWORK_AI_PROVIDER",
         "STEPWORK_AI_API_KEY",
         "STEPWORK_AI_BASE_URL",
@@ -100,3 +110,59 @@ def test_ai_provider_from_hint_empty_returns_none() -> None:
     _clear_provider_env()
     assert resolve_mod.ai_provider_from_hint(None) is None
     assert resolve_mod.ai_provider_from_hint({}) is None
+
+
+# ----- Tranche 3：可选真实引擎（whisper / edge）import 守卫回退 -----
+
+
+def test_resolve_default_tts_local() -> None:
+    _clear_provider_env()
+    assert isinstance(resolve_mod.resolve_tts(), LocalTTSProvider)
+
+
+def test_resolve_asr_whisper_missing_package_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_provider_env()
+    os.environ["STEPWORK_ASR_PROVIDER"] = "whisper"
+    # 模拟未安装 faster-whisper：缺包必须回退 None（→ UNAVAILABLE），不崩溃
+    monkeypatch.setattr(
+        resolve_mod, "_has_module", lambda name: name != "faster_whisper"
+    )
+    assert resolve_mod.resolve_asr() is None
+
+
+def test_resolve_asr_whisper_present_builds_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_provider_env()
+    os.environ["STEPWORK_ASR_PROVIDER"] = "whisper"
+    os.environ["STEPWORK_ASR_MODEL"] = "medium"
+    # 模拟已安装：构造 provider（构造不触发引擎导入，模型加载惰性）
+    monkeypatch.setattr(resolve_mod, "_has_module", lambda name: True)
+    asr = resolve_mod.resolve_asr()
+    assert isinstance(asr, FasterWhisperASRProvider)
+    assert asr.model_size == "medium"
+
+
+def test_resolve_tts_edge_missing_package_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_provider_env()
+    os.environ["STEPWORK_TTS_PROVIDER"] = "edge"
+    monkeypatch.setattr(
+        resolve_mod, "_has_module", lambda name: name != "edge_tts"
+    )
+    assert resolve_mod.resolve_tts() is None
+
+
+def test_resolve_tts_edge_present_builds_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_provider_env()
+    os.environ["STEPWORK_TTS_PROVIDER"] = "edge"
+    os.environ["STEPWORK_TTS_VOICE"] = "zh-CN-YunxiNeural"
+    monkeypatch.setattr(resolve_mod, "_has_module", lambda name: True)
+    tts = resolve_mod.resolve_tts()
+    assert isinstance(tts, EdgeTTSProvider)
+    assert tts.voice == "zh-CN-YunxiNeural"

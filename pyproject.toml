@@ -24,6 +24,15 @@ dev = [
   "ruff>=0.5",
   "mypy>=1.10",
 ]
+# 可选真实引擎（Tranche 3）：默认不装，按需 `pip install -e .[asr]` / `.[tts]`。
+# 缺失时 resolve_asr/resolve_tts 走 import 守卫回退 None（→ UNAVAILABLE），
+# 不影响离线 local Provider 与 worker 启动。
+asr = [
+  "faster-whisper>=1.0",  # STEPWORK_ASR_PROVIDER=whisper 本地离线识别
+]
+tts = [
+  "edge-tts>=6.1",  # STEPWORK_TTS_PROVIDER=edge 微软在线神经语音
+]
 
 [project.scripts]
 stepwork-worker = "worker.runtime.__main__:main"

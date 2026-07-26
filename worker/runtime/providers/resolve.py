@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import threading
 from typing import Any
@@ -40,6 +41,14 @@ def _env(key: str) -> str | None:
     """读取环境变量，空串视为未设置。"""
     v = os.environ.get(key)
     return v if v else None
+
+
+def _has_module(name: str) -> bool:
+    """可选依赖探测：包已安装才为真（不触发导入副作用）。"""
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError):
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -117,9 +126,12 @@ def _valid_base_url(url: str | None) -> bool:
 def resolve_asr(workspace_id: str | None = None) -> ASRProvider | None:
     """按 ``STEPWORK_ASR_PROVIDER`` 解析 ASR Provider。
 
-    默认 ``local``（离线确定性，满足转写可运行证伪）；设为 ``cloud``
-    时需要 ``STEPWORK_ASR_API_KEY`` + ``STEPWORK_ASR_BASE_URL``，否则
-    回退 ``None``（handler 转译为 ``UNAVAILABLE``）。
+    - ``local``（默认）：离线确定性草稿转写，满足可运行证伪。
+    - ``whisper``（``faster-whisper``）：本地真实识别（可选依赖 ``.[asr]``；
+      未安装则回退 ``None`` → ``UNAVAILABLE``）；模型 size 取
+      ``STEPWORK_ASR_MODEL`` / 覆盖层 / 默认 ``small``。
+    - ``cloud``：需 ``STEPWORK_ASR_API_KEY`` + ``STEPWORK_ASR_BASE_URL``，
+      否则回退 ``None``。
 
     若 env 缺失，则回退到 ``workspace_id`` 对应的密钥覆盖层
     （来自设置页保存的密钥，仅存内存）。
@@ -127,6 +139,16 @@ def resolve_asr(workspace_id: str | None = None) -> ASRProvider | None:
     kind = (_env("STEPWORK_ASR_PROVIDER") or "local").lower()
     if kind == "local":
         return LocalASRProvider()
+    if kind in ("whisper", "faster-whisper", "faster_whisper"):
+        # 可选真实引擎：包缺失即回退 None（handler → UNAVAILABLE），
+        # 绝不因缺依赖崩掉解析。模型 size 取 env / 覆盖层 / 默认 small。
+        if not _has_module("faster_whisper"):
+            return None
+        ov = _override_for(workspace_id, "asr")
+        model = _env("STEPWORK_ASR_MODEL") or str(ov.get("model") or "") or "small"
+        from worker.runtime.providers.asr.whisper import FasterWhisperASRProvider
+
+        return FasterWhisperASRProvider(model_size=model)
     if kind == "cloud":
         ov = _override_for(workspace_id, "asr")
         key = _env("STEPWORK_ASR_API_KEY") or ov.get("apiKey")
@@ -195,16 +217,29 @@ def ai_provider_from_hint(hint: dict[str, Any] | None) -> AIProvider | None:
 
 
 def resolve_tts(workspace_id: str | None = None) -> TTSProvider | None:
-    """按 ``STEPWORK_TTS_PROVIDER`` 解析 TTS Provider（W6）。
+    """按 ``STEPWORK_TTS_PROVIDER`` 解析 TTS Provider（W6 / Tranche 3）。
 
-    默认 ``local``（离线确定性占位，满足渲染可运行证伪）；
-    设为 ``cloud`` 时需要 ``STEPWORK_TTS_API_KEY`` + ``STEPWORK_TTS_BASE_URL``，
-    否则回退 ``None``（handler 转译为 ``UNAVAILABLE``）。
+    - ``local``（默认）：离线确定性 WAV（静音但时长真实），满足渲染证伪。
+    - ``edge``（``edge-tts``）：微软在线神经语音（可选依赖 ``.[tts]``；
+      未安装则回退 ``None`` → ``UNAVAILABLE``）；声线取
+      ``STEPWORK_TTS_VOICE`` / 覆盖层 / provider 默认。
+    - ``cloud``：需 ``STEPWORK_TTS_API_KEY`` + ``STEPWORK_TTS_BASE_URL``，
+      否则回退 ``None``。
     env 缺失时回退到 ``workspace_id`` 的密钥覆盖层。
     """
     kind = (_env("STEPWORK_TTS_PROVIDER") or "local").lower()
     if kind == "local":
         return LocalTTSProvider()
+    if kind in ("edge", "edge-tts", "edge_tts"):
+        # 可选真实语音：缺包即回退 None（handler → UNAVAILABLE）。
+        # 声线取 env / 覆盖层 / provider 默认。
+        if not _has_module("edge_tts"):
+            return None
+        ov = _override_for(workspace_id, "tts")
+        voice = _env("STEPWORK_TTS_VOICE") or str(ov.get("voice") or "") or None
+        from worker.runtime.providers.tts.edge import EdgeTTSProvider
+
+        return EdgeTTSProvider(voice=voice)
     if kind == "cloud":
         ov = _override_for(workspace_id, "tts")
         key = _env("STEPWORK_TTS_API_KEY") or str(ov.get("apiKey") or "")
