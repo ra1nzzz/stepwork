@@ -81,6 +81,11 @@ _ROUTES: dict[str, str] = {
     "SendAcpPrompt": "worker.runtime.handlers.acp",
     "EndAcpSession": "worker.runtime.handlers.acp",
     "ListAcpSessions": "worker.runtime.handlers.acp",
+    # 定时发布（优先走平台原生定时；无原生能力则本地到点提醒）
+    "SchedulePublish": "worker.runtime.handlers.publish",
+    "ListScheduledPublishes": "worker.runtime.handlers.publish",
+    "CancelScheduledPublish": "worker.runtime.handlers.publish",
+    "FireDueSchedules": "worker.runtime.handlers.publish",
     "ExportDiagnosticsBundle": "worker.runtime.handlers.diagnostics",
     # W9: 集成 / 数据迁移 / 种子测试（Layer 0 路由先行，handler 由各支线补齐）
     "ExportProject": "worker.runtime.handlers.project_io",

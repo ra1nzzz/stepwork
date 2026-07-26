@@ -173,6 +173,10 @@ export interface CommandEnvelope {
     | "SendAcpPrompt"
     | "EndAcpSession"
     | "ListAcpSessions"
+    | "SchedulePublish"
+    | "ListScheduledPublishes"
+    | "CancelScheduledPublish"
+    | "FireDueSchedules"
     | "RequestPublishAuthorization"
     | "RecordPublishResult"
     | "ListPublishJobs"
@@ -509,6 +513,8 @@ export interface FillPackage {
   fields: { title: string; body: string; tags: string[] };
   assets: { video: string | null; cover: string | null };
   constraints: Record<string, number>;
+  /** null = 立即发布 */
+  schedule: ScheduleBlock | null;
   issues: FillPackageIssue[];
   ready: boolean;
 }
@@ -701,7 +707,58 @@ export interface ListWorkspacesPayload {
 }
 
 /** 发布平台（PRD-PUB-001 MVP 仅抖音 + 通用） */
-export type PublishPlatform = "douyin" | "generic";
+export type PublishPlatform =
+  | "douyin"
+  | "bilibili"
+  | "xiaohongshu"
+  | "weixin_channels"
+  | "generic";
+
+/** 平台中文名。与 worker 的 PLATFORM_RULES.label 对应。 */
+export const PLATFORM_LABELS: Record<string, string> = {
+  douyin: "抖音",
+  bilibili: "B站",
+  xiaohongshu: "小红书",
+  weixin_channels: "微信视频号",
+  generic: "通用",
+};
+
+/**
+ * 定时发布模式。区分二者是安全核心：
+ * - platform_native：平台自己到点发布，真正无人值守；
+ * - local_reminder：平台无原生定时，本地到点只是**提醒**，仍需用户手动发。
+ */
+export type ScheduleMode = "platform_native" | "local_reminder";
+
+export interface ScheduleBlock {
+  mode: ScheduleMode;
+  scheduled_at: string;
+  fill_native_field: boolean;
+  platform_window: {
+    supported: boolean;
+    max_ahead_days: number;
+    min_lead_minutes: number;
+  };
+  note: string;
+  requires_manual_submit: true;
+  issues: FillPackageIssue[];
+}
+
+export interface ScheduledPublish {
+  id: string;
+  project_id: string;
+  variant_id: string;
+  platform: string;
+  scheduled_at: string;
+  mode: ScheduleMode;
+  status: string;
+  /** 仅 platform_native 为 true —— UI 必须据此区分措辞 */
+  unattended: boolean;
+  mode_description: string;
+  note?: string | null;
+  fired_at?: string | null;
+  content_changed?: boolean;
+}
 
 /** CreatePlatformVariant payload */
 export interface CreatePlatformVariantPayload {

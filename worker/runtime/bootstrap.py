@@ -126,6 +126,16 @@ def bootstrap_db(
             logger.info(
                 "startup job recovery: swept=%s orphaned=%s", len(swept), orphaned
             )
+        # 定时发布：worker 关着的时候排期照样会到点，启动时必须补扫一次，
+        # 否则昨晚到期的条目会永远停在 pending，用户以为排了、其实没动静。
+        try:
+            from worker.runtime.publish.schedule import fire as fire_due_schedules
+
+            fired = fire_due_schedules(connection)
+            if fired:
+                logger.info("startup schedule sweep: fired=%s", len(fired))
+        except Exception:  # noqa: BLE001 - 定时扫描失败绝不阻塞启动
+            logger.exception("startup schedule sweep failed")
         # Tranche 2（PRD-SRC-005）：启动清扫 temp/下载中间文件
         # （retentionDays + cleanupMode 策略；内部兜底，绝不阻塞启动）。
         # 仅桌面 worker 路径执行：per-command 门面清扫可能删掉并发

@@ -34,11 +34,14 @@ from worker.runtime.deps import Deps
 from worker.runtime.handlers.approvals import content_hash as approval_content_hash
 from worker.runtime.handlers.approvals import create_request as create_approval
 from worker.runtime.models import CommandEnvelope, CommandResult
-from worker.runtime.publish.platforms import build_fill_package
+from worker.runtime.publish import schedule
+from worker.runtime.publish.platforms import PLATFORM_RULES, build_fill_package
 from worker.runtime.render.ffmpeg_runner import FFmpegRunner
 
-# 平台白名单（PRD-PUB-001 MVP）
-_PLATFORMS: tuple[str, ...] = ("douyin", "generic")
+# 平台白名单（PRD-PUB-001）。**从规则表派生**，不再手写一份 —— 此前这里
+# 硬编码 ("douyin", "generic")，往 PLATFORM_RULES 里加平台后仍然创建不了
+# 变体，两处不同步且报错信息完全看不出原因。
+_PLATFORMS: tuple[str, ...] = tuple(sorted(PLATFORM_RULES))
 
 
 def _now() -> str:
@@ -366,10 +369,18 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         variant = _row_to_variant(row)
         video_path = _resolve_video_path(repos, variant.get("video_version_id"))
         cover = p.get("coverPath") or p.get("cover_path")
+        # 定时发布：给了时间就在包里带上 schedule 段，供插件填平台自带的
+        # 定时字段（原生模式）；不给则是立即发布，行为与此前完全一致
+        raw_when = p.get("scheduledAt") or p.get("scheduled_at")
+        try:
+            when = schedule.parse_scheduled_at(str(raw_when)) if raw_when else None
+        except ValueError as e:
+            raise DispatchError("INVALID_ARGUMENT", f"scheduledAt 解析失败：{e}") from e
         package = build_fill_package(
             variant=variant,
             video_path=video_path,
             cover_path=str(cover) if cover else None,
+            scheduled_at=when,
         )
         return CommandResult(
             ok=True,
@@ -518,6 +529,78 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             ok=True,
             commandId=env.commandId,
             detail={"publish_job": _publish_job_to_dict(updated)},
+        )
+
+    if env.commandType == "SchedulePublish":
+        sched_variant_id = p.get("variantId") or p.get("variant_id")
+        if not sched_variant_id:
+            raise DispatchError("INVALID_ARGUMENT", "variantId required")
+        raw_when = p.get("scheduledAt") or p.get("scheduled_at")
+        if not raw_when:
+            raise DispatchError("INVALID_ARGUMENT", "scheduledAt required")
+        try:
+            when = schedule.parse_scheduled_at(str(raw_when))
+        except ValueError as e:
+            raise DispatchError("INVALID_ARGUMENT", f"scheduledAt 解析失败：{e}") from e
+
+        row = repos.conn.execute(
+            "SELECT * FROM platform_variants WHERE id=?", (str(sched_variant_id),)
+        ).fetchone()
+        if row is None:
+            raise DispatchError("NOT_FOUND", f"variant {sched_variant_id!r} not found")
+        variant = _row_to_variant(row)
+        try:
+            record = schedule.create(
+                repos.conn,
+                workspace_id=env.workspaceId,
+                project_id=str(variant["project_id"]),
+                variant_id=str(sched_variant_id),
+                platform=str(variant.get("platform") or ""),
+                scheduled_at=when,
+                content_hash=schedule.current_content_hash(
+                    repos.conn, str(sched_variant_id)
+                ),
+                note=str(p.get("note") or ""),
+            )
+        except ValueError as e:
+            raise DispatchError("INVALID_ARGUMENT", str(e)) from e
+        record["mode_description"] = schedule.describe_mode(str(record["mode"]))
+        return CommandResult(ok=True, commandId=env.commandId, detail=record)
+
+    if env.commandType == "ListScheduledPublishes":
+        items = schedule.list_all(
+            repos.conn,
+            project_id=(p.get("projectId") or p.get("project_id") or None),
+            status=(p.get("status") or None),
+        )
+        for item in items:
+            item["mode_description"] = schedule.describe_mode(str(item["mode"]))
+        return CommandResult(
+            ok=True, commandId=env.commandId, detail={"scheduled": items}
+        )
+
+    if env.commandType == "CancelScheduledPublish":
+        sched_id = p.get("scheduleId") or p.get("schedule_id")
+        if not sched_id:
+            raise DispatchError("INVALID_ARGUMENT", "scheduleId required")
+        cancelled = schedule.cancel(repos.conn, str(sched_id))
+        if not cancelled:
+            # 已触发/已取消的不再改动：如实说明，而不是假装成功
+            raise DispatchError(
+                "INVALID_STATE", f"排期 {sched_id!r} 不存在或已触发，无法取消"
+            )
+        return CommandResult(
+            ok=True, commandId=env.commandId, detail={"cancelled": str(sched_id)}
+        )
+
+    if env.commandType == "FireDueSchedules":
+        fired = schedule.fire(repos.conn)
+        for item in fired:
+            item["mode_description"] = schedule.describe_mode(str(item["mode"]))
+        return CommandResult(
+            ok=True,
+            commandId=env.commandId,
+            detail={"fired": fired, "count": len(fired)},
         )
 
     if env.commandType == "ListPublishJobs":

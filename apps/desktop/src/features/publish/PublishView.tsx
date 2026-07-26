@@ -17,11 +17,13 @@ import { openLocalPath } from "@/lib/shell";
 import { useViewStore } from "@/stores/useViewStore";
 import { useRenderStore } from "@/stores/useRenderStore";
 import { TagListInput } from "@/components/TagListInput";
+import { PLATFORM_LABELS } from "@/lib/types";
 import type {
   FillPackage,
   CreatePlatformVariantPayload,
   PlatformVariant,
   PublishPlatform,
+  ScheduledPublish,
 } from "@/lib/types";
 
 interface ProjectOption {
@@ -43,8 +45,9 @@ function normalizeTags(tags: unknown): string[] {
   return [];
 }
 
+/** 平台中文名。此前硬写成「抖音 : 通用」的三元式，新增平台后会全部显示成「通用」。 */
 function platformLabel(p: string): string {
-  return p === "douyin" ? "抖音" : "通用";
+  return PLATFORM_LABELS[p] ?? p;
 }
 
 export function PublishView() {
@@ -61,6 +64,10 @@ export function PublishView() {
 
   // 变体表单
   const [platform, setPlatform] = useState<PublishPlatform>("douyin");
+  // 定时发布：每个变体独立的目标时间与排期结果
+  const [scheduleAt, setScheduleAt] = useState<Record<string, string>>({});
+  const [schedulingId, setSchedulingId] = useState<string | null>(null);
+  const [scheduled, setScheduled] = useState<ScheduledPublish[]>([]);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [tags, setTags] = useState<string[]>([]);
@@ -108,6 +115,57 @@ export function PublishView() {
     }
   }
 
+  /** 拉取排期列表（含到点提醒状态） */
+  const loadScheduled = useCallback(async () => {
+    const env = buildEnvelope("ListScheduledPublishes", getWorkspaceId(), projectId, {
+      projectId,
+    });
+    const res = await dispatchCommand(env);
+    if (!res.ok) return;
+    const d = (res.detail ?? {}) as { scheduled?: ScheduledPublish[] };
+    setScheduled(d.scheduled ?? []);
+  }, [projectId]);
+
+  /**
+   * 排一条定时发布。
+   *
+   * 有原生定时的平台（抖音/B站/小红书）走平台自己的定时字段，到点由平台
+   * 发布；没有的（视频号）只能本地到点提醒。后端会如实返回是哪种，UI 必须
+   * 照实显示 —— 把「提醒」说成「定时发布」会让用户以为可以去睡觉。
+   */
+  async function schedulePublish(variantId: string) {
+    const when = scheduleAt[variantId];
+    if (!when) return;
+    setSchedulingId(variantId);
+    try {
+      const env = buildEnvelope("SchedulePublish", getWorkspaceId(), projectId, {
+        variantId,
+        // datetime-local 是本地时间且不带时区，转成带时区的 ISO 再上行，
+        // 否则后端按 UTC 解释会差好几个小时
+        scheduledAt: new Date(when).toISOString(),
+      });
+      const res = await dispatchCommand(env);
+      if (!res.ok) {
+        setAuthNotice((prev) => ({
+          ...prev,
+          [variantId]: res.error ?? "排期失败",
+        }));
+        return;
+      }
+      await loadScheduled();
+    } finally {
+      setSchedulingId(null);
+    }
+  }
+
+  async function cancelSchedule(scheduleId: string) {
+    const env = buildEnvelope("CancelScheduledPublish", getWorkspaceId(), projectId, {
+      scheduleId,
+    });
+    await dispatchCommand(env);
+    await loadScheduled();
+  }
+
   // 加载项目列表（进入发布页时）
   useEffect(() => {
     let cancelled = false;
@@ -149,11 +207,23 @@ export function PublishView() {
     }
   }, []);
 
-  // 项目切换时重载变体列表
+  // 项目切换时重载变体与排期列表
   useEffect(() => {
-    if (projectId) void loadVariants(projectId);
-    else setVariants([]);
-  }, [projectId, loadVariants]);
+    if (projectId) {
+      void loadVariants(projectId);
+      // 先补扫一次到期排期，再拉列表 —— 否则 worker 关机期间到点的条目
+      // 会一直停在 pending，用户打开页面看不到任何提醒
+      void (async () => {
+        await dispatchCommand(
+          buildEnvelope("FireDueSchedules", getWorkspaceId(), projectId, {}),
+        );
+        await loadScheduled();
+      })();
+    } else {
+      setVariants([]);
+      setScheduled([]);
+    }
+  }, [projectId, loadVariants, loadScheduled]);
 
   function handleProjectChange(id: string) {
     setProjectId(id || null);
@@ -315,8 +385,11 @@ export function PublishView() {
                 value={platform}
                 onChange={(e) => setPlatform(e.target.value as PublishPlatform)}
               >
-                <option value="douyin">抖音</option>
-                <option value="generic">通用</option>
+                {Object.entries(PLATFORM_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
               </select>
             </div>
             <div className="form-group" style={{ marginBottom: 12 }}>
@@ -463,6 +536,62 @@ export function PublishView() {
                           {fillingId === v.id ? "检查中…" : "检查并生成填充包"}
                         </button>
                       </div>
+                      {/* 定时发布：优先用平台自带的定时能力 */}
+                      <div className="task-actions" style={{ marginTop: 6 }}>
+                        <input
+                          type="datetime-local"
+                          className="text-input"
+                          value={scheduleAt[v.id] ?? ""}
+                          onChange={(e) =>
+                            setScheduleAt((prev) => ({
+                              ...prev,
+                              [v.id]: e.target.value,
+                            }))
+                          }
+                          data-od-id={`schedule-at-${v.id}`}
+                        />
+                        <button
+                          className="btn small ghost"
+                          type="button"
+                          disabled={schedulingId !== null || !scheduleAt[v.id]}
+                          onClick={() => void schedulePublish(v.id)}
+                        >
+                          {schedulingId === v.id ? "排期中…" : "定时发布"}
+                        </button>
+                      </div>
+                      {scheduled
+                        .filter((sp) => sp.variant_id === v.id)
+                        .map((sp) => (
+                          <div
+                            key={sp.id}
+                            className="panel-meta"
+                            style={{ marginTop: 6 }}
+                            data-od-id={`schedule-row-${sp.id}`}
+                          >
+                            <span
+                              className={`status ${sp.unattended ? "success" : "warning"}`}
+                            >
+                              {/* 只有平台原生定时才是真无人值守；本地模式必须
+                                  明说是「提醒」，不能让用户以为可以去睡觉 */}
+                              {sp.unattended ? "平台定时" : "到点提醒"}
+                            </span>{" "}
+                            {sp.scheduled_at.slice(0, 16).replace("T", " ")} ·{" "}
+                            {sp.mode_description}
+                            {sp.content_changed && (
+                              <strong>（排期后内容已改动，请重新确认）</strong>
+                            )}
+                            {sp.status === "pending" && (
+                              <button
+                                className="btn small ghost"
+                                type="button"
+                                style={{ marginLeft: 8 }}
+                                onClick={() => void cancelSchedule(sp.id)}
+                              >
+                                取消排期
+                              </button>
+                            )}
+                          </div>
+                        ))}
                       {fillPackages[v.id] && (
                         <div className="section-gap">
                           <p className="panel-meta" style={{ margin: 0 }}>
