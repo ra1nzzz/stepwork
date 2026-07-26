@@ -9,6 +9,7 @@ import { WorkbenchView } from "@/features/home/WorkbenchView";
 import { ProjectsView } from "@/features/projects/ProjectsView";
 import { CreateView } from "@/features/create/CreateView";
 import { TasksView } from "@/features/tasks/TasksView";
+import { PublishView } from "@/features/publish/PublishView";
 import SettingsView from "@/features/settings/SettingsView";
 import { DiagnosticsView } from "@/features/diagnostics/DiagnosticsView";
 import { PluginsView } from "@/features/plugins/PluginsView";
@@ -84,6 +85,11 @@ function buildTopBar(
     case "tasks":
       return {
         crumbs: <strong>任务</strong>,
+        topActions: null,
+      };
+    case "publish":
+      return {
+        crumbs: <strong>发布</strong>,
         topActions: null,
       };
     case "settings":
@@ -162,6 +168,9 @@ export default function App() {
       break;
     case "tasks":
       content = <TasksView />;
+      break;
+    case "publish":
+      content = <PublishView />;
       break;
     case "settings":
       content = <SettingsView />;

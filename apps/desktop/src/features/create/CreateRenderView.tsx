@@ -4,14 +4,29 @@
  *
  * 数据流：
  *   - useRenderStore.sourceVersionId 由 CreateScriptView 在脚本保存后写入
- *   - 用户选择 TTS 引擎 → setTtsEngine
+ *   - 用户选择 TTS 引擎 → setTtsEngine；用户录音经 dialog 选择音频文件
+ *     → setUserAudioUri → payload.user_audio_uri（Tranche 2）
  *   - 用户点击「开始渲染」→ render() → status + progress + draft
- *   - 渲染中可取消 → cancel()
- *   - 失败可重试 → retry()
+ *   - 渲染中可取消 → cancel()；失败可重试 → retry()
+ *   - 渲染成功展示 artifacts（video/subtitles/audio）+ 打开输出目录（Tranche 2）
+ *   - 费用透明：执行前展示 TTS provider/model，执行后展示 detail.invocation
  */
 
+import { useState } from "react";
 import { useRenderStore, type RenderStatus } from "@/stores/useRenderStore";
 import { useViewStore } from "@/stores/useViewStore";
+import { isTauri } from "@/lib/tauri";
+import { dirname, openLocalPath } from "@/lib/shell";
+import { formatCost, useProviderInfo } from "@/lib/useProviderInfo";
+
+/** 用户录音可选的音频扩展名（与导入的 AUDIO_EXTS 一致） */
+const AUDIO_EXTS = ["mp3", "wav", "m4a", "flac", "aac", "ogg", "opus"];
+
+/** 从绝对路径取文件名（Windows / POSIX 分隔符都兼容） */
+function basename(path: string): string {
+  const parts = path.split(/[\\/]/);
+  return parts[parts.length - 1] || path;
+}
 
 function statusLabel(s: RenderStatus): string {
   switch (s) {
@@ -39,20 +54,54 @@ export function CreateRenderView() {
   const sourceVersionId = useRenderStore((s) => s.sourceVersionId);
   const template = useRenderStore((s) => s.template);
   const ttsEngine = useRenderStore((s) => s.ttsEngine);
+  const userAudioUri = useRenderStore((s) => s.userAudioUri);
   const status = useRenderStore((s) => s.status);
   const jobId = useRenderStore((s) => s.jobId);
   const progress = useRenderStore((s) => s.progress);
   const draft = useRenderStore((s) => s.draft);
+  const artifacts = useRenderStore((s) => s.artifacts);
+  const invocation = useRenderStore((s) => s.invocation);
   const isBusy = useRenderStore((s) => s.isBusy);
   const error = useRenderStore((s) => s.error);
   const setTemplate = useRenderStore((s) => s.setTemplate);
   const setTtsEngine = useRenderStore((s) => s.setTtsEngine);
+  const setUserAudioUri = useRenderStore((s) => s.setUserAudioUri);
   const render = useRenderStore((s) => s.render);
   const cancel = useRenderStore((s) => s.cancel);
   const retry = useRenderStore((s) => s.retry);
 
-  const canRender = !!sourceVersionId && !isBusy;
+  const providerInfo = useProviderInfo();
+  const [openNotice, setOpenNotice] = useState<string | null>(null);
+  const inTauri = isTauri();
+
+  const canRender =
+    !!sourceVersionId &&
+    !isBusy &&
+    (ttsEngine !== "user_audio" || !!userAudioUri);
   const progressPercent = Math.round(progress * 100);
+
+  /** 用户录音选择：dialog 选音频文件 → user_audio_uri（Tranche 2） */
+  async function pickUserAudio() {
+    if (!inTauri || isBusy) return;
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const selected = await open({
+      multiple: false,
+      filters: [{ name: "音频", extensions: AUDIO_EXTS }],
+    });
+    if (typeof selected === "string") setUserAudioUri(selected);
+  }
+
+  /** 打开输出目录（视频 artifact 所在目录） */
+  async function handleOpenOutputDir() {
+    const video = artifacts?.video ?? draft?.video_uri;
+    if (!video) return;
+    try {
+      setOpenNotice(null);
+      await openLocalPath(dirname(video));
+    } catch (e) {
+      setOpenNotice(e instanceof Error ? e.message : String(e));
+    }
+  }
 
   return (
     <>
@@ -130,6 +179,26 @@ export function CreateRenderView() {
                   <option value="user_audio">用户录音</option>
                 </select>
               </div>
+              {ttsEngine === "user_audio" && (
+                <div className="form-group">
+                  <label htmlFor="userAudioPick">用户录音文件</label>
+                  <div className="inline-actions">
+                    <button
+                      id="userAudioPick"
+                      type="button"
+                      className="btn small ghost"
+                      onClick={() => void pickUserAudio()}
+                      disabled={!inTauri || isBusy}
+                      title={inTauri ? undefined : "选择音频文件需要在桌面应用中使用"}
+                    >
+                      {userAudioUri ? "重新选择" : "选择音频文件"}
+                    </button>
+                    <span className="panel-meta mono" style={{ alignSelf: "center" }}>
+                      {userAudioUri ? basename(userAudioUri) : "未选择"}
+                    </span>
+                  </div>
+                </div>
+              )}
               <div className="form-group">
                 <label htmlFor="template">模板</label>
                 <select
@@ -189,6 +258,28 @@ export function CreateRenderView() {
                   <dt>TTS</dt>
                   <dd>{ttsEngine === "synthesize" ? "Edge TTS" : "用户录音"}</dd>
                 </div>
+                {/* 费用透明：执行前展示将使用的 TTS provider/model */}
+                {ttsEngine === "synthesize" && (
+                  <div className="provenance-row">
+                    <dt>将使用模型</dt>
+                    <dd className="mono">
+                      {providerInfo
+                        ? `${providerInfo.tts.provider ?? "未配置"} / ${providerInfo.tts.model ?? "未配置"}`
+                        : "读取配置中…"}
+                    </dd>
+                  </div>
+                )}
+                {/* 费用透明：执行后展示 detail.invocation */}
+                {invocation && (
+                  <div className="provenance-row">
+                    <dt>本次调用</dt>
+                    <dd>
+                      {invocation.provider} / {invocation.model}
+                      {" · "}
+                      {formatCost(invocation.estimated_cost)}
+                    </dd>
+                  </div>
+                )}
                 {jobId && (
                   <div className="provenance-row">
                     <dt>job_id</dt>
@@ -247,16 +338,66 @@ export function CreateRenderView() {
                 <button
                   className="btn small"
                   type="button"
-                  disabled={status !== "succeeded" || !draft?.video_uri}
+                  disabled={status !== "succeeded" || !(artifacts?.video ?? draft?.video_uri)}
                   onClick={() => {
-                    if (draft?.video_uri) {
-                      void navigator.clipboard.writeText(draft.video_uri);
-                    }
+                    const video = artifacts?.video ?? draft?.video_uri;
+                    if (video) void navigator.clipboard.writeText(video);
                   }}
                 >
                   复制路径
                 </button>
               </div>
+              {/* Tranche 2：字幕/音频 artifact（渲染成功后由 detail.artifacts 提供） */}
+              {artifacts?.subtitles && (
+                <div className="export-row">
+                  <div>
+                    <strong>字幕 SRT</strong>
+                    <div className="row-sub mono">{basename(artifacts.subtitles)}</div>
+                  </div>
+                  <button
+                    className="btn small"
+                    type="button"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(artifacts.subtitles as string);
+                    }}
+                  >
+                    复制路径
+                  </button>
+                </div>
+              )}
+              {artifacts?.audio && (
+                <div className="export-row">
+                  <div>
+                    <strong>旁白音频</strong>
+                    <div className="row-sub mono">{basename(artifacts.audio)}</div>
+                  </div>
+                  <button
+                    className="btn small"
+                    type="button"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(artifacts.audio as string);
+                    }}
+                  >
+                    复制路径
+                  </button>
+                </div>
+              )}
+              {status === "succeeded" && (artifacts?.video ?? draft?.video_uri) && (
+                <div className="inline-actions section-gap">
+                  <button
+                    className="btn small"
+                    type="button"
+                    onClick={() => void handleOpenOutputDir()}
+                  >
+                    打开输出目录
+                  </button>
+                </div>
+              )}
+              {openNotice && (
+                <p className="panel-meta section-gap" role="status">
+                  {openNotice}
+                </p>
+              )}
             </div>
           </article>
         </div>

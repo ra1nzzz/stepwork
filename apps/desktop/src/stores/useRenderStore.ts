@@ -18,6 +18,8 @@ import type {
   CreateRenderJobPayload,
   CancelJobPayload,
   JobProgressParams,
+  RenderArtifacts,
+  ProviderInvocation,
 } from "@/lib/types";
 
 const WORKSPACE = "ws-local";
@@ -38,16 +40,25 @@ interface RenderStoreState {
   sourceVersionId: string;
   template: string;
   ttsEngine: "synthesize" | "user_audio";
+  /** 用户录音音频绝对路径（tts_engine=user_audio 时随 payload 提交） */
+  userAudioUri: string | null;
   status: RenderStatus;
   jobId: string | null;
   progress: number;
   draft: VideoDraftMeta | null;
+  /** 渲染产物 content_versions(video_draft) 的版本 id（发布关联用） */
+  videoVersionId: string | null;
+  /** 渲染成功 detail.artifacts（video/subtitles/audio 绝对路径） */
+  artifacts: RenderArtifacts | null;
+  /** 费用透明：detail.invocation（执行后展示） */
+  invocation: ProviderInvocation | null;
   isBusy: boolean;
   error: string | null;
 
   setSourceVersion: (id: string) => void;
   setTemplate: (t: string) => void;
   setTtsEngine: (e: "synthesize" | "user_audio") => void;
+  setUserAudioUri: (uri: string | null) => void;
   render: () => Promise<void>;
   cancel: () => Promise<void>;
   retry: () => Promise<void>;
@@ -81,25 +92,36 @@ export const useRenderStore = create<RenderStoreState>((set, get) => ({
   sourceVersionId: "",
   template: "vertical-caption-v1",
   ttsEngine: "synthesize",
+  userAudioUri: null,
   status: "idle",
   jobId: null,
   progress: 0,
   draft: null,
+  videoVersionId: null,
+  artifacts: null,
+  invocation: null,
   isBusy: false,
   error: null,
 
   setSourceVersion: (id) => set({ sourceVersionId: id }),
   setTemplate: (t) => set({ template: t }),
   setTtsEngine: (e) => set({ ttsEngine: e }),
+  setUserAudioUri: (uri) => set({ userAudioUri: uri }),
 
   render: async () => {
     if (get().isBusy) return;
+    if (get().ttsEngine === "user_audio" && !get().userAudioUri) {
+      set({ error: "请先选择用户录音音频文件" });
+      return;
+    }
     set({ status: "running", isBusy: true, error: null, progress: 0.05 });
     try {
       const payload: CreateRenderJobPayload = {
         source_version_id: get().sourceVersionId,
         template: get().template,
         tts_engine: get().ttsEngine,
+        user_audio_uri:
+          get().ttsEngine === "user_audio" ? get().userAudioUri : null,
       };
       const env = buildEnvelope(
         "CreateRenderJob",
@@ -118,10 +140,24 @@ export const useRenderStore = create<RenderStoreState>((set, get) => ({
         return;
       }
       const detail = (res.detail ?? {}) as Record<string, unknown>;
+      // Tranche 2：渲染成功 detail 携带 artifacts（video/subtitles/audio）
+      // 与 invocation（provider/model/estimated_cost）；旧后端缺失时为 null
+      const rawArtifacts = detail.artifacts as
+        | { video?: string; subtitles?: string | null; audio?: string | null }
+        | undefined;
       set({
         status: "succeeded",
         jobId: res.job_id ?? null,
         progress: 1,
+        videoVersionId: res.artifact_ids[0] ?? null,
+        artifacts: rawArtifacts?.video
+          ? {
+              video: rawArtifacts.video,
+              subtitles: rawArtifacts.subtitles ?? null,
+              audio: rawArtifacts.audio ?? null,
+            }
+          : null,
+        invocation: (detail.invocation as ProviderInvocation | undefined) ?? null,
         draft: metaFromDetail(
           detail,
           get().template,
@@ -179,7 +215,16 @@ export const useRenderStore = create<RenderStoreState>((set, get) => ({
 
   retry: async () => {
     // 清旧 error，避免 UI 残留上一次失败文案
-    set({ error: null, status: "idle", draft: null, jobId: null, progress: 0 });
+    set({
+      error: null,
+      status: "idle",
+      draft: null,
+      jobId: null,
+      progress: 0,
+      videoVersionId: null,
+      artifacts: null,
+      invocation: null,
+    });
     await get().render();
   },
 
@@ -189,6 +234,9 @@ export const useRenderStore = create<RenderStoreState>((set, get) => ({
       jobId: null,
       progress: 0,
       draft: null,
+      videoVersionId: null,
+      artifacts: null,
+      invocation: null,
       error: null,
       isBusy: false,
     }),

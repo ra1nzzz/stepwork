@@ -5,6 +5,8 @@
  *   - ListProjects：进入页面时加载，刷新按钮触发重载
  *   - ExportProject：导出选中项目为 zip
  *   - ImportProject：选择 zip 文件后导入
+ *   - Tranche 2：ListBrandProfiles + SetProjectBrandProfile
+ *     （项目 ↔ 品牌档案关联，生成注入用）
  *
  * 由于后端无 ArchiveProject / UpdateProject，归档/恢复 UI 已移除。
  */
@@ -12,6 +14,7 @@
 import { useEffect, useState } from "react";
 import { buildEnvelope, dispatchCommand, isTauri } from "@/lib/tauri";
 import { useViewStore } from "@/stores/useViewStore";
+import type { BrandProfile, SetProjectBrandProfilePayload } from "@/lib/types";
 
 interface ProjectRow {
   id: string;
@@ -52,6 +55,9 @@ export function ProjectsView() {
   const [notice, setNotice] = useState<string | null>(null);
   const [searchKeyword, setSearchKeyword] = useState("");
   const [creating, setCreating] = useState(false);
+  // Tranche 2：品牌档案关联（生成注入用）
+  const [brandProfiles, setBrandProfiles] = useState<BrandProfile[]>([]);
+  const [bindingId, setBindingId] = useState<string | null>(null);
   const inTauri = isTauri();
 
   // 按标题本地过滤
@@ -79,7 +85,43 @@ export function ProjectsView() {
 
   useEffect(() => {
     void loadProjects();
+    // 品牌档案列表（关联 select 的选项；后端未连接时静默保持空）
+    void (async () => {
+      try {
+        const env = buildEnvelope("ListBrandProfiles", "ws-local", null, {});
+        const res = await dispatchCommand(env);
+        if (!res.ok) return;
+        const detail = (res.detail ?? {}) as { profiles?: BrandProfile[] };
+        setBrandProfiles(detail.profiles ?? []);
+      } catch {
+        /* 静默 */
+      }
+    })();
   }, []);
+
+  /** 项目 ↔ 品牌档案关联（SetProjectBrandProfile；空值解除关联） */
+  async function handleBindBrand(projectId: string, profileId: string) {
+    setBindingId(projectId);
+    setError(null);
+    try {
+      const payload: SetProjectBrandProfilePayload = {
+        projectId,
+        profileId: profileId || null,
+      };
+      const env = buildEnvelope("SetProjectBrandProfile", "ws-local", projectId, payload);
+      const res = await dispatchCommand(env);
+      if (!res.ok) throw new Error(res.error ?? "SET_BRAND_PROFILE_FAILED");
+      setRows((prev) =>
+        prev.map((r) =>
+          r.id === projectId ? { ...r, brand_profile_id: profileId || null } : r,
+        ),
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBindingId(null);
+    }
+  }
 
   async function handleExport() {
     if (!selectedId) return;
@@ -232,6 +274,7 @@ export function ProjectsView() {
               <tr>
                 <th>项目</th>
                 <th>状态</th>
+                <th>品牌档案</th>
                 <th>创建时间</th>
                 <th>最近更新</th>
                 <th>操作</th>
@@ -240,14 +283,14 @@ export function ProjectsView() {
             <tbody id="projectRows">
               {isLoading && (
                 <tr>
-                  <td colSpan={5} style={{ textAlign: "center", padding: 24 }}>
+                  <td colSpan={6} style={{ textAlign: "center", padding: 24 }}>
                     正在加载项目列表…
                   </td>
                 </tr>
               )}
               {!isLoading && filteredRows.length === 0 && (
                 <tr>
-                  <td colSpan={5} style={{ textAlign: "center", padding: 24, color: "var(--muted)" }}>
+                  <td colSpan={6} style={{ textAlign: "center", padding: 24, color: "var(--muted)" }}>
                     {searchKeyword ? "无匹配项目。" : "尚无项目。点击「新建项目」开始第一个创作。"}
                   </td>
                 </tr>
@@ -268,6 +311,22 @@ export function ProjectsView() {
                   </td>
                   <td>
                     <span className="status">{row.status}</span>
+                  </td>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <select
+                      className="select"
+                      aria-label={`项目 ${row.title} 的品牌档案`}
+                      value={row.brand_profile_id ?? ""}
+                      disabled={bindingId === row.id}
+                      onChange={(e) => void handleBindBrand(row.id, e.target.value)}
+                    >
+                      <option value="">未关联</option>
+                      {brandProfiles.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
                   </td>
                   <td className="mono">{formatDate(row.created_at)}</td>
                   <td className="mono">{formatDate(row.updated_at)}</td>

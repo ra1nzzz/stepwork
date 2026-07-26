@@ -5,8 +5,15 @@
  * 数据流：
  *   1. 用户从 useImportStore.assets 选一个 asset
  *   2. 调 useTranscriptStore.transcribe(assetId) → 得到 versionId
- *   3. 调 useAnalysisStore.analyze(versionId) → 得到结构化报告
+ *   3. 调 useAnalysisStore.analyze(versionId) → 完整结构化报告
+ *      （summary/hook/structure/topics/key_points/risks/… 经 GetContentVersion 拉取）
  *   4. 把 transcript versionId 写入 useScriptStore.setSourceVersion，供下游角度生成
+ *
+ * Tranche 2：
+ *   - 逐字稿全文：GetContentVersion（store 有 version id）；缺失时回退
+ *     ListContentVersions contentType='transcript' 最新一条
+ *   - 编辑模式：字段编辑 → SaveAnalysis 生成新版本（版本链，不覆盖历史）
+ *   - 费用透明：执行前展示 provider/model/预计费用，执行后展示 detail.invocation
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -15,6 +22,13 @@ import { useTranscriptStore, type TranscriptJob } from "@/stores/useTranscriptSt
 import { useAnalysisStore } from "@/stores/useAnalysisStore";
 import { useScriptStore } from "@/stores/useScriptStore";
 import { useViewStore } from "@/stores/useViewStore";
+import { buildEnvelope, dispatchCommand, getWorkspaceId } from "@/lib/tauri";
+import { estimateCost, formatCost, useProviderInfo } from "@/lib/useProviderInfo";
+import type {
+  AnalysisReportData,
+  ContentVersionDetail,
+  ContentVersionSummary,
+} from "@/lib/types";
 
 function jobStatusLabel(s: TranscriptJob["status"]): string {
   switch (s) {
@@ -38,8 +52,91 @@ function jobStatusClass(s: TranscriptJob["status"]): string {
   }
 }
 
+function sentimentLabel(s: string | null): string {
+  if (s === "positive") return "正面";
+  if (s === "negative") return "负面";
+  if (s === "neutral") return "中性";
+  return s ?? "未知";
+}
+
+/** 编辑模式表单模型（数组字段按行编辑） */
+interface EditModel {
+  summary: string;
+  hook: string;
+  structureText: string;
+  topicsText: string;
+  keyPointsText: string;
+  risksText: string;
+  sentiment: string;
+  suggestedTitle: string;
+  suggestedTagsText: string;
+}
+
+function toEditModel(d: AnalysisReportData): EditModel {
+  return {
+    summary: d.summary,
+    hook: d.hook ?? "",
+    structureText: d.structure.join("\n"),
+    topicsText: d.topics.join("\n"),
+    keyPointsText: d.key_points.join("\n"),
+    risksText: d.risks.join("\n"),
+    sentiment: d.sentiment ?? "neutral",
+    suggestedTitle: d.suggested_title ?? "",
+    suggestedTagsText: d.suggested_tags.join("\n"),
+  };
+}
+
+function splitLines(text: string): string[] {
+  return text
+    .split("\n")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+function fromEditModel(m: EditModel, base: AnalysisReportData): AnalysisReportData {
+  return {
+    ...base,
+    summary: m.summary,
+    hook: m.hook.trim() ? m.hook.trim() : null,
+    structure: splitLines(m.structureText),
+    topics: splitLines(m.topicsText),
+    key_points: splitLines(m.keyPointsText),
+    risks: splitLines(m.risksText),
+    sentiment: m.sentiment || null,
+    suggested_title: m.suggestedTitle.trim() ? m.suggestedTitle.trim() : null,
+    suggested_tags: splitLines(m.suggestedTagsText),
+  };
+}
+
+/** 报告只读区块（标题 + 列表/段落） */
+function ReportSection({
+  title,
+  items,
+  text,
+}: {
+  title: string;
+  items?: string[];
+  text?: string | null;
+}) {
+  if ((items == null || items.length === 0) && !text) return null;
+  return (
+    <div className="report-section" style={{ marginBottom: 12 }}>
+      <h3>{title}</h3>
+      {text && <p>{text}</p>}
+      {items && items.length > 0 && (
+        <ul className="report-list">
+          {items.map((it, i) => (
+            <li key={i}>{it}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export function CreateAnalysisView() {
   const setCreateSubView = useViewStore((s) => s.setCreateSubView);
+  const selectedProjectId = useViewStore((s) => s.selectedProjectId);
   const assets = useImportStore((s) => s.assets);
 
   const jobs = useTranscriptStore((s) => s.jobs);
@@ -51,14 +148,25 @@ export function CreateAnalysisView() {
 
   const reports = useAnalysisStore((s) => s.reports);
   const isAnalyzing = useAnalysisStore((s) => s.isBusy);
+  const isSaving = useAnalysisStore((s) => s.isSaving);
   const analysisError = useAnalysisStore((s) => s.error);
   const analyze = useAnalysisStore((s) => s.analyze);
+  const saveAnalysis = useAnalysisStore((s) => s.saveAnalysis);
 
   const setScriptSourceVersion = useScriptStore((s) => s.setSourceVersion);
+
+  const providerInfo = useProviderInfo();
 
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(
     assets[0]?.id ?? null,
   );
+
+  // 逐字稿全文（GetContentVersion 拉取）
+  const [transcriptText, setTranscriptText] = useState<string | null>(null);
+  const [transcriptExpanded, setTranscriptExpanded] = useState(false);
+
+  // 编辑模式
+  const [editModel, setEditModel] = useState<EditModel | null>(null);
 
   // 自动选中第一个 asset
   useEffect(() => {
@@ -79,7 +187,56 @@ export function CreateAnalysisView() {
     }
   }, [latestTranscriptVersion, setScriptSourceVersion]);
 
+  // 逐字稿全文：优先按 store 里的 version id 拉取；
+  // 缺失时回退 ListContentVersions contentType='transcript' 最新一条
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        let versionId = latestTranscriptVersion;
+        if (!versionId && selectedProjectId) {
+          const listEnv = buildEnvelope(
+            "ListContentVersions",
+            getWorkspaceId(),
+            selectedProjectId,
+            { projectId: selectedProjectId, contentType: "transcript", limit: 1 },
+          );
+          const listRes = await dispatchCommand(listEnv);
+          if (listRes.ok) {
+            const detail = (listRes.detail ?? {}) as {
+              versions?: ContentVersionSummary[];
+            };
+            versionId = detail.versions?.[0]?.id ?? null;
+          }
+        }
+        if (!versionId) {
+          if (!cancelled) setTranscriptText(null);
+          return;
+        }
+        const env = buildEnvelope("GetContentVersion", getWorkspaceId(), selectedProjectId, {
+          versionId,
+        });
+        const res = await dispatchCommand(env);
+        if (cancelled || !res.ok) return;
+        const detail = (res.detail ?? {}) as { version?: ContentVersionDetail };
+        setTranscriptText(detail.version?.content ?? null);
+      } catch {
+        /* 后端未连接：不展示全文 */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [latestTranscriptVersion, selectedProjectId]);
+
   const latestReport = reports[reports.length - 1] ?? null;
+  const reportData = latestReport?.data ?? null;
+
+  // 执行前费用粗估：转写字符量 / 1000 × costPer1k
+  const preCost = useMemo(() => {
+    if (!transcriptText || !providerInfo) return null;
+    return estimateCost(transcriptText.length, providerInfo.costPer1k);
+  }, [transcriptText, providerInfo]);
 
   function handleTranscribe() {
     if (!selectedAssetId) return;
@@ -88,7 +245,18 @@ export function CreateAnalysisView() {
 
   function handleAnalyze() {
     if (!latestTranscriptVersion) return;
+    setEditModel(null);
     void analyze(latestTranscriptVersion);
+  }
+
+  function enterEdit() {
+    if (reportData) setEditModel(toEditModel(reportData));
+  }
+
+  async function handleSaveEdit() {
+    if (!editModel || !reportData) return;
+    await saveAnalysis(fromEditModel(editModel, reportData));
+    setEditModel(null);
   }
 
   return (
@@ -121,116 +289,157 @@ export function CreateAnalysisView() {
       </section>
 
       <section className="layout-main section-gap" id="analysis-report">
-        {/* 左：转写任务面板 */}
-        <article className="panel" data-od-id="transcript-panel">
-          <div className="panel-head">
-            <div>
-              <h2 className="panel-title">转写任务</h2>
-              <div className="panel-meta">
-                {assets.length === 0
-                  ? "请先在「导入」步骤添加素材"
-                  : `可选 ${assets.length} 个素材`}
+        {/* 左：转写任务 + 逐字稿全文 */}
+        <div className="grid">
+          <article className="panel" data-od-id="transcript-panel">
+            <div className="panel-head">
+              <div>
+                <h2 className="panel-title">转写任务</h2>
+                <div className="panel-meta">
+                  {assets.length === 0
+                    ? "请先在「导入」步骤添加素材"
+                    : `可选 ${assets.length} 个素材`}
+                </div>
               </div>
+              <button
+                className="btn small ghost"
+                type="button"
+                onClick={handleTranscribe}
+                disabled={isTranscribing || !selectedAssetId}
+              >
+                {isTranscribing ? "转写中…" : "开始转写"}
+              </button>
             </div>
-            <button
-              className="btn small ghost"
-              type="button"
-              onClick={handleTranscribe}
-              disabled={isTranscribing || !selectedAssetId}
-            >
-              {isTranscribing ? "转写中…" : "开始转写"}
-            </button>
-          </div>
-          <div className="panel-body">
-            {/* 素材选择器 */}
-            {assets.length > 0 && (
-              <div className="form-group" style={{ marginBottom: 16 }}>
-                <label htmlFor="assetSelect">选择素材</label>
-                <select
-                  id="assetSelect"
-                  className="select"
-                  value={selectedAssetId ?? ""}
-                  onChange={(e) => setSelectedAssetId(e.target.value)}
-                >
-                  {assets.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.local_uri} ({a.kind})
-                    </option>
+            <div className="panel-body">
+              {/* 素材选择器 */}
+              {assets.length > 0 && (
+                <div className="form-group" style={{ marginBottom: 16 }}>
+                  <label htmlFor="assetSelect">选择素材</label>
+                  <select
+                    id="assetSelect"
+                    className="select"
+                    value={selectedAssetId ?? ""}
+                    onChange={(e) => setSelectedAssetId(e.target.value)}
+                  >
+                    {assets.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.local_uri} ({a.kind})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* 转写任务列表 */}
+              {jobs.length === 0 ? (
+                <p className="panel-meta" style={{ margin: 0 }}>
+                  尚无转写任务。选择素材后点击「开始转写」。
+                </p>
+              ) : (
+                <div className="task-list">
+                  {jobs.map((job) => (
+                    <div className="task-item" key={job.id} data-state={job.status}>
+                      <div className="task-top">
+                        <div>
+                          <div className="task-name">
+                            {job.assetId ? `asset ${job.assetId.slice(0, 8)}` : "外部素材"}
+                          </div>
+                          <div className="row-sub">
+                            {job.versionId ? `版本 ${job.versionId.slice(0, 8)}` : "无版本"}
+                            {job.language ? ` · ${job.language}` : ""}
+                          </div>
+                        </div>
+                        <span className={`status ${jobStatusClass(job.status)}`}>
+                          {jobStatusLabel(job.status)}
+                        </span>
+                      </div>
+                      {job.status === "running" && (
+                        <div
+                          className="progress"
+                          style={{ ["--progress" as string]: `${Math.round(job.progress * 100)}%` }}
+                        >
+                          <span />
+                        </div>
+                      )}
+                      {job.error && (
+                        <p className="panel-meta section-gap" style={{ color: "var(--danger)" }}>
+                          {job.error}
+                        </p>
+                      )}
+                      <div className="task-actions">
+                        {job.status === "failed" && (
+                          <button
+                            className="btn small retry"
+                            type="button"
+                            onClick={() => void retryTranscribe(job.id)}
+                          >
+                            重试
+                          </button>
+                        )}
+                        {(job.status === "running" || job.status === "pending") && (
+                          <button
+                            className="btn small ghost"
+                            type="button"
+                            onClick={() => cancelTranscribe(job.id)}
+                          >
+                            取消
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   ))}
-                </select>
+                </div>
+              )}
+
+              {transcribeError && (
+                <p className="error-text section-gap" style={{ color: "var(--danger)" }}>
+                  {transcribeError}
+                </p>
+              )}
+            </div>
+          </article>
+
+          {/* 逐字稿全文（GetContentVersion 拉取） */}
+          <article className="panel" data-od-id="transcript-fulltext-panel">
+            <div className="panel-head">
+              <div>
+                <h2 className="panel-title">逐字稿全文</h2>
+                <div className="panel-meta">
+                  {transcriptText
+                    ? `${transcriptText.length} 字`
+                    : "转写完成后自动加载"}
+                </div>
               </div>
-            )}
+              {transcriptText && transcriptText.length > 600 && (
+                <button
+                  className="btn small ghost"
+                  type="button"
+                  onClick={() => setTranscriptExpanded((v) => !v)}
+                >
+                  {transcriptExpanded ? "收起" : "展开全文"}
+                </button>
+              )}
+            </div>
+            <div className="panel-body">
+              {transcriptText ? (
+                <p
+                  className="transcript"
+                  style={{ margin: 0, whiteSpace: "pre-wrap", lineHeight: 1.8 }}
+                >
+                  {transcriptExpanded || transcriptText.length <= 600
+                    ? transcriptText
+                    : `${transcriptText.slice(0, 600)}…`}
+                </p>
+              ) : (
+                <p className="panel-meta" style={{ margin: 0 }}>
+                  尚无逐字稿。完成转写后此处展示全文。
+                </p>
+              )}
+            </div>
+          </article>
+        </div>
 
-            {/* 转写任务列表 */}
-            {jobs.length === 0 ? (
-              <p className="panel-meta" style={{ margin: 0 }}>
-                尚无转写任务。选择素材后点击「开始转写」。
-              </p>
-            ) : (
-              <div className="task-list">
-                {jobs.map((job) => (
-                  <div className="task-item" key={job.id} data-state={job.status}>
-                    <div className="task-top">
-                      <div>
-                        <div className="task-name">
-                          {job.assetId ? `asset ${job.assetId.slice(0, 8)}` : "外部素材"}
-                        </div>
-                        <div className="row-sub">
-                          {job.versionId ? `版本 ${job.versionId.slice(0, 8)}` : "无版本"}
-                          {job.language ? ` · ${job.language}` : ""}
-                        </div>
-                      </div>
-                      <span className={`status ${jobStatusClass(job.status)}`}>
-                        {jobStatusLabel(job.status)}
-                      </span>
-                    </div>
-                    {job.status === "running" && (
-                      <div
-                        className="progress"
-                        style={{ ["--progress" as string]: `${Math.round(job.progress * 100)}%` }}
-                      >
-                        <span />
-                      </div>
-                    )}
-                    {job.error && (
-                      <p className="panel-meta section-gap" style={{ color: "var(--danger)" }}>
-                        {job.error}
-                      </p>
-                    )}
-                    <div className="task-actions">
-                      {job.status === "failed" && (
-                        <button
-                          className="btn small retry"
-                          type="button"
-                          onClick={() => void retryTranscribe(job.id)}
-                        >
-                          重试
-                        </button>
-                      )}
-                      {(job.status === "running" || job.status === "pending") && (
-                        <button
-                          className="btn small ghost"
-                          type="button"
-                          onClick={() => cancelTranscribe(job.id)}
-                        >
-                          取消
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {transcribeError && (
-              <p className="error-text section-gap" style={{ color: "var(--danger)" }}>
-                {transcribeError}
-              </p>
-            )}
-          </div>
-        </article>
-
-        {/* 右：结构化分析 */}
+        {/* 右：结构化分析（完整报告 + 编辑模式） */}
         <aside className="panel" data-od-id="structured-report-panel">
           <div className="panel-head">
             <div>
@@ -250,6 +459,39 @@ export function CreateAnalysisView() {
               {isAnalyzing ? "分析中…" : "生成分析"}
             </button>
           </div>
+
+          {/* 费用透明：执行前 provider/model/预计费用（PRD-ANA-006） */}
+          <div className="panel-body provenance-bar" style={{ paddingBottom: 0 }}>
+            <dl className="provenance">
+              <div className="provenance-row">
+                <dt>将使用模型</dt>
+                <dd className="mono">
+                  {providerInfo
+                    ? `${providerInfo.ai.provider ?? "未配置"} / ${providerInfo.ai.model ?? "未配置"}`
+                    : "读取配置中…"}
+                </dd>
+              </div>
+              <div className="provenance-row">
+                <dt>预计费用</dt>
+                <dd>
+                  {transcriptText
+                    ? `${formatCost(preCost)}（${transcriptText.length} 字粗估）`
+                    : "待转写完成"}
+                </dd>
+              </div>
+              {latestReport?.invocation && (
+                <div className="provenance-row">
+                  <dt>本次调用</dt>
+                  <dd>
+                    {latestReport.invocation.provider} / {latestReport.invocation.model}
+                    {" · "}
+                    {formatCost(latestReport.invocation.estimated_cost)}
+                  </dd>
+                </div>
+              )}
+            </dl>
+          </div>
+
           <div className="panel-body">
             {!latestReport && !isAnalyzing && (
               <p className="panel-meta" style={{ margin: 0 }}>
@@ -271,38 +513,191 @@ export function CreateAnalysisView() {
               </p>
             )}
 
-            {latestReport?.status === "succeeded" && (
+            {latestReport?.status === "succeeded" && !reportData && (
+              <p className="panel-meta" style={{ margin: 0 }}>
+                分析完成，但报告全文拉取失败。版本
+                {latestReport.versionId ? ` ${latestReport.versionId.slice(0, 8)}` : ""}
+                已落库。
+              </p>
+            )}
+
+            {/* 只读完整报告 */}
+            {latestReport?.status === "succeeded" && reportData && !editModel && (
               <>
-                {latestReport.summary && (
+                <ReportSection title="核心判断" text={reportData.summary} />
+                <ReportSection title="开头钩子" text={reportData.hook} />
+                <ReportSection title="内容结构" items={reportData.structure} />
+                <ReportSection title="话题点" items={reportData.topics} />
+                <ReportSection title="关键要点" items={reportData.key_points} />
+                <ReportSection title="风险点" items={reportData.risks} />
+                <ReportSection
+                  title="情感倾向"
+                  text={sentimentLabel(reportData.sentiment)}
+                />
+                <ReportSection title="建议标题" text={reportData.suggested_title} />
+                {reportData.suggested_tags.length > 0 && (
                   <div className="report-section" style={{ marginBottom: 12 }}>
-                    <h3>核心判断</h3>
-                    <p>{latestReport.summary}</p>
-                  </div>
-                )}
-                {latestReport.topics.length > 0 && (
-                  <div className="report-section" style={{ marginBottom: 12 }}>
-                    <h3>话题点</h3>
-                    <ul className="report-list">
-                      {latestReport.topics.map((t, i) => (
-                        <li key={i}>
-                          <strong>{t.title}</strong>
-                          {t.summary ? ` — ${t.summary}` : ""}
-                        </li>
+                    <h3>建议标签</h3>
+                    <div className="filters" style={{ flexWrap: "wrap" }}>
+                      {reportData.suggested_tags.map((t) => (
+                        <span key={t} className="chip">
+                          {t}
+                        </span>
                       ))}
-                    </ul>
+                    </div>
                   </div>
                 )}
-                {latestReport.sentiment && (
-                  <div className="report-section">
-                    <h3>情感倾向</h3>
-                    <p>{latestReport.sentiment}</p>
-                  </div>
-                )}
-                {latestReport.confidence != null && (
+                {reportData.confidence != null && (
                   <p className="panel-meta" style={{ marginTop: 8 }}>
-                    置信度 {(latestReport.confidence * 100).toFixed(1)}%
+                    置信度 {(reportData.confidence * 100).toFixed(1)}%
+                    {latestReport.versionId
+                      ? ` · 版本 ${latestReport.versionId.slice(0, 8)}`
+                      : ""}
                   </p>
                 )}
+                <div className="inline-actions section-gap">
+                  <button className="btn small ghost" type="button" onClick={enterEdit}>
+                    编辑报告
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* 编辑模式：字段编辑 → SaveAnalysis 生成新版本 */}
+            {editModel && reportData && (
+              <>
+                <div className="form-group" style={{ marginBottom: 10 }}>
+                  <label htmlFor="editSummary">核心判断</label>
+                  <textarea
+                    id="editSummary"
+                    className="field"
+                    rows={3}
+                    style={{ width: "100%", resize: "vertical", fontFamily: "inherit" }}
+                    value={editModel.summary}
+                    onChange={(e) => setEditModel({ ...editModel, summary: e.target.value })}
+                  />
+                </div>
+                <div className="form-group" style={{ marginBottom: 10 }}>
+                  <label htmlFor="editHook">开头钩子</label>
+                  <textarea
+                    id="editHook"
+                    className="field"
+                    rows={2}
+                    style={{ width: "100%", resize: "vertical", fontFamily: "inherit" }}
+                    value={editModel.hook}
+                    onChange={(e) => setEditModel({ ...editModel, hook: e.target.value })}
+                  />
+                </div>
+                <div className="form-group" style={{ marginBottom: 10 }}>
+                  <label htmlFor="editStructure">内容结构（每行一条）</label>
+                  <textarea
+                    id="editStructure"
+                    className="field"
+                    rows={4}
+                    style={{ width: "100%", resize: "vertical", fontFamily: "inherit" }}
+                    value={editModel.structureText}
+                    onChange={(e) =>
+                      setEditModel({ ...editModel, structureText: e.target.value })
+                    }
+                  />
+                </div>
+                <div className="form-group" style={{ marginBottom: 10 }}>
+                  <label htmlFor="editTopics">话题点（每行一条）</label>
+                  <textarea
+                    id="editTopics"
+                    className="field"
+                    rows={4}
+                    style={{ width: "100%", resize: "vertical", fontFamily: "inherit" }}
+                    value={editModel.topicsText}
+                    onChange={(e) =>
+                      setEditModel({ ...editModel, topicsText: e.target.value })
+                    }
+                  />
+                </div>
+                <div className="form-group" style={{ marginBottom: 10 }}>
+                  <label htmlFor="editKeyPoints">关键要点（每行一条）</label>
+                  <textarea
+                    id="editKeyPoints"
+                    className="field"
+                    rows={4}
+                    style={{ width: "100%", resize: "vertical", fontFamily: "inherit" }}
+                    value={editModel.keyPointsText}
+                    onChange={(e) =>
+                      setEditModel({ ...editModel, keyPointsText: e.target.value })
+                    }
+                  />
+                </div>
+                <div className="form-group" style={{ marginBottom: 10 }}>
+                  <label htmlFor="editRisks">风险点（每行一条）</label>
+                  <textarea
+                    id="editRisks"
+                    className="field"
+                    rows={3}
+                    style={{ width: "100%", resize: "vertical", fontFamily: "inherit" }}
+                    value={editModel.risksText}
+                    onChange={(e) =>
+                      setEditModel({ ...editModel, risksText: e.target.value })
+                    }
+                  />
+                </div>
+                <div className="form-group" style={{ marginBottom: 10 }}>
+                  <label htmlFor="editSentiment">情感倾向</label>
+                  <select
+                    id="editSentiment"
+                    className="select"
+                    value={editModel.sentiment}
+                    onChange={(e) =>
+                      setEditModel({ ...editModel, sentiment: e.target.value })
+                    }
+                  >
+                    <option value="positive">正面</option>
+                    <option value="neutral">中性</option>
+                    <option value="negative">负面</option>
+                  </select>
+                </div>
+                <div className="form-group" style={{ marginBottom: 10 }}>
+                  <label htmlFor="editTitle">建议标题</label>
+                  <input
+                    id="editTitle"
+                    className="field"
+                    style={{ width: "100%" }}
+                    value={editModel.suggestedTitle}
+                    onChange={(e) =>
+                      setEditModel({ ...editModel, suggestedTitle: e.target.value })
+                    }
+                  />
+                </div>
+                <div className="form-group" style={{ marginBottom: 10 }}>
+                  <label htmlFor="editTags">建议标签（每行一条）</label>
+                  <textarea
+                    id="editTags"
+                    className="field"
+                    rows={3}
+                    style={{ width: "100%", resize: "vertical", fontFamily: "inherit" }}
+                    value={editModel.suggestedTagsText}
+                    onChange={(e) =>
+                      setEditModel({ ...editModel, suggestedTagsText: e.target.value })
+                    }
+                  />
+                </div>
+                <div className="inline-actions">
+                  <button
+                    className="btn small ghost"
+                    type="button"
+                    onClick={() => setEditModel(null)}
+                    disabled={isSaving}
+                  >
+                    取消
+                  </button>
+                  <button
+                    className="btn small primary"
+                    type="button"
+                    onClick={() => void handleSaveEdit()}
+                    disabled={isSaving}
+                  >
+                    {isSaving ? "保存中…" : "保存为新版本"}
+                  </button>
+                </div>
               </>
             )}
           </div>

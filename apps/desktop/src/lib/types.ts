@@ -123,7 +123,21 @@ export interface CommandEnvelope {
     | "CreateProject"
     | "DeleteAsset"
     | "BackupWorkspace"
-    | "RestoreWorkspace";
+    | "RestoreWorkspace"
+    | "CreateBrandProfile"
+    | "UpdateBrandProfile"
+    | "ListBrandProfiles"
+    | "SetProjectBrandProfile"
+    | "SaveAnalysis"
+    | "ListContentVersions"
+    | "GetContentVersion"
+    | "CreateWorkspace"
+    | "RenameWorkspace"
+    | "ArchiveWorkspace"
+    | "ListWorkspaces"
+    | "CreatePlatformVariant"
+    | "ListPlatformVariants"
+    | "ExportBundle";
   schemaVersion: string;
   actor: { type: "user" | "agent" | "plugin" | "system" | "desktop"; id: string };
   source: string;
@@ -189,24 +203,40 @@ export type AnalysisStatus =
   | "succeeded"
   | "failed";
 
-export interface AnalysisTopic {
-  title: string;
+/**
+ * 完整分析报告数据（对齐 worker/runtime/analysis/schema.py ANALYSIS_SCHEMA，
+ * Tranche 2 新增 hook / structure / risks 三个 required 字段）。
+ * 报告以 JSON string 落库为 content_versions(analysis)，前端经
+ * GetContentVersion 拉取全文后解析为本类型。
+ */
+export interface AnalysisReportData {
   summary: string;
-  timestamp?: number | null;
+  /** 开头钩子（Tranche 2 新增；旧版本报告可能缺失 → null） */
+  hook: string | null;
+  /** 内容结构骨架（Tranche 2 新增） */
+  structure: string[];
+  topics: string[];
+  key_points: string[];
+  /** 风险点（Tranche 2 新增） */
+  risks: string[];
+  sentiment: string | null;
+  suggested_title: string | null;
+  suggested_tags: string[];
+  target_audience: string | null;
+  provider: string;
+  model: string;
+  confidence: number | null;
 }
 
-export interface AnalysisChapter {
-  title: string;
-  start: number;
-  end: number;
-}
-
+/** 一次分析任务的 UI 侧包装（store 内条目） */
 export interface AnalysisReport {
   status: AnalysisStatus;
-  summary: string;
-  chapters: AnalysisChapter[];
-  topics: AnalysisTopic[];
-  sentiment: string | null;
+  /** 分析产物 content_versions(analysis) 的版本 id */
+  versionId: string | null;
+  /** 完整报告数据（GetContentVersion 拉取解析；失败时为 null） */
+  data: AnalysisReportData | null;
+  /** 费用透明：执行后由 detail.invocation 回填 */
+  invocation: ProviderInvocation | null;
   provider: string | null;
   model: string | null;
   confidence: number | null;
@@ -383,4 +413,179 @@ export interface JobProgressParams {
 export interface WorkerNotification {
   method: string;
   params: Record<string, unknown>;
+}
+
+/**
+ * ===== Tranche 2 类型（BrandProfile / 版本查询 / Workspace / 发布 / 费用透明） =====
+ */
+
+/** 费用透明：命令成功后 detail.invocation（provider/model/粗估费用） */
+export interface ProviderInvocation {
+  provider: string;
+  model: string;
+  estimated_cost: number | null;
+}
+
+/** 渲染成功 detail.artifacts（绝对路径；字幕/音频可能缺失） */
+export interface RenderArtifacts {
+  video: string;
+  subtitles: string | null;
+  audio: string | null;
+}
+
+/** 品牌档案（对齐 migrations/0005 brand_profiles；出参全字段 camelCase） */
+export interface BrandProfile {
+  id: string;
+  workspaceId: string;
+  name: string;
+  positioning: string;
+  audience: string;
+  tone: string;
+  contentPillars: string[];
+  bannedExpressions: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** CreateBrandProfile payload */
+export interface CreateBrandProfilePayload {
+  name: string;
+  positioning?: string;
+  audience?: string;
+  tone?: string;
+  contentPillars?: string[];
+  bannedExpressions?: string[];
+}
+
+/** UpdateBrandProfile payload（除 profileId 外均可选） */
+export interface UpdateBrandProfilePayload extends Partial<CreateBrandProfilePayload> {
+  profileId: string;
+}
+
+/** SetProjectBrandProfile payload（profileId 为 null 表示解除关联） */
+export interface SetProjectBrandProfilePayload {
+  projectId: string;
+  profileId: string | null;
+}
+
+/** SaveAnalysis payload（content 为报告 JSON string；版本链仿 SaveScript） */
+export interface SaveAnalysisPayload {
+  projectId?: string;
+  content: string;
+  parentVersionId?: string | null;
+}
+
+/** ListContentVersions payload */
+export interface ListContentVersionsPayload {
+  projectId: string;
+  contentType?: string;
+  limit?: number;
+}
+
+/** ListContentVersions 返回的版本摘要（preview 为内容前 200 字符） */
+export interface ContentVersionSummary {
+  id: string;
+  content_type: string;
+  parent_version_id: string | null;
+  created_at: string;
+  producer: Record<string, unknown> | null;
+  preview: string;
+}
+
+/** GetContentVersion payload */
+export interface GetContentVersionPayload {
+  versionId: string;
+}
+
+/** GetContentVersion 返回的完整版本 */
+export interface ContentVersionDetail {
+  id: string;
+  project_id: string;
+  content_type: string;
+  content: string;
+  parent_version_id: string | null;
+  created_at: string;
+  producer: Record<string, unknown> | null;
+}
+
+/** 工作区行（对齐 migrations/0001 workspaces） */
+export interface WorkspaceRow {
+  id: string;
+  name: string;
+  root_path?: string;
+  created_at?: string;
+  archived_at?: string | null;
+}
+
+/** CreateWorkspace payload */
+export interface CreateWorkspacePayload {
+  name: string;
+}
+
+/** RenameWorkspace payload */
+export interface RenameWorkspacePayload {
+  workspaceId: string;
+  name: string;
+}
+
+/** ArchiveWorkspace payload */
+export interface ArchiveWorkspacePayload {
+  workspaceId: string;
+}
+
+/** ListWorkspaces payload */
+export interface ListWorkspacesPayload {
+  includeArchived?: boolean;
+}
+
+/** 发布平台（PRD-PUB-001 MVP 仅抖音 + 通用） */
+export type PublishPlatform = "douyin" | "generic";
+
+/** CreatePlatformVariant payload */
+export interface CreatePlatformVariantPayload {
+  projectId: string;
+  platform: PublishPlatform;
+  title: string;
+  body: string;
+  tags: string[];
+  videoVersionId?: string;
+}
+
+/** ListPlatformVariants payload */
+export interface ListPlatformVariantsPayload {
+  projectId: string;
+}
+
+/** 平台变体行（对齐 migrations/0003 platform_variants；tags 可能是
+ *  JSON string 或已解析数组，展示层用 normalize 处理） */
+export interface PlatformVariant {
+  id: string;
+  platform: string;
+  title: string | null;
+  body: string | null;
+  tags: unknown;
+  content_version_id?: string | null;
+  validation_status?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+/** ExportBundle payload */
+export interface ExportBundlePayload {
+  variantId: string;
+}
+
+/** ImportSource payload（Tranche 2：url 直链导入 + 来源记录三字段） */
+export interface ImportSourcePayload {
+  /** 本地导入：绝对路径（与 url 二选一） */
+  local_uri?: string;
+  /** 链接导入：https 直链（与 local_uri 二选一） */
+  url?: string;
+  kind?: string;
+  content_hash?: string;
+  /** 来源记录（PRD-SRC-003） */
+  original_url?: string | null;
+  author?: string | null;
+  rights_declaration?: "original" | "licensed" | "reference" | null;
+  metadata?: Record<string, unknown>;
 }

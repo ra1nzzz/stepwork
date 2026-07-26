@@ -1,9 +1,13 @@
 /**
- * 脚本创作 Store（W5 Batch1）
+ * 脚本创作 Store（W5 Batch1 → Tranche 2 扩展）
  * - 对转写/素材 dispatch GenerateTopic → 拿到差异化角度
  * - 选定角度 dispatch GenerateScript → 拿到脚本正文（seed 编辑器）
  * - 编辑器内容变化（TipTap JSON）经防抖后 dispatch SaveScript 自动保存，
  *   每次保存新建一条 script 版本并串 parent 链（防丢稿）
+ * - Tranche 2（WS-005 恢复闭环）：
+ *   loadVersions 经 ListContentVersions 恢复项目最近的 script 版本链，
+ *   并把最新版本内容 seed 回编辑器；loadVersionContent 经 GetContentVersion
+ *   加载任意历史版本全文；回滚 = 以历史内容 SaveScript 生成新版本，不覆盖历史
  *
  * 与 W3/W4 store 一致：经由 buildEnvelope + dispatchCommand
  */
@@ -17,6 +21,8 @@ import type {
   GenerateTopicPayload,
   GenerateScriptPayload,
   SaveScriptPayload,
+  ContentVersionSummary,
+  ContentVersionDetail,
 } from "@/lib/types";
 
 const WORKSPACE = "ws-local";
@@ -51,7 +57,30 @@ interface ScriptStoreState {
   setScriptTitle: (t: string) => void;
   /** 保存正文（可选标题）到后端，新建版本并串链 */
   saveScript: (text: string, title?: string) => Promise<void>;
+  /** 进入创作页时恢复项目的 script 版本链，并 seed 最新版本内容（WS-005） */
+  loadVersions: () => Promise<void>;
+  /** 加载指定版本全文（版本 tab 点击查看/回滚用） */
+  loadVersionContent: (
+    versionId: string,
+  ) => Promise<{ title: string; body: string } | null>;
   reset: () => void;
+}
+
+/** 解析 script 版本内容：生成路径为 {title, body}，保存路径为 {text, title}，
+ *  历史/外部内容可能是裸文本 → 整体作为 body */
+function parseScriptContent(raw: string): { title: string; body: string } {
+  try {
+    const obj = JSON.parse(raw) as Record<string, unknown>;
+    const body =
+      typeof obj.body === "string"
+        ? obj.body
+        : typeof obj.text === "string"
+          ? obj.text
+          : raw;
+    return { title: typeof obj.title === "string" ? obj.title : "", body };
+  } catch {
+    return { title: "", body: raw };
+  }
 }
 
 function newVersionRef(
@@ -186,6 +215,60 @@ export const useScriptStore = create<ScriptStoreState>((set, get) => ({
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       set({ error: msg });
+    }
+  },
+
+  loadVersions: async () => {
+    const projectId = currentProjectId();
+    if (!projectId) return;
+    try {
+      const env = buildEnvelope("ListContentVersions", WORKSPACE, projectId, {
+        projectId,
+        contentType: "script",
+        limit: 20,
+      });
+      const res = await dispatchCommand(env);
+      if (!res.ok) return;
+      const detail = (res.detail ?? {}) as { versions?: ContentVersionSummary[] };
+      const versions = detail.versions ?? [];
+      if (versions.length === 0) return;
+      const chain: ScriptVersionRef[] = versions.map((v) => ({
+        id: v.id,
+        parent_version_id: v.parent_version_id,
+        created_at: v.created_at,
+        producer_kind:
+          typeof v.producer?.kind === "string" ? (v.producer.kind as string) : null,
+      }));
+      set({ versionChain: chain });
+      // 恢复最新版本内容到编辑器（仅当本地尚无已保存版本，避免覆盖会话内进度）
+      if (!get().scriptVersionId) {
+        const latest = await get().loadVersionContent(chain[0].id);
+        if (latest) {
+          set((s) => ({
+            scriptVersionId: chain[0].id,
+            scriptTitle: latest.title || s.scriptTitle,
+            seedBody: latest.body,
+          }));
+        }
+      }
+    } catch {
+      /* 后端未连接：保持空链 */
+    }
+  },
+
+  loadVersionContent: async (versionId) => {
+    try {
+      const env = buildEnvelope("GetContentVersion", WORKSPACE, currentProjectId(), {
+        versionId,
+      });
+      const res = await dispatchCommand(env);
+      if (!res.ok) return null;
+      const detail = (res.detail ?? {}) as { version?: ContentVersionDetail };
+      const content = detail.version?.content;
+      if (content == null) return null;
+      return parseScriptContent(content);
+    } catch {
+      return null;
     }
   },
 

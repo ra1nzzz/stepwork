@@ -1,22 +1,50 @@
 /**
  * SET.3 — SettingsView
- * 4 个 Tab（对齐 Prototype/settings.html）：BrandProfile / AI Provider / 数据与存储 / 导入与导出。
+ * 6 个 Tab（对齐 Prototype/settings.html + Tranche 2）：
+ * BrandProfile / 品牌档案 / 工作区 / AI Provider / 数据与存储 / 导入与导出。
  * 所有字段绑定 useSettingsStore。API Key 仅以 password 控件呈现，绝不回显明文。
+ *
+ * Tranche 2：
+ * - 品牌档案：多 BrandProfile 管理（列表/新建/编辑，含内容支柱与禁用表达标签输入），
+ *   经 ListBrandProfiles / CreateBrandProfile / UpdateBrandProfile 命令落库
+ * - 工作区：Workspace 管理（列表/新建/重命名/归档），
+ *   经 ListWorkspaces / CreateWorkspace / RenameWorkspace / ArchiveWorkspace 命令
  */
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 import { useSettingsStore } from "@/stores/useSettingsStore";
 import type { SettingsConfig } from "@/stores/useSettingsStore";
-import { getConfig, updateConfig } from "@/lib/tauri";
+import {
+  buildEnvelope,
+  dispatchCommand,
+  getConfig,
+  getWorkspaceId,
+  updateConfig,
+} from "@/lib/tauri";
+import { TagListInput } from "@/components/TagListInput";
+import type {
+  BrandProfile,
+  CreateBrandProfilePayload,
+  UpdateBrandProfilePayload,
+  WorkspaceRow,
+} from "@/lib/types";
 
 import "@/styles/settings.css";
 
 /** 主代理在 tauri.ts 提供的返回类型（此处标注，供调用点复用） */
 type ConfigResult = { ok: boolean; config?: unknown; resolved?: unknown; error?: string };
 
-type TabKey = "brand" | "providers" | "data" | "export";
+type TabKey =
+  | "brand"
+  | "brandProfiles"
+  | "workspaces"
+  | "providers"
+  | "data"
+  | "export";
 
 const TABS: { key: TabKey; label: string; meta: string }[] = [
   { key: "brand", label: "BrandProfile", meta: "用于约束原创角度、脚本语气与事实表达" },
+  { key: "brandProfiles", label: "品牌档案", meta: "多品牌档案：定位、受众、语气、内容支柱与禁用表达" },
+  { key: "workspaces", label: "工作区", meta: "管理工作区：新建、重命名与归档" },
   { key: "providers", label: "AI Provider", meta: "查看任务使用的模型、费用与数据范围" },
   { key: "data", label: "数据与存储", meta: "管理素材、Artifact 与诊断日志的保留策略" },
   { key: "export", label: "导入与导出", meta: "校验项目包及其生成记录的完整性" },
@@ -184,6 +212,8 @@ export default function SettingsView() {
             {activeTab === "brand" && (
               <BrandPanel settings={settings} update={update} />
             )}
+            {activeTab === "brandProfiles" && <BrandProfilesPanel />}
+            {activeTab === "workspaces" && <WorkspacesPanel />}
             {activeTab === "providers" && (
               <ProvidersPanel
                 settings={settings}
@@ -311,6 +341,468 @@ function BrandPanel({
             );
           })}
         </div>
+      </div>
+    </>
+  );
+}
+
+/* ---------- 品牌档案（Tranche 2 · PRD-BRD-001/002） ---------- */
+
+/** BrandProfile 编辑表单模型 */
+interface BrandProfileForm {
+  name: string;
+  positioning: string;
+  audience: string;
+  tone: string;
+  contentPillars: string[];
+  bannedExpressions: string[];
+}
+
+function emptyBrandForm(): BrandProfileForm {
+  return {
+    name: "",
+    positioning: "",
+    audience: "",
+    tone: "",
+    contentPillars: [],
+    bannedExpressions: [],
+  };
+}
+
+function profileToForm(p: BrandProfile): BrandProfileForm {
+  return {
+    name: p.name ?? "",
+    positioning: p.positioning ?? "",
+    audience: p.audience ?? "",
+    tone: p.tone ?? "",
+    contentPillars: Array.isArray(p.contentPillars) ? p.contentPillars : [],
+    bannedExpressions: Array.isArray(p.bannedExpressions) ? p.bannedExpressions : [],
+  };
+}
+
+function BrandProfilesPanel() {
+  const [profiles, setProfiles] = useState<BrandProfile[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  /** 正在编辑的档案 id；null = 新建；undefined = 未打开表单 */
+  const [editingId, setEditingId] = useState<string | null | undefined>(undefined);
+  const [form, setForm] = useState<BrandProfileForm>(emptyBrandForm());
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const env = buildEnvelope("ListBrandProfiles", getWorkspaceId(), null, {});
+      const res = await dispatchCommand(env);
+      if (!res.ok) throw new Error(res.error ?? "LIST_BRAND_PROFILES_FAILED");
+      const detail = (res.detail ?? {}) as { profiles?: BrandProfile[] };
+      setProfiles(detail.profiles ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  function startCreate() {
+    setEditingId(null);
+    setForm(emptyBrandForm());
+  }
+
+  function startEdit(p: BrandProfile) {
+    setEditingId(p.id);
+    setForm(profileToForm(p));
+  }
+
+  async function handleSubmit() {
+    if (!form.name.trim()) {
+      setError("请填写档案名称");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const base: CreateBrandProfilePayload = {
+        name: form.name.trim(),
+        positioning: form.positioning,
+        audience: form.audience,
+        tone: form.tone,
+        contentPillars: form.contentPillars,
+        bannedExpressions: form.bannedExpressions,
+      };
+      const env =
+        editingId == null
+          ? buildEnvelope("CreateBrandProfile", getWorkspaceId(), null, base)
+          : buildEnvelope("UpdateBrandProfile", getWorkspaceId(), null, {
+              profileId: editingId,
+              ...base,
+            } satisfies UpdateBrandProfilePayload);
+      const res = await dispatchCommand(env);
+      if (!res.ok) throw new Error(res.error ?? "SAVE_BRAND_PROFILE_FAILED");
+      setEditingId(undefined);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      {error && (
+        <p className="error-text" style={{ color: "var(--danger)", marginBottom: 12 }}>
+          {error}
+        </p>
+      )}
+
+      {editingId === undefined ? (
+        <>
+          {loading && <p className="panel-meta">加载品牌档案…</p>}
+          {!loading && profiles.length === 0 && (
+            <p className="panel-meta">尚无品牌档案。新建档案后可在项目上关联，约束角度与脚本生成。</p>
+          )}
+          {profiles.length > 0 && (
+            <div className="task-list" style={{ marginBottom: 12 }}>
+              {profiles.map((p) => (
+                <div className="task-item" key={p.id}>
+                  <div className="task-top">
+                    <div>
+                      <div className="task-name">{p.name}</div>
+                      <div className="row-sub">
+                        {p.positioning || "（未填写定位）"}
+                        {p.audience ? ` · 受众：${p.audience}` : ""}
+                      </div>
+                    </div>
+                    <button
+                      className="btn small ghost"
+                      type="button"
+                      onClick={() => startEdit(p)}
+                    >
+                      编辑
+                    </button>
+                  </div>
+                  {(p.contentPillars?.length > 0 || p.bannedExpressions?.length > 0) && (
+                    <p className="panel-meta" style={{ margin: "6px 0 0" }}>
+                      {p.contentPillars?.length > 0
+                        ? `支柱：${p.contentPillars.join(" / ")}`
+                        : ""}
+                      {p.contentPillars?.length > 0 && p.bannedExpressions?.length > 0
+                        ? " · "
+                        : ""}
+                      {p.bannedExpressions?.length > 0
+                        ? `禁用：${p.bannedExpressions.join(" / ")}`
+                        : ""}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="inline-actions">
+            <button className="btn small ghost" type="button" onClick={() => void load()} disabled={loading}>
+              刷新
+            </button>
+            <button className="btn small primary" type="button" onClick={startCreate}>
+              新建档案
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="form-row">
+            <label htmlFor="bpName">档案名称</label>
+            <div>
+              <input
+                id="bpName"
+                className="field"
+                style={{ width: "100%" }}
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder="如：科技实测 · 克制判断"
+              />
+            </div>
+          </div>
+          <div className="form-row">
+            <label htmlFor="bpPositioning">定位</label>
+            <div>
+              <input
+                id="bpPositioning"
+                className="field"
+                style={{ width: "100%" }}
+                value={form.positioning}
+                onChange={(e) => setForm({ ...form, positioning: e.target.value })}
+                placeholder="账号的内容定位"
+              />
+            </div>
+          </div>
+          <div className="form-row">
+            <label htmlFor="bpAudience">核心受众</label>
+            <div>
+              <input
+                id="bpAudience"
+                className="field"
+                style={{ width: "100%" }}
+                value={form.audience}
+                onChange={(e) => setForm({ ...form, audience: e.target.value })}
+              />
+            </div>
+          </div>
+          <div className="form-row">
+            <label htmlFor="bpTone">语气 / 表达原则</label>
+            <div>
+              <textarea
+                id="bpTone"
+                className="textarea"
+                value={form.tone}
+                onChange={(e) => setForm({ ...form, tone: e.target.value })}
+              />
+            </div>
+          </div>
+          <div className="form-row">
+            <label htmlFor="bpPillars">内容支柱</label>
+            <TagListInput
+              id="bpPillars"
+              value={form.contentPillars}
+              onChange={(next) => setForm({ ...form, contentPillars: next })}
+              placeholder="输入内容支柱后回车添加"
+              disabled={saving}
+            />
+          </div>
+          <div className="form-row">
+            <label htmlFor="bpBanned">禁用表达</label>
+            <TagListInput
+              id="bpBanned"
+              value={form.bannedExpressions}
+              onChange={(next) => setForm({ ...form, bannedExpressions: next })}
+              placeholder="输入禁用表达后回车添加"
+              disabled={saving}
+            />
+          </div>
+          <div className="inline-actions">
+            <button
+              className="btn small ghost"
+              type="button"
+              onClick={() => setEditingId(undefined)}
+              disabled={saving}
+            >
+              取消
+            </button>
+            <button
+              className="btn small primary"
+              type="button"
+              onClick={() => void handleSubmit()}
+              disabled={saving}
+              aria-busy={saving}
+            >
+              {saving ? "保存中…" : editingId == null ? "创建档案" : "保存修改"}
+            </button>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+/* ---------- 工作区管理（Tranche 2 · PRD-WS-001） ---------- */
+function WorkspacesPanel() {
+  const [rows, setRows] = useState<WorkspaceRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [newName, setNewName] = useState("");
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const env = buildEnvelope("ListWorkspaces", getWorkspaceId(), null, {});
+      const res = await dispatchCommand(env);
+      if (!res.ok) throw new Error(res.error ?? "LIST_WORKSPACES_FAILED");
+      const detail = (res.detail ?? {}) as { workspaces?: WorkspaceRow[] };
+      setRows(detail.workspaces ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function run(action: () => Promise<void>) {
+    setBusy(true);
+    setError(null);
+    try {
+      await action();
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handleCreate() {
+    const name = newName.trim();
+    if (!name) return;
+    void run(async () => {
+      const env = buildEnvelope("CreateWorkspace", getWorkspaceId(), null, { name });
+      const res = await dispatchCommand(env);
+      if (!res.ok) throw new Error(res.error ?? "CREATE_WORKSPACE_FAILED");
+      setNewName("");
+    });
+  }
+
+  function handleRename(workspaceId: string) {
+    const name = renameValue.trim();
+    if (!name) return;
+    void run(async () => {
+      const env = buildEnvelope("RenameWorkspace", getWorkspaceId(), null, {
+        workspaceId,
+        name,
+      });
+      const res = await dispatchCommand(env);
+      if (!res.ok) throw new Error(res.error ?? "RENAME_WORKSPACE_FAILED");
+      setRenamingId(null);
+    });
+  }
+
+  function handleArchive(workspaceId: string) {
+    void run(async () => {
+      const env = buildEnvelope("ArchiveWorkspace", getWorkspaceId(), null, {
+        workspaceId,
+      });
+      const res = await dispatchCommand(env);
+      if (!res.ok) throw new Error(res.error ?? "ARCHIVE_WORKSPACE_FAILED");
+    });
+  }
+
+  return (
+    <>
+      {error && (
+        <p className="error-text" style={{ color: "var(--danger)", marginBottom: 12 }}>
+          {error}
+        </p>
+      )}
+
+      {loading && <p className="panel-meta">加载工作区…</p>}
+      {!loading && rows.length === 0 && (
+        <p className="panel-meta">尚无工作区记录（已归档的工作区不在列表中）。</p>
+      )}
+      {rows.length > 0 && (
+        <div className="task-list" style={{ marginBottom: 12 }}>
+          {rows.map((w) => (
+            <div className="task-item" key={w.id}>
+              <div className="task-top">
+                <div>
+                  {renamingId === w.id ? (
+                    <div className="inline-actions">
+                      <input
+                        className="field"
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleRename(w.id);
+                        }}
+                        disabled={busy}
+                        aria-label="工作区新名称"
+                      />
+                      <button
+                        className="btn small primary"
+                        type="button"
+                        onClick={() => handleRename(w.id)}
+                        disabled={busy || !renameValue.trim()}
+                      >
+                        保存
+                      </button>
+                      <button
+                        className="btn small ghost"
+                        type="button"
+                        onClick={() => setRenamingId(null)}
+                        disabled={busy}
+                      >
+                        取消
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="task-name">{w.name}</div>
+                      <div className="row-sub mono">{w.id}</div>
+                    </>
+                  )}
+                </div>
+                {renamingId !== w.id && (
+                  <div className="task-actions">
+                    <button
+                      className="btn small ghost"
+                      type="button"
+                      onClick={() => {
+                        setRenamingId(w.id);
+                        setRenameValue(w.name);
+                      }}
+                      disabled={busy}
+                    >
+                      重命名
+                    </button>
+                    <button
+                      className="btn small ghost"
+                      type="button"
+                      onClick={() => handleArchive(w.id)}
+                      disabled={busy}
+                    >
+                      归档
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="form-row">
+        <label htmlFor="newWorkspaceName">新建工作区</label>
+        <div className="inline-actions">
+          <input
+            id="newWorkspaceName"
+            className="field"
+            value={newName}
+            placeholder="工作区名称"
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleCreate();
+            }}
+            disabled={busy}
+          />
+          <button
+            className="btn small primary"
+            type="button"
+            onClick={handleCreate}
+            disabled={busy || !newName.trim()}
+          >
+            新建
+          </button>
+        </div>
+      </div>
+      <div className="inline-actions" style={{ marginTop: 12 }}>
+        <button
+          className="btn small ghost"
+          type="button"
+          onClick={() => void load()}
+          disabled={loading || busy}
+        >
+          刷新
+        </button>
       </div>
     </>
   );

@@ -7,6 +7,11 @@
  *   - 用户点击「AI 生成新版本」→ generateScript() → scriptTitle + seedBody + scriptVersionId
  *   - 用户编辑文本 → 防抖 800ms → saveScript({text}) → 新版本串链
  *   - 进入下一步渲染
+ *
+ * Tranche 2（WS-005 恢复闭环）：
+ *   - 进入创作页时 loadVersions() → ListContentVersions 恢复最近 script 版本
+ *   - 点击版本 tab → GetContentVersion 加载该版本全文（只读预览）
+ *   - 回滚 = 以历史内容 SaveScript 生成新版本，绝不覆盖历史
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -27,26 +32,71 @@ export function CreateScriptView() {
   const generateScript = useScriptStore((s) => s.generateScript);
   const setScriptTitle = useScriptStore((s) => s.setScriptTitle);
   const saveScript = useScriptStore((s) => s.saveScript);
+  const loadVersions = useScriptStore((s) => s.loadVersions);
+  const loadVersionContent = useScriptStore((s) => s.loadVersionContent);
 
   const setRenderSourceVersion = useRenderStore((s) => s.setSourceVersion);
 
   const [body, setBody] = useState("");
   const [saveLabel, setSaveLabel] = useState("已就绪");
   const [activeTabIndex, setActiveTabIndex] = useState(0);
+  /** 历史版本只读预览（点击非最新 tab 时加载） */
+  const [preview, setPreview] = useState<{
+    id: string;
+    title: string;
+    body: string;
+  } | null>(null);
   const saveTimer = useRef<number | null>(null);
 
-  // 当 store 推送新的 seedBody（AI 生成），同步到本地编辑框
+  // 进入创作页时恢复最近的 script 版本链（WS-005 恢复闭环）
+  useEffect(() => {
+    if (useScriptStore.getState().versionChain.length === 0) {
+      void loadVersions();
+    }
+  }, [loadVersions]);
+
+  // 当 store 推送新的 seedBody（AI 生成 / 版本恢复），同步到本地编辑框
   useEffect(() => {
     if (seedBody != null) {
       setBody(seedBody);
-      setSaveLabel("AI 生成已载入");
+      setSaveLabel("版本已载入");
     }
   }, [seedBody]);
 
-  // 新版本生成后默认选中第一个（最新）tab
+  // 新版本生成后默认选中第一个（最新）tab，并退出历史预览
   useEffect(() => {
     setActiveTabIndex(0);
+    setPreview(null);
   }, [versionChain.length]);
+
+  /** 版本 tab 点击：最新 tab 回到编辑态；历史 tab 拉全文进入只读预览 */
+  async function handleTabClick(index: number, versionId: string) {
+    setActiveTabIndex(index);
+    if (index === 0) {
+      setPreview(null);
+      return;
+    }
+    const content = await loadVersionContent(versionId);
+    if (content) {
+      setPreview({ id: versionId, title: content.title, body: content.body });
+    } else {
+      setPreview(null);
+      setSaveLabel("版本加载失败");
+    }
+  }
+
+  /** 回滚：以历史版本内容 SaveScript 生成新版本（不覆盖历史） */
+  async function handleRollback() {
+    if (!preview) return;
+    const title = preview.title || scriptTitle;
+    setScriptTitle(title);
+    setBody(preview.body);
+    if (saveTimer.current) window.clearTimeout(saveTimer.current);
+    await saveScript(preview.body, title);
+    setPreview(null);
+    setActiveTabIndex(0);
+    setSaveLabel("已回滚为新版本");
+  }
 
   // 把 scriptVersionId 写入 renderStore，供下一步渲染
   useEffect(() => {
@@ -116,7 +166,7 @@ export function CreateScriptView() {
                     role="tab"
                     aria-selected={activeTabIndex === i}
                     title={`${v.producer_kind ?? "user"} · ${v.created_at}`}
-                    onClick={() => setActiveTabIndex(i)}
+                    onClick={() => void handleTabClick(i, v.id)}
                   >
                     {v.producer_kind === "ai-script" ? "AI" : `V${versionChain.length - i}`}
                   </button>
@@ -169,42 +219,91 @@ export function CreateScriptView() {
           </div>
 
           <div className="panel-body" style={{ paddingTop: 0 }}>
-            <div className="form-group" style={{ marginBottom: 12 }}>
-              <label htmlFor="scriptTitle">标题</label>
-              <input
-                id="scriptTitle"
-                className="field"
-                type="text"
-                value={scriptTitle}
-                onChange={(e) => setScriptTitle(e.target.value)}
-                onBlur={handleTitleBlur}
-                placeholder="脚本标题"
-              />
-            </div>
-            <div className="form-group">
-              <label htmlFor="scriptBody">正文</label>
-              <textarea
-                id="scriptBody"
-                className="field"
-                value={body}
-                onChange={(e) => handleBodyChange(e.target.value)}
-                placeholder="点击「AI 生成新版本」生成脚本正文，或直接粘贴/编辑内容。"
-                rows={16}
-                style={{ width: "100%", resize: "vertical", fontFamily: "inherit", lineHeight: 1.7 }}
-              />
-            </div>
+            {preview ? (
+              <>
+                {/* 历史版本只读预览 + 回滚（回滚生成新版本，不覆盖历史） */}
+                <div className="form-group" style={{ marginBottom: 12 }}>
+                  <label htmlFor="previewTitle">
+                    历史版本标题（只读 · {preview.id.slice(0, 8)}…）
+                  </label>
+                  <input
+                    id="previewTitle"
+                    className="field"
+                    type="text"
+                    value={preview.title}
+                    readOnly
+                    placeholder="（无标题）"
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="previewBody">历史版本正文（只读）</label>
+                  <textarea
+                    id="previewBody"
+                    className="field"
+                    value={preview.body}
+                    readOnly
+                    rows={16}
+                    style={{ width: "100%", resize: "vertical", fontFamily: "inherit", lineHeight: 1.7 }}
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="form-group" style={{ marginBottom: 12 }}>
+                  <label htmlFor="scriptTitle">标题</label>
+                  <input
+                    id="scriptTitle"
+                    className="field"
+                    type="text"
+                    value={scriptTitle}
+                    onChange={(e) => setScriptTitle(e.target.value)}
+                    onBlur={handleTitleBlur}
+                    placeholder="脚本标题"
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="scriptBody">正文</label>
+                  <textarea
+                    id="scriptBody"
+                    className="field"
+                    value={body}
+                    onChange={(e) => handleBodyChange(e.target.value)}
+                    placeholder="点击「AI 生成新版本」生成脚本正文，或直接粘贴/编辑内容。"
+                    rows={16}
+                    style={{ width: "100%", resize: "vertical", fontFamily: "inherit", lineHeight: 1.7 }}
+                  />
+                </div>
+              </>
+            )}
           </div>
 
           <div className="editor-toolbar">
-            <span className="panel-meta">正文修改后 800ms 自动保存</span>
-            <button
-              className="btn small"
-              type="button"
-              onClick={handleGenerate}
-              disabled={!canGenerate}
-            >
-              {isBusy ? "生成中…" : "AI 生成新版本"}
-            </button>
+            {preview ? (
+              <>
+                <span className="panel-meta">
+                  正在查看历史版本，回滚将以此内容生成新版本
+                </span>
+                <button
+                  className="btn small primary"
+                  type="button"
+                  onClick={() => void handleRollback()}
+                >
+                  回滚到此版本
+                </button>
+              </>
+            ) : (
+              <>
+                <span className="panel-meta">正文修改后 800ms 自动保存</span>
+                <button
+                  className="btn small"
+                  type="button"
+                  onClick={handleGenerate}
+                  disabled={!canGenerate}
+                >
+                  {isBusy ? "生成中…" : "AI 生成新版本"}
+                </button>
+              </>
+            )}
           </div>
         </article>
       </section>

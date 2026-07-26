@@ -1,6 +1,6 @@
 /**
  * 视图路由 Store
- * 对齐 Prototype 一级导航：首页 / 项目 / 创作 / 任务 / 设置 / 插件
+ * 对齐 PRD Ch.7 一级导航：首页 / 项目 / 创作 / 任务 / 发布 / 插件 / 设置
  * "创作"页内部通过 subnav 切换子视图（import/analysis/angle/script/render）
  *
  * selectedProjectId：当前选中的项目 id，贯穿整个创作流程，
@@ -16,6 +16,7 @@ export type ViewId =
   | "projects"
   | "create"
   | "tasks"
+  | "publish"
   | "settings"
   | "plugins"
   | "diagnostics";
