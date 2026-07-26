@@ -54,34 +54,57 @@ export function ProjectsView() {
   const [importing, setImporting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [searchKeyword, setSearchKeyword] = useState("");
+  // PRD-WS-003：标签筛选与排序（服务端执行）
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [availableTags, setAvailableTags] = useState<string[]>([]);
+  const [sortMode, setSortMode] = useState<"recent" | "created" | "title">(
+    "recent",
+  );
   const [creating, setCreating] = useState(false);
   // Tranche 2：品牌档案关联（生成注入用）
   const [brandProfiles, setBrandProfiles] = useState<BrandProfile[]>([]);
   const [bindingId, setBindingId] = useState<string | null>(null);
   const inTauri = isTauri();
 
-  // 按标题本地过滤
-  const filteredRows = searchKeyword.trim()
-    ? rows.filter((r) =>
-        r.title.toLowerCase().includes(searchKeyword.trim().toLowerCase()),
-      )
-    : rows;
+  // PRD-WS-003：搜索/标签/排序改为**后端**执行（此前只是对已拉取列表做
+  // 本地 includes，数据一多就不准，也无法按标签或最近访问筛）
+  const filteredRows = rows;
 
   async function loadProjects() {
     setIsLoading(true);
     setError(null);
     try {
-      const env = buildEnvelope("ListProjects", getWorkspaceId(), null, {});
+      const listPayload: Record<string, unknown> = {};
+      if (searchKeyword.trim()) listPayload.keyword = searchKeyword.trim();
+      if (selectedTags.length > 0) listPayload.tags = selectedTags;
+      listPayload.sort = sortMode;
+      const env = buildEnvelope(
+        "ListProjects",
+        getWorkspaceId(),
+        null,
+        listPayload,
+      );
       const res = await dispatchCommand(env);
       if (!res.ok) throw new Error(res.error ?? "LIST_PROJECTS_FAILED");
-      const detail = (res.detail ?? {}) as { projects?: ProjectRow[] };
+      const detail = (res.detail ?? {}) as {
+        projects?: ProjectRow[];
+        available_tags?: string[];
+      };
       setRows(detail.projects ?? []);
+      setAvailableTags(detail.available_tags ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setIsLoading(false);
     }
   }
+
+  // 筛选条件变化 → 重新向后端查询（关键词防抖 300ms）
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadProjects(), 300);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchKeyword, selectedTags, sortMode]);
 
   useEffect(() => {
     void loadProjects();
@@ -214,6 +237,43 @@ export function ProjectsView() {
 
       <section className="panel">
         <div className="panel-head">
+          {/* PRD-WS-003：标签筛选（点选切换，多选为 AND 语义） */}
+          {availableTags.length > 0 && (
+            <div className="inline-actions" data-od-id="project-tag-filter">
+              <span className="panel-meta" style={{ alignSelf: "center" }}>
+                标签：
+              </span>
+              {availableTags.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  className={`btn small ${
+                    selectedTags.includes(tag) ? "primary" : "ghost"
+                  }`}
+                  onClick={() =>
+                    setSelectedTags((prev) =>
+                      prev.includes(tag)
+                        ? prev.filter((t) => t !== tag)
+                        : [...prev, tag],
+                    )
+                  }
+                  disabled={isLoading}
+                >
+                  {tag}
+                </button>
+              ))}
+              {selectedTags.length > 0 && (
+                <button
+                  type="button"
+                  className="btn small ghost"
+                  onClick={() => setSelectedTags([])}
+                >
+                  清除筛选
+                </button>
+              )}
+            </div>
+          )}
+
           <div className="searchbar">
             <input
               className="field"
@@ -226,6 +286,20 @@ export function ProjectsView() {
             />
           </div>
           <div className="filters">
+            {/* PRD-WS-003：排序（最近访问 / 创建时间 / 标题） */}
+            <select
+              className="select"
+              value={sortMode}
+              onChange={(e) =>
+                setSortMode(e.target.value as "recent" | "created" | "title")
+              }
+              disabled={isLoading}
+              aria-label="项目排序"
+            >
+              <option value="recent">最近访问</option>
+              <option value="created">创建时间</option>
+              <option value="title">标题</option>
+            </select>
             <button
               className="btn small ghost"
               type="button"

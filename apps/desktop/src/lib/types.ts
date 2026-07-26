@@ -149,7 +149,8 @@ export interface CommandEnvelope {
     | "CheckPluginHealth"
     | "CreateApprovalRequest"
     | "ListApprovalRequests"
-    | "DecideApprovalRequest";
+    | "DecideApprovalRequest"
+    | "SetProjectTags";
   schemaVersion: string;
   actor: { type: "user" | "agent" | "plugin" | "system" | "desktop"; id: string };
   source: string;

@@ -42,6 +42,8 @@ _ROUTES: dict[str, str] = {
     "ListJobs": "worker.runtime.handlers.queries",
     "CreateProject": "worker.runtime.handlers.projects",
     "DeleteAsset": "worker.runtime.handlers.projects",
+    # PRD-WS-003：项目标签
+    "SetProjectTags": "worker.runtime.handlers.projects",
     # W8: 插件 / Provenance / Agent / 诊断包（Layer 0 路由先行，handler 由各支线补齐）
     "ListPlugins": "worker.runtime.handlers.plugins",
     "GetPluginManifest": "worker.runtime.handlers.plugins",

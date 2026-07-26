@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from typing import Any
 
 from worker.runtime.commands.bus import DispatchError
@@ -71,6 +72,17 @@ def _asset_to_dict(asset: Any) -> dict[str, Any]:
     }
 
 
+def _load_tags(row: Any) -> list[str]:
+    """解析 ``tags`` JSON 列；缺列/畸形一律返回空列表。"""
+    if "tags" not in row.keys():
+        return []
+    try:
+        parsed = json.loads(row["tags"]) if row["tags"] else []
+    except (TypeError, ValueError):
+        return []
+    return [str(t) for t in parsed] if isinstance(parsed, list) else []
+
+
 def _project_row_to_dict(row: Any) -> dict[str, Any]:
     """把 ``content_projects`` 行转为可序列化的 dict（列名 → 值）。"""
     return {
@@ -90,6 +102,11 @@ def _project_row_to_dict(row: Any) -> dict[str, Any]:
         ),
         "created_at": str(row["created_at"]),
         "updated_at": str(row["updated_at"]),
+        # PRD-WS-003：标签与最近访问（旧库未跑 0007 时兜底）
+        "tags": _load_tags(row),
+        "last_accessed_at": (
+            row["last_accessed_at"] if "last_accessed_at" in row.keys() else None
+        ),
     }
 
 
@@ -117,14 +134,67 @@ def _job_to_dict(job: Job) -> dict[str, Any]:
 async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     """路由 ``ListProjects`` / ``GetProject`` / ``GetJobStatus`` 三个查询命令。"""
     if env.commandType == "ListProjects":
-        rows = deps.repos.conn.execute(
-            "SELECT * FROM content_projects WHERE workspace_id=? "
-            "ORDER BY created_at DESC",
+        # PRD-WS-003「项目搜索、标签与最近访问」：此前无任何查询参数，
+        # 前端只能对已拉取列表做本地 title 过滤（数据多了就不准）。
+        payload = env.payload or {}
+        sql = "SELECT * FROM content_projects WHERE workspace_id=?"
+        args: list[Any] = [env.workspaceId]
+
+        keyword = payload.get("keyword")
+        if keyword:
+            if not isinstance(keyword, str):
+                raise DispatchError("INVALID_ARGUMENT", "keyword must be a string")
+            sql += " AND title LIKE ?"
+            args.append(f"%{keyword}%")
+
+        status_filter = payload.get("status")
+        if status_filter:
+            if not isinstance(status_filter, str):
+                raise DispatchError("INVALID_ARGUMENT", "status must be a string")
+            sql += " AND status=?"
+            args.append(status_filter)
+
+        tags = payload.get("tags")
+        if tags:
+            if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
+                raise DispatchError(
+                    "INVALID_ARGUMENT", "tags must be a list of strings"
+                )
+            # tags 存 JSON 数组文本，用 LIKE 做包含匹配（本地单用户量级足够）；
+            # 多标签为 AND 语义（同时含有）。
+            for tag in tags:
+                sql += " AND tags LIKE ?"
+                args.append(f'%"{tag}"%')
+
+        # PRD-WS-003「最近访问」：默认按最近访问排序，回落创建时间
+        # （首页「最近项目」此前实为 created_at 倒序，访问过也不会靠前）
+        sort = str(payload.get("sort") or "recent")
+        if sort == "recent":
+            sql += " ORDER BY COALESCE(last_accessed_at, created_at) DESC"
+        elif sort == "created":
+            sql += " ORDER BY created_at DESC"
+        elif sort == "title":
+            sql += " ORDER BY title ASC"
+        else:
+            raise DispatchError(
+                "INVALID_ARGUMENT", f"unknown sort {sort!r}"
+            )
+
+        rows = deps.repos.conn.execute(sql, tuple(args)).fetchall()
+        projects = [_project_row_to_dict(r) for r in rows]
+        # 供 UI 渲染标签筛选器：取**全工作区**的标签，而不是筛选后的结果 ——
+        # 否则按某标签筛选后其它标签就消失了，用户无法切换筛选条件。
+        all_rows = deps.repos.conn.execute(
+            "SELECT tags FROM content_projects WHERE workspace_id=?",
             (env.workspaceId,),
         ).fetchall()
-        projects = [_project_row_to_dict(r) for r in rows]
+        all_tags: set[str] = set()
+        for tag_row in all_rows:
+            all_tags.update(_load_tags(tag_row))
         return CommandResult(
-            ok=True, commandId=env.commandId, detail={"projects": projects}
+            ok=True,
+            commandId=env.commandId,
+            detail={"projects": projects, "available_tags": sorted(all_tags)},
         )
 
     if env.commandType == "GetProject":
@@ -136,6 +206,16 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         ).fetchone()
         if row is None:
             raise DispatchError("NOT_FOUND", f"project {pid!r} not found")
+        # PRD-WS-003「最近访问」：打开项目即刷新访问时间。与 updated_at
+        # （内容变更时间）分开——后者建完项目就不再变，无法表达「最近用过」。
+        deps.repos.conn.execute(
+            "UPDATE content_projects SET last_accessed_at=? WHERE id=?",
+            (datetime.now(UTC).isoformat(), pid),
+        )
+        deps.repos.conn.commit()
+        row = deps.repos.conn.execute(
+            "SELECT * FROM content_projects WHERE id=?", (pid,)
+        ).fetchone()
         return CommandResult(
             ok=True,
             commandId=env.commandId,
@@ -165,7 +245,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
                 "INVALID_ARGUMENT", f"limit must be a positive integer, got {limit!r}"
             )
         sql = "SELECT * FROM jobs"
-        args: list[Any] = []
+        args = []  # 复用上文 list[Any]（同作用域重复注解会 no-redef）
         if states is not None:
             if not isinstance(states, list) or not all(
                 isinstance(s, str) for s in states
