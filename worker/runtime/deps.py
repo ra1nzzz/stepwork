@@ -32,5 +32,6 @@ class Deps:
     ai: Any = None
     tts: Any = None
     renderer: Any = None
+    scene_detector: Any = None
     notify: Any = None
     worker_state: Any = None

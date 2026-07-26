@@ -21,6 +21,7 @@ import threading
 from typing import Any
 from urllib.parse import urlparse
 
+from worker.runtime.analysis.scene import FFmpegSceneDetector, SceneDetector
 from worker.runtime.providers.ai.base import AIProvider
 from worker.runtime.providers.ai.cloud import CloudAIProvider
 from worker.runtime.providers.ai.openai_compatible import (
@@ -271,3 +272,15 @@ def resolve_tts(workspace_id: str | None = None) -> TTSProvider | None:
 def resolve_renderer() -> RendererProvider | None:
     """W6 内置 FFmpeg 渲染器（vertical-caption-v1）。"""
     return FFmpegRenderer(FFmpegRunner())
+
+
+def resolve_scene_detector() -> SceneDetector | None:
+    """PRD-ANA-003 精确分析的场景切分器（ffmpeg 场景检测滤镜）。
+
+    ffmpeg 缺失时 ``available=False``，handler 精确模式转 ``UNAVAILABLE``；
+    始终返回实例（而非 None），由 handler 按 ``available`` 决定是否可用。
+    切点灵敏度取 ``STEPWORK_SCENE_THRESHOLD``（默认 0.4）。
+    """
+    thr = _env("STEPWORK_SCENE_THRESHOLD")
+    threshold = float(thr) if thr else 0.4
+    return FFmpegSceneDetector(threshold=threshold)

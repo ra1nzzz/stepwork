@@ -24,6 +24,7 @@ from worker.runtime.providers.resolve import (
     resolve_ai,
     resolve_asr,
     resolve_renderer,
+    resolve_scene_detector,
     resolve_tts,
 )
 from worker.runtime.state import WorkerState
@@ -58,6 +59,7 @@ async def run_command(
             ai=resolve_ai(ws),
             tts=resolve_tts(ws),
             renderer=resolve_renderer(),
+            scene_detector=resolve_scene_detector(),
         )
         # ``dispatch`` 内部会 ``parse_envelope(raw)`` 校验信封并路由到
         # handler，最终对 ``CommandResult`` 调 ``model_dump()`` 返回 dict。

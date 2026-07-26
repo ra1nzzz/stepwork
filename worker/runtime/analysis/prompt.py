@@ -28,11 +28,29 @@ def build_analysis_prompt(source_meta: dict[str, Any], brand: dict[str, Any] | N
     brand_name = brand.get("name", "未知品牌")
     pillars = brand.get("pillars", [])
 
+    # 精确分析（PRD-ANA-003）：附场景时间线，使 structure / key_points
+    # 能引用镜头切点与关键帧时间戳（PRD-ANA-005 来源位置）。
+    scenes = source_meta.get("scenes") or []
+    scene_block = ""
+    if scenes:
+        lines = "\n".join(
+            f"- 场景{s['index'] + 1}: {s['start']:.1f}s–{s['end']:.1f}s"
+            f"（关键帧 {s['keyframe_sec']:.1f}s）"
+            for s in scenes
+        )
+        scene_block = (
+            f"\n以下是该素材的场景切分时间线（共 {len(scenes)} 个镜头）：\n"
+            f"----\n{lines}\n----\n"
+            f"请在 structure 中按场景顺序描述，并尽量在 key_points 里带上"
+            f"对应时间戳（如「12.3s」），便于跳转来源位置。\n"
+        )
+
     schema_hint = ", ".join(ANALYSIS_SCHEMA["required"])
     return (
         f"你是一名为「{brand_name}」做内容分析的助手。\n"
         f"品牌内容支柱：{pillars}\n\n"
-        f"以下是素材转写稿：\n----\n{text}\n----\n\n"
+        f"以下是素材转写稿：\n----\n{text}\n----\n"
+        f"{scene_block}\n"
         f"请基于以上输出 JSON，字段必须包含：{schema_hint}。\n"
         f"sentiment 取值为 positive / neutral / negative；"
         f"confidence 为 0~1 的置信度；"

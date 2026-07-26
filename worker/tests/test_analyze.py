@@ -8,6 +8,7 @@ from typing import Any
 
 from worker.runtime import ingest
 from worker.runtime.analysis.report import AnalysisReport
+from worker.runtime.analysis.scene import Scene
 from worker.runtime.commands.bus import dispatch
 from worker.runtime.db.connection import in_memory
 from worker.runtime.db.migrations import run_migrations
@@ -52,6 +53,52 @@ class _BadAIProvider:
     ) -> dict[str, Any]:
         # 缺 required 字段，应触发 schema 校验失败
         return {"summary": "只有摘要"}
+
+
+class _PromptCapturingAI:
+    """记录收到的 prompt，用于断言场景时间线已注入。"""
+
+    name = "capture-ai"
+    model = "cap-1"
+    estimated_cost_per_1k = 0.0
+
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    async def complete(
+        self, prompt: str, schema: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        self.prompts.append(prompt)
+        return dict(_VALID)
+
+
+class _FakeSceneDetector:
+    """确定性假场景切分器（离线验证精确模式逻辑，不碰 ffmpeg）。"""
+
+    name = "fake-scene"
+    available = True
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def detect(
+        self, media_uri: str, opts: dict[str, Any] | None = None
+    ) -> list[Scene]:
+        self.calls.append(media_uri)
+        return [
+            Scene(index=0, start=0.0, end=5.0, keyframe_sec=2.5),
+            Scene(index=1, start=5.0, end=12.0, keyframe_sec=8.5),
+        ]
+
+
+class _UnavailableSceneDetector:
+    name = "ffmpeg-scene"
+    available = False
+
+    async def detect(
+        self, media_uri: str, opts: dict[str, Any] | None = None
+    ) -> list[Scene]:
+        raise AssertionError("detect 不应在 available=False 时被调用")
 
 
 def _deps(ai: Any) -> Deps:
@@ -130,3 +177,69 @@ async def test_analyze_invalid_report_fails() -> None:
     res = await dispatch(_env("AnalyzeSource", {"text": "x"}), deps)
     assert res["ok"] is False
     assert "ANALYSIS_FAILED" in (res.get("error") or "")
+
+
+# ----- PRD-ANA-003：精确分析（结合 ASR + 场景切分） -----
+
+
+async def test_analyze_precise_attaches_scene_timeline() -> None:
+    ai = _PromptCapturingAI()
+    det = _FakeSceneDetector()
+    c = in_memory()
+    run_migrations(c, _MIG_DIR)
+    deps = Deps(repos=Repos(c), ingest=ingest, asr=None, ai=ai, scene_detector=det)
+    res = await dispatch(
+        _env(
+            "AnalyzeSource",
+            {"text": "转写内容", "mode": "precise", "media_uri": "file:///tmp/v.mp4"},
+        ),
+        deps,
+    )
+    assert res["ok"] is True
+    # 探测器按媒体源被调用
+    assert det.calls == ["file:///tmp/v.mp4"]
+    # detail 暴露 mode + 场景数
+    assert res["detail"]["mode"] == "precise"
+    assert res["detail"]["scene_count"] == 2
+    # 场景时间线注入了 prompt（供 structure/key_points 引用时间戳）
+    assert "场景切分时间线" in ai.prompts[0]
+    assert "关键帧 2.5s" in ai.prompts[0]
+    # 场景随产物落库（producer.scenes）
+    cv = deps.repos.content_versions.get(res["artifact_ids"][0])
+    assert cv is not None
+    assert cv.producer["mode"] == "precise"
+    assert len(cv.producer["scenes"]) == 2
+    assert cv.producer["scenes"][1]["keyframe_sec"] == 8.5
+
+
+async def test_analyze_quick_has_no_scenes() -> None:
+    ai = _PromptCapturingAI()
+    deps = _deps(ai)
+    deps.scene_detector = _FakeSceneDetector()
+    res = await dispatch(_env("AnalyzeSource", {"text": "转写内容"}), deps)
+    assert res["ok"] is True
+    assert res["detail"]["mode"] == "quick"
+    assert res["detail"]["scene_count"] == 0
+    assert "场景切分时间线" not in ai.prompts[0]
+
+
+async def test_analyze_precise_without_detector_unavailable() -> None:
+    deps = _deps(_FakeAIProvider())
+    deps.scene_detector = _UnavailableSceneDetector()
+    res = await dispatch(
+        _env(
+            "AnalyzeSource",
+            {"text": "x", "mode": "precise", "media_uri": "file:///tmp/v.mp4"},
+        ),
+        deps,
+    )
+    assert res["ok"] is False
+    assert "UNAVAILABLE" in (res.get("error") or "")
+
+
+async def test_analyze_precise_requires_media() -> None:
+    deps = _deps(_FakeAIProvider())
+    deps.scene_detector = _FakeSceneDetector()
+    res = await dispatch(_env("AnalyzeSource", {"text": "x", "mode": "precise"}), deps)
+    assert res["ok"] is False
+    assert "INVALID_ARGUMENT" in (res.get("error") or "")
