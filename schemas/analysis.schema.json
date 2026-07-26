@@ -69,6 +69,41 @@
     },
     "confidence": {
       "type": "number"
+    },
+    "citations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "claim": {
+            "type": "string"
+          },
+          "start_sec": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "scene_index": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "quote": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "claim",
+          "start_sec",
+          "scene_index",
+          "quote"
+        ]
+      }
     }
   },
   "required": [
@@ -84,6 +119,7 @@
     "risks",
     "provider",
     "model",
-    "confidence"
+    "confidence",
+    "citations"
   ]
 }

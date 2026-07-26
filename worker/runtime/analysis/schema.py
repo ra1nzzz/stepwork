@@ -32,6 +32,25 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
         "provider": {"type": "string"},
         "model": {"type": "string"},
         "confidence": {"type": "number"},
+        # PRD-ANA-005「分析引用对应来源位置」：关键结论带来源锚点，
+        # 使 UI 能跳转到对应时间戳或逐字稿段落。
+        "citations": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    # 该引用支撑的结论文本（与 key_points/summary 里的措辞对应）
+                    "claim": {"type": "string"},
+                    # 来源时间戳（秒）；纯文本分析时为 null
+                    "start_sec": {"type": ["number", "null"]},
+                    # 精确模式下的场景序号；快速模式为 null
+                    "scene_index": {"type": ["integer", "null"]},
+                    # 逐字稿原文片段（供无时间戳时定位）
+                    "quote": {"type": ["string", "null"]},
+                },
+                "required": ["claim", "start_sec", "scene_index", "quote"],
+            },
+        },
     },
     "required": [
         "summary",
@@ -47,5 +66,6 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
         "provider",
         "model",
         "confidence",
+        "citations",
     ],
 }

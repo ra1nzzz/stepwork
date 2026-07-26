@@ -18,6 +18,7 @@ import { useSettingsStore } from "@/stores/useSettingsStore";
 import { useViewStore } from "@/stores/useViewStore";
 import type {
   AnalysisMode,
+  Citation,
   AnalysisReport,
   AnalysisReportData,
   AnalysisStatus,
@@ -94,6 +95,10 @@ export function parseReportData(raw: string): AnalysisReportData | null {
       model: String(obj.model ?? ""),
       confidence:
         typeof obj.confidence === "number" ? obj.confidence : null,
+      // PRD-ANA-005：来源引用（旧报告缺该字段 → 空数组）
+      citations: Array.isArray(obj.citations)
+        ? (obj.citations as Citation[])
+        : [],
     };
   } catch {
     return null;

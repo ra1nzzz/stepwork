@@ -227,6 +227,14 @@ export type AnalysisStatus =
  * 报告以 JSON string 落库为 content_versions(analysis)，前端经
  * GetContentVersion 拉取全文后解析为本类型。
  */
+/** PRD-ANA-005：关键结论的来源锚点（可跳转时间戳或逐字稿片段） */
+export interface Citation {
+  claim: string;
+  start_sec: number | null;
+  scene_index: number | null;
+  quote: string | null;
+}
+
 export interface AnalysisReportData {
   summary: string;
   /** 开头钩子（Tranche 2 新增；旧版本报告可能缺失 → null） */
@@ -244,6 +252,8 @@ export interface AnalysisReportData {
   provider: string;
   model: string;
   confidence: number | null;
+  /** PRD-ANA-005：来源引用（旧版本报告可能缺失） */
+  citations?: Citation[];
 }
 
 /** 一次分析任务的 UI 侧包装（store 内条目） */

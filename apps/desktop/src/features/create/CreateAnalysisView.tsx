@@ -26,6 +26,7 @@ import { buildEnvelope, dispatchCommand, getWorkspaceId } from "@/lib/tauri";
 import { estimateCost, formatCost, useProviderInfo } from "@/lib/useProviderInfo";
 import type {
   AnalysisMode,
+  Citation,
   AnalysisReportData,
   ContentVersionDetail,
   ContentVersionSummary,
@@ -51,6 +52,14 @@ function jobStatusClass(s: TranscriptJob["status"]): string {
     case "cancelled": return "warning";
     default: return "";
   }
+}
+
+/** 秒 → mm:ss（来源时间戳展示） */
+function formatTimestamp(sec: number): string {
+  const total = Math.max(0, Math.round(sec));
+  const m = Math.floor(total / 60);
+  const ss = total % 60;
+  return `${m}:${String(ss).padStart(2, "0")}`;
 }
 
 function sentimentLabel(s: string | null): string {
@@ -268,6 +277,20 @@ export function CreateAnalysisView() {
 
   function enterEdit() {
     if (reportData) setEditModel(toEditModel(reportData));
+  }
+
+  /**
+   * PRD-ANA-005「关键结论可跳转时间戳或文本段落」：
+   * 展开逐字稿并把引用原文滚动到视野内（无 quote 时仅展开）。
+   */
+  function jumpToSource(c: Citation) {
+    setTranscriptExpanded(true);
+    if (!c.quote) return;
+    window.setTimeout(() => {
+      const container = document.querySelector(".transcript");
+      if (!container) return;
+      container.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 50);
   }
 
   async function handleSaveEdit() {
@@ -611,6 +634,35 @@ export function CreateAnalysisView() {
                 <ReportSection title="话题点" items={reportData.topics} />
                 <ReportSection title="关键要点" items={reportData.key_points} />
                 <ReportSection title="风险点" items={reportData.risks} />
+                {/* PRD-ANA-005：关键结论可跳转来源（时间戳 / 逐字稿片段） */}
+                {(reportData.citations?.length ?? 0) > 0 && (
+                  <div className="report-section" style={{ marginBottom: 12 }}>
+                    <h3>结论来源</h3>
+                    <ul className="report-list">
+                      {reportData.citations!.map((c, i) => (
+                        <li key={i}>
+                          <span>{c.claim}</span>
+                          {(c.start_sec != null || c.quote) && (
+                            <button
+                              type="button"
+                              className="btn small ghost"
+                              style={{ marginLeft: 8 }}
+                              onClick={() => jumpToSource(c)}
+                              title="定位到逐字稿来源"
+                            >
+                              {c.start_sec != null
+                                ? formatTimestamp(c.start_sec)
+                                : "定位原文"}
+                              {c.scene_index != null
+                                ? ` · 场景${c.scene_index + 1}`
+                                : ""}
+                            </button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 <ReportSection
                   title="情感倾向"
                   text={sentimentLabel(reportData.sentiment)}

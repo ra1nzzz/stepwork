@@ -57,5 +57,10 @@ def build_analysis_prompt(source_meta: dict[str, Any], brand: dict[str, Any] | N
         f"topics / suggested_tags / key_points 为字符串数组；"
         f"hook 为素材开头钩子（无明显钩子时为 null）；"
         f"structure 为内容结构骨架（字符串数组，按叙事顺序）；"
-        f"risks 为风险点（字符串数组，如事实存疑 / 合规 / 版权风险）。"
+        f"risks 为风险点（字符串数组，如事实存疑 / 合规 / 版权风险）；"
+        f"citations 为关键结论的来源锚点数组（PRD-ANA-005），每项含 "
+        f"claim（该条结论）、quote（逐字稿原文片段）、"
+        f"start_sec（对应时间戳秒数，未知给 null）、"
+        f"scene_index（对应场景序号，无场景信息给 null）；"
+        f"至少为 summary 与每条 key_point 给出一条引用。"
     )

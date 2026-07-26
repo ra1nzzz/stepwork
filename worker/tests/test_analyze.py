@@ -243,3 +243,68 @@ async def test_analyze_precise_requires_media() -> None:
     res = await dispatch(_env("AnalyzeSource", {"text": "x", "mode": "precise"}), deps)
     assert res["ok"] is False
     assert "INVALID_ARGUMENT" in (res.get("error") or "")
+
+
+# ----- PRD-ANA-005：分析引用对应来源位置 -----
+
+
+class _CitingAI:
+    """返回带 citations 的分析（PRD-ANA-005）。"""
+
+    name = "citing-ai"
+    model = "cite-1"
+    estimated_cost_per_1k = 0.0
+
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    async def complete(
+        self, prompt: str, schema: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        self.prompts.append(prompt)
+        return {
+            **_VALID,
+            "hook": "钩子",
+            "structure": ["开场"],
+            "risks": [],
+            "citations": [
+                {
+                    "claim": "本期聊自动化工作流",
+                    "start_sec": 12.5,
+                    "scene_index": 1,
+                    "quote": "今天我们聊聊自动化工作流",
+                },
+            ],
+        }
+
+
+async def test_analysis_citations_persisted_and_returned() -> None:
+    """结论来源锚点必须落库并可回读（供 UI 跳转时间戳/原文）。"""
+    ai = _CitingAI()
+    deps = _deps(ai)
+    res = await dispatch(_env("AnalyzeSource", {"text": "素材转写内容"}), deps)
+    assert res["ok"] is True, res.get("error")
+
+    cv = deps.repos.content_versions.get(res["artifact_ids"][0])
+    assert cv is not None
+    report = AnalysisReport.model_validate_json(cv.content)
+    assert len(report.citations) == 1
+    citation = report.citations[0]
+    assert citation.start_sec == 12.5
+    assert citation.scene_index == 1
+    assert citation.quote
+
+    # prompt 明确索取引用，否则模型不会产出
+    assert "citations" in ai.prompts[0]
+    assert "start_sec" in ai.prompts[0]
+
+
+async def test_analysis_without_citations_still_valid() -> None:
+    """旧版本报告缺 citations 字段时不得回读失败（向后兼容）。"""
+    deps = _deps(_FakeAIProvider())
+    res = await dispatch(_env("AnalyzeSource", {"text": "素材"}), deps)
+    assert res["ok"] is True
+    cv = deps.repos.content_versions.get(res["artifact_ids"][0])
+    assert cv is not None
+    report = AnalysisReport.model_validate_json(cv.content)
+    assert report.citations == []
