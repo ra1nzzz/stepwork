@@ -925,3 +925,13 @@ def test_script_paragraph_rejects_unknown_operation() -> None:
         main(["script", "paragraph", "--version-id", "cv-1",
               "--index", "0", "--operation", "translate"])
     assert ei.value.code == 2
+
+
+def test_job_cancel_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    """PRD §13.2：CLI 与 UI 命令集对等（此前 CLI 无取消入口）。"""
+    captured = _capture_run_command(monkeypatch, {"ok": True, "detail": {}})
+    rc = main(["job", "cancel", "job-1"])
+
+    assert rc == 0
+    assert captured["env"]["commandType"] == "CancelJob"
+    assert captured["env"]["payload"] == {"job_id": "job-1"}

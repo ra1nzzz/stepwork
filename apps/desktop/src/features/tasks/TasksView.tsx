@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { buildEnvelope, dispatchCommand } from "@/lib/tauri";
+import { buildEnvelope, dispatchCommand, getWorkspaceId } from "@/lib/tauri";
 import { useJobEventsStore } from "@/stores/useJobEventsStore";
 import { useRenderStore, type RenderStatus } from "@/stores/useRenderStore";
 import { AgentView } from "@/features/agent/AgentView";
@@ -34,6 +34,47 @@ interface DiagnosticsResult {
   bundle_path: string;
   size_bytes: number;
   desensitized: boolean;
+}
+
+/**
+ * 失败原因 → 中文解释 + 下一步（PRD §10.3「失败可恢复：均提供下一步」）。
+ * 此前任务中心只渲染裸 error_code（如 RENDER_FAILED），用户无从下手。
+ */
+const FAILURE_HINTS: Record<string, string> = {
+  TRANSCRIBE_FAILED: "转写失败：检查 ASR 配置或换用本地引擎后重试。",
+  ANALYSIS_FAILED: "分析失败：检查设置页的 LLM Key 与 Base URL 后重试。",
+  RENDER_FAILED: "渲染失败：确认 ffmpeg 可用（设置页可检测依赖）后重试。",
+  EDIT_FAILED: "段落编辑失败：模型未返回有效文本，可重试或换 provider。",
+  DOWNLOAD_FAILED: "下载失败：确认链接可直接访问，或先下载到本地再导入。",
+  NEED_LOGIN: "该链接需要登录：请先在浏览器下载到本地，再从本地导入。",
+  UNAVAILABLE: "所需 Provider 未配置：请到设置页完成配置后重试。",
+  CANCELLED: "任务已取消。",
+};
+
+function failureHint(code: string): string {
+  const key = code.split(":")[0].trim();
+  const hint = FAILURE_HINTS[key];
+  return hint ? `${key} · ${hint}` : key;
+}
+
+/** JobStage 中文映射（此前直接显示英文枚举原值，用户读不懂） */
+const STAGE_LABELS: Record<string, string> = {
+  downloading: "下载中",
+  transcribing: "转写中",
+  analyzing: "分析中",
+  delegating: "委派中",
+  generating: "生成中",
+  proposing: "选题中",
+  scripting: "写脚本",
+  synthesizing: "合成旁白",
+  rendering: "渲染中",
+  publishing: "发布中",
+  verifying: "校验中",
+};
+
+function stageLabel(stage: string | null): string {
+  if (!stage) return "无阶段";
+  return `阶段 ${STAGE_LABELS[stage] ?? stage}`;
 }
 
 function jobStateLabel(s: JobState): string {
@@ -96,9 +137,31 @@ function formatTime(iso: string): string {
   }
 }
 
-function JobRow({ job }: { job: PersistedJob }) {
+function JobRow({ job, onRefresh }: { job: PersistedJob; onRefresh: () => void }) {
   const active =
     job.state === "running" || job.state === "leased" || job.state === "pending";
+  // UX §10.2：任务中心是唯一的持久化任务视图，此前没有任何操作按钮——
+  // 重启后恢复出来的任务在 UI 上完全无法取消。
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  async function handleCancel() {
+    setBusy(true);
+    setNotice(null);
+    try {
+      const env = buildEnvelope("CancelJob", getWorkspaceId(), null, {
+        job_id: job.id,
+      });
+      const res = await dispatchCommand(env);
+      if (!res.ok) setNotice(res.error ?? "取消失败");
+      onRefresh();
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div
       className={`task-item${job.state === "failed" ? " task-error" : ""}`}
@@ -114,7 +177,7 @@ function JobRow({ job }: { job: PersistedJob }) {
             </span>
           </div>
           <div className="row-sub">
-            {job.stage ? `阶段 ${job.stage}` : "无阶段"}
+            {stageLabel(job.stage)}
             {` · 更新 ${formatTime(job.updated_at)}`}
           </div>
         </div>
@@ -135,8 +198,24 @@ function JobRow({ job }: { job: PersistedJob }) {
 
       {job.error_code && (
         <p className="panel-meta section-gap" style={{ color: "var(--danger)" }}>
-          {job.error_code}
+          {failureHint(job.error_code)}
         </p>
+      )}
+
+      {(active || notice) && (
+        <div className="inline-actions section-gap">
+          {active && (
+            <button
+              type="button"
+              className="btn small ghost"
+              onClick={() => void handleCancel()}
+              disabled={busy}
+            >
+              {busy ? "取消中…" : "取消任务"}
+            </button>
+          )}
+          {notice && <span className="panel-meta">{notice}</span>}
+        </div>
       )}
     </div>
   );
@@ -146,6 +225,7 @@ export function TasksView() {
   const [tab, setTab] = useState<TaskTab>("jobs");
 
   const jobs = useJobEventsStore((s) => s.jobs);
+  const refreshJobs = useJobEventsStore((s) => s.refresh);
   const jobsError = useJobEventsStore((s) => s.error);
   const lastRefreshAt = useJobEventsStore((s) => s.lastRefreshAt);
 
@@ -255,7 +335,13 @@ export function TasksView() {
                     : "正在加载任务列表…"}
                 </p>
               ) : (
-                jobs.map((job) => <JobRow key={job.id} job={job} />)
+                jobs.map((job) => (
+                  <JobRow
+                    key={job.id}
+                    job={job}
+                    onRefresh={() => void refreshJobs()}
+                  />
+                ))
               )}
             </div>
           </article>

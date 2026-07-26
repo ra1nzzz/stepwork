@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 from typing import Any
 
@@ -186,6 +187,14 @@ async def dispatch(raw: dict[str, Any], deps: Any) -> dict[str, Any]:
     handler = importlib.import_module(module_path).handle
     try:
         result: CommandResult = await handler(env, deps)
+    except asyncio.CancelledError:
+        # 用户取消（CancelJob 打断了本任务）。必须在此边界转成正常结果：
+        # CancelledError 是 BaseException，若继续向上抛，RPC 循环不会写回
+        # 任何响应帧，调用方只能一直等到超时（Rust 侧 30 分钟）。
+        # job 终态已由 content_job 落为 CANCELLED。
+        return CommandResult(
+            ok=False, commandId=env.commandId, error="CANCELLED: 任务已被用户取消"
+        ).model_dump()
     except DispatchError as e:
         return CommandResult(
             ok=False, commandId=env.commandId, error=f"{e.code}: {e.message}"

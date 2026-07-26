@@ -219,3 +219,71 @@ async def test_edit_without_ai_provider_unavailable() -> None:
     )
     assert res["ok"] is False
     assert "UNAVAILABLE" in res["error"]
+
+
+# ----- UX §10.2：取消对异步任务真实生效（此前只有渲染可取消） -----
+
+
+class _SlowAI:
+    """慢 provider：用于验证取消能在 await 点真正打断。"""
+
+    name = "slow-ai"
+    model = "slow-1"
+    estimated_cost_per_1k = 0.0
+
+    async def complete(
+        self, prompt: str, schema: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        import asyncio
+
+        await asyncio.sleep(30)  # 永远等不到（会被 cancel 打断）
+        return {"text": "不该到达"}
+
+
+async def test_cancel_interrupts_async_job_and_marks_cancelled() -> None:
+    """对分析类异步任务点取消：任务被真正打断，job 落 CANCELLED，不落产物。"""
+    import asyncio
+
+    from worker.runtime.jobs.cancel import TASK_REGISTRY, request
+
+    c = in_memory()
+    run_migrations(c, _MIG_DIR)
+    repos = Repos(c)
+    ws = repos.workspaces.insert(Workspace(name="ws-c", root_path="/tmp/c"))
+    prj = repos.projects.insert(ContentProject(workspace_id=ws, title="p"))
+    deps = Deps(repos=repos, ingest=ingest, ai=_SlowAI())
+
+    env = {
+        "commandId": "cmd-cancel",
+        "commandType": "AnalyzeSource",
+        "schemaVersion": "1",
+        "actor": {"type": "user", "id": "u"},
+        "source": "ui",
+        "workspaceId": ws,
+        "projectId": prj,
+        "payload": {"text": "待分析文本"},
+        "requestedAt": "2026-07-26T00:00:00+00:00",
+    }
+    task = asyncio.create_task(dispatch(env, deps))
+
+    # 等任务把自己登记进注册表（有界轮询）
+    job_id = None
+    for _ in range(100):
+        await asyncio.sleep(0.01)
+        if TASK_REGISTRY:
+            job_id = next(iter(TASK_REGISTRY))
+            break
+    assert job_id is not None, "异步任务未登记到取消注册表"
+
+    assert request(job_id) is True  # 找到并打断
+    res = await task
+
+    # dispatch 边界把取消转成干净结果（而不是让 RPC 无响应挂到超时）
+    assert res["ok"] is False
+    assert "CANCELLED" in res["error"]
+
+    # job 落 CANCELLED 终态，且没有产出内容版本
+    row = c.execute("SELECT state FROM jobs WHERE id=?", (job_id,)).fetchone()
+    assert row["state"] == "cancelled"
+    versions = c.execute("SELECT COUNT(*) n FROM content_versions").fetchone()["n"]
+    assert versions == 0

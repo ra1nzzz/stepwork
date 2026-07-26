@@ -35,6 +35,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from worker.runtime.commands.bus import DispatchError
+from worker.runtime.jobs.cancel import clear as clear_cancel
+from worker.runtime.jobs.cancel import register_task
 from worker.runtime.jobs.engine import create_job, record_result, transition
 from worker.runtime.jobs.lease import acquire
 from worker.runtime.models import CommandEnvelope, ContentVersion, Job, JobStage, JobState
@@ -146,8 +148,20 @@ async def content_job(
     await notify_job_progress(notify, job)
 
     ctx = _JobCtx(job=job, project_id=project_id, repos=repos)
+    # UX §10.2：登记当前 Task，使 CancelJob 能真正打断异步任务
+    # （渲染另用 threading.Event，见 jobs/cancel.py）。
+    current = asyncio.current_task()
+    if current is not None:
+        register_task(job.id, current)
     try:
         yield ctx
+    except asyncio.CancelledError:
+        # 用户取消：落 CANCELLED 终态并通知，然后把取消继续向上传播
+        # （绝不吞掉 CancelledError，否则事件循环的取消语义会被破坏）
+        cancelled = transition(repos, job.id, JobState.CANCELLED)
+        with contextlib.suppress(Exception):
+            await notify_job_progress(notify, cancelled)
+        raise
     except DispatchError:
         # handler 自行转译的领域错误（含输入校验 / FFmpeg 特定分支），不再重复处理
         raise
@@ -155,6 +169,8 @@ async def content_job(
         failed = transition(repos, job.id, JobState.FAILED, error=str(e)[:200])
         await notify_job_progress(notify, failed)
         raise DispatchError(fail_code, str(e)[:200]) from None
+    finally:
+        clear_cancel(job.id)
 
 
 def persist_content_version(

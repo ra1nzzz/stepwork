@@ -269,6 +269,11 @@ def build_parser() -> argparse.ArgumentParser:
     js.set_defaults(command_type="GetJobStatus")
     js.add_argument("job_id", help="任务 id")
 
+    # PRD §13.2「CLI 与 UI 同命令一致结果」：此前 CLI 无取消入口
+    jc = job_sub.add_parser("cancel", help="取消任务（CancelJob）")
+    jc.set_defaults(command_type="CancelJob")
+    jc.add_argument("job_id", help="任务 id")
+
     jl = job_sub.add_parser("list", help="列出任务（ListJobs）")
     jl.set_defaults(command_type="ListJobs")
     jl.add_argument(
@@ -652,6 +657,8 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
     if command == "job":
         action = getattr(args, "job_action", None)
         if action == "status":
+            return {"job_id": args.job_id}
+        if action == "cancel":
             return {"job_id": args.job_id}
         if action == "list":
             # 契约：states / limit 均可选，缺省不写入 payload
