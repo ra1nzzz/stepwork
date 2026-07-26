@@ -71,10 +71,11 @@ def _resolve_db_path(backup: bool = True) -> str:
     db = Path(home) / "stepwork.db"
     if backup and db.exists():
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
-        backup = Path(home) / "backups" / f"stepwork-{stamp}.db"
-        backup.parent.mkdir(parents=True, exist_ok=True)
+        # 变量名与 backup 布尔参数区隔，避免遮蔽（mypy type-var 冲突）
+        backup_path = Path(home) / "backups" / f"stepwork-{stamp}.db"
+        backup_path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            shutil.copyfile(db, backup)
+            shutil.copyfile(db, backup_path)
         except OSError as exc:
             # 备份失败不阻塞启动（可能权限受限或磁盘满）
             logger.warning("启动备份失败（不阻塞启动）: %s", exc)
