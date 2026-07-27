@@ -10,14 +10,19 @@ use crate::state::AppState;
 /// Fetch the current worker health status.
 #[tauri::command]
 pub async fn get_worker_health(state: State<'_, AppState>) -> Result<Value, SidecarError> {
-    let guard = state.sidecar.lock().await;
-    let sidecar = guard.as_ref().ok_or_else(|| {
-        SidecarError::new(
-            crate::error::SidecarErrorKind::WorkerCrashed,
-            "worker is not running",
-        )
-    })?;
-    sidecar.rpc.call("runtime.health_check", json!({})).await
+    // 锁内只 clone 出 Arc<RpcClient> 即释放，不在 await RPC 期间持有
+    // state.sidecar 锁（与 dispatch.rs 同一约定）。
+    let rpc = {
+        let guard = state.sidecar.lock().await;
+        let sidecar = guard.as_ref().ok_or_else(|| {
+            SidecarError::new(
+                crate::error::SidecarErrorKind::WorkerCrashed,
+                "worker is not running",
+            )
+        })?;
+        std::sync::Arc::clone(&sidecar.rpc)
+    };
+    rpc.call("runtime.health_check", json!({})).await
 }
 
 /// Request a sidecar restart.
@@ -56,10 +61,11 @@ pub async fn get_app_info(state: State<'_, AppState>) -> Result<Value, SidecarEr
 }
 
 /// Resolve STEPWORK_HOME directory.
+///
+/// 统一委托给 `debug_config::resolve_stepwork_home`（默认 `~/STEPWORK`，
+/// 与 Python worker 的 bootstrap.py 保持一致）。
 fn dirs_stepwork_home() -> String {
-    std::env::var("STEPWORK_HOME").unwrap_or_else(|_| {
-        let mut path = std::env::temp_dir();
-        path.push("stepwork-home");
-        path.to_string_lossy().into_owned()
-    })
+    crate::debug_config::resolve_stepwork_home()
+        .to_string_lossy()
+        .into_owned()
 }

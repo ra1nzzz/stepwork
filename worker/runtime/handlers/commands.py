@@ -18,6 +18,7 @@ from worker.runtime.providers.resolve import (
     resolve_ai,
     resolve_asr,
     resolve_renderer,
+    resolve_scene_detector,
     resolve_tts,
 )
 from worker.runtime.state import WorkerState
@@ -52,6 +53,9 @@ async def handle_command(
         ai=resolve_ai(ws_id),
         tts=resolve_tts(ws_id),
         renderer=resolve_renderer(),
+        scene_detector=resolve_scene_detector(),
+        notify=state.notify,
+        worker_state=state,
     )
     # 包装为 {"result": <CommandResult dict>}，与模块 docstring 合约一致；
     # _dispatch 据此走 result 分支（否则会把 error 字符串当 dict 调 .get 崩）。

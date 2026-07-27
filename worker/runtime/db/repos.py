@@ -264,6 +264,12 @@ class JobRepo:
         )
         self.conn.commit()
 
+    # 终态集合：迁移进入后清空租约字段（租约只对「执行中」有意义；
+    # 残留会让 acquire/sweep 误判、也污染重试链路的可观测性）
+    _TERMINAL_STATES: frozenset[JobState] = frozenset(
+        {JobState.SUCCEEDED, JobState.FAILED, JobState.CANCELLED, JobState.EXPIRED}
+    )
+
     def update_state(
         self,
         job_id: str,
@@ -273,11 +279,31 @@ class JobRepo:
         stage: Optional[JobStage] = None,
     ) -> Job:
         now = datetime.now(UTC).isoformat()
-        self.conn.execute(
-            "UPDATE jobs SET state=?, progress=COALESCE(?,progress), "
-            "error_code=?, stage=COALESCE(?,stage), updated_at=? WHERE id=?",
-            (to_state.value, progress, error, stage.value if stage else None, now, job_id),
-        )
+        if to_state in self._TERMINAL_STATES:
+            # 终态：一并清除 lease_owner / lease_expires_at
+            self.conn.execute(
+                "UPDATE jobs SET state=?, progress=COALESCE(?,progress), "
+                "error_code=?, stage=COALESCE(?,stage), "
+                "lease_owner=NULL, lease_expires_at=NULL, updated_at=? WHERE id=?",
+                (to_state.value, progress, error, stage.value if stage else None, now, job_id),
+            )
+        else:
+            # 终态不可回退（WHERE 里带守卫，避免竞态）：取消渲染时主协程已把
+            # job 落 CANCELLED，但 ffmpeg 工作线程可能还在跑，其进度回调会
+            # 继续提交 RUNNING —— 若不守卫，终态会被改回 RUNNING，任务永久
+            # 悬挂。守卫放在 SQL 的 WHERE 而非 Python 判断，避免 check-then-act
+            # 之间的窗口。
+            placeholders = ",".join(["?"] * len(self._TERMINAL_STATES))
+            self.conn.execute(
+                "UPDATE jobs SET state=?, progress=COALESCE(?,progress), "
+                "error_code=?, stage=COALESCE(?,stage), updated_at=? "
+                f"WHERE id=? AND state NOT IN ({placeholders})",
+                (
+                    to_state.value, progress, error,
+                    stage.value if stage else None, now, job_id,
+                    *[s.value for s in self._TERMINAL_STATES],
+                ),
+            )
         self.conn.commit()
         got = self.get(job_id)
         assert got is not None

@@ -15,6 +15,14 @@
    - :class:`ConnectionClosedError` → break
 8. 收到 ``runtime.shutdown`` → 设置 ``state.shutdown_event`` → 等 heartbeat 退出 →
    关闭 writer → 退出码 0
+
+T1 并发 dispatch：``job.*`` / ``command.*`` request 帧经 ``asyncio.create_task``
+并发处理，长任务（渲染 / 转写）不再阻塞读循环——``CancelJob`` 可在其它命令
+执行期间被处理。所有帧写入（响应 / 心跳 / notification）经 ``state.write_lock``
+整帧互斥：``write_frame`` 在帧内部 await（``drain`` → run_in_executor），
+两个任务并发写帧时，flush 可能在不同执行器线程上并发进行，帧序 / 字节序
+均无保证，必须加锁串行化。``runtime.health_check`` / ``runtime.shutdown``
+保持内联（快路径 + shutdown 需要即刻置位事件）。
 """
 
 from __future__ import annotations
@@ -23,8 +31,10 @@ import asyncio
 import logging
 import os
 import sys
+import threading
 import time
-from typing import IO
+from io import BufferedReader
+from typing import IO, Any
 
 from worker.runtime.handlers import commands, health, lifecycle
 from worker.runtime.heartbeat import heartbeat_loop
@@ -53,6 +63,9 @@ JSONRPC_INVALID_REQUEST: int = -32600
 JSONRPC_METHOD_NOT_FOUND: int = -32601
 """JSON-RPC 2.0：Method not found。"""
 
+JSONRPC_INTERNAL_ERROR: int = -32603
+"""JSON-RPC 2.0：Internal error。"""
+
 JSONRPC_UNAUTHORIZED: int = -32001
 """自定义错误码：session token 校验失败。"""
 
@@ -60,11 +73,11 @@ _SESSION_TOKEN_KEY: str = "_session_token"
 """请求 params 中携带 session token 的保留字段名。"""
 
 
-def _stdin_binary() -> IO[bytes]:
+def _stdin_binary() -> BufferedReader:
     """返回 stdin 的二进制缓冲对象。
 
-    Returns:
-        ``sys.stdin.buffer``（存在时），否则回退到 ``sys.stdin`` 本身。
+    返回 ``sys.stdin.buffer``（``BufferedReader``，支持 ``read1``）；缺省时
+    回退 ``sys.stdin`` 本身（类型不符，仅在无 buffer 的异常环境走到）。
     """
     buffer = getattr(sys.stdin, "buffer", None)
     return buffer if buffer is not None else sys.stdin  # type: ignore[return-value]
@@ -80,25 +93,81 @@ def _stdout_binary() -> IO[bytes]:
     return buffer if buffer is not None else sys.stdout  # type: ignore[return-value]
 
 
-async def _open_stdin_stdout() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-    """把进程 stdin/stdout 包装为 asyncio StreamReader/StreamWriter。
+class _ThreadStdoutWriter:
+    """Async-compatible stdout writer that writes in a thread executor.
 
-    通过 ``loop.connect_read_pipe`` / ``loop.connect_write_pipe`` 把
-    ``sys.stdin.buffer`` / ``sys.stdout.buffer`` 接入事件循环。
+    Replaces ``loop.connect_write_pipe`` which is unsupported by
+    ``SelectorEventLoop`` on Windows. Buffers writes and flushes via
+    ``run_in_executor`` to avoid blocking the event loop.
+    """
+
+    def __init__(self, stdout: IO[bytes], loop: asyncio.AbstractEventLoop) -> None:
+        self._stdout = stdout
+        self._loop = loop
+        self._buf = bytearray()
+        self._closed = False
+
+    def write(self, data: bytes) -> None:
+        self._buf.extend(data)
+
+    async def drain(self) -> None:
+        if self._buf:
+            data = bytes(self._buf)
+            self._buf.clear()
+            await self._loop.run_in_executor(None, self._write_sync, data)
+
+    def _write_sync(self, data: bytes) -> None:
+        try:
+            self._stdout.write(data)
+            self._stdout.flush()
+        except (OSError, BrokenPipeError, ValueError):
+            pass
+
+    def close(self) -> None:
+        self._closed = True
+
+    async def wait_closed(self) -> None:
+        await self.drain()
+
+
+async def _open_stdin_stdout() -> tuple[asyncio.StreamReader, _ThreadStdoutWriter]:
+    """把进程 stdin/stdout 包装为 asyncio StreamReader / 自定义 Writer。
+
+    使用守护线程从 ``sys.stdin.buffer`` 读取数据并 feed 到 ``asyncio.StreamReader``，
+    通过 ``run_in_executor`` 写入 ``sys.stdout.buffer``。
+
+    这种方式兼容 Windows 上的 ``SelectorEventLoop`` 和 ``ProactorEventLoop``，
+    避免了 ``connect_read_pipe`` 在 ``SelectorEventLoop`` 下的 ``NotImplementedError``
+    以及 ``ProactorEventLoop`` 在 Python 3.13 下的 ``_empty_waiter`` bug。
 
     Returns:
         ``(reader, writer)`` 元组。
     """
     loop = asyncio.get_running_loop()
-
     reader = asyncio.StreamReader()
-    reader_protocol = asyncio.StreamReaderProtocol(reader)
-    await loop.connect_read_pipe(lambda: reader_protocol, _stdin_binary())
 
-    writer_transport, writer_protocol = await loop.connect_write_pipe(
-        asyncio.streams.FlowControlMixin, _stdout_binary()
-    )
-    writer = asyncio.StreamWriter(writer_transport, writer_protocol, reader, loop)
+    stdin_bin = _stdin_binary()
+
+    def _feed_stdin() -> None:
+        try:
+            while True:
+                # read1() returns as soon as any data is available (up to n bytes),
+                # unlike read() which blocks until n bytes or EOF.
+                data = stdin_bin.read1(4096)
+                if not data:
+                    break
+                loop.call_soon_threadsafe(reader.feed_data, data)
+        except (OSError, ValueError):
+            pass
+        finally:
+            try:
+                loop.call_soon_threadsafe(reader.feed_eof)
+            except RuntimeError:
+                pass
+
+    threading.Thread(target=_feed_stdin, daemon=True).start()
+
+    writer = _ThreadStdoutWriter(_stdout_binary(), loop)
     return reader, writer
 
 
@@ -181,11 +250,23 @@ async def amain() -> int:
 
     reader, writer = await _open_stdin_stdout()
 
+    async def _write_locked(frame: RpcFrame) -> None:
+        """经 ``state.write_lock`` 整帧互斥地写出一帧。"""
+        async with state.write_lock:
+            await write_frame(writer, frame)
+
+    async def _notify(method: str, params: dict[str, Any]) -> None:
+        """发送一条 JSON-RPC notification（进度通知等，T1 契约注入点）。"""
+        await _write_locked(make_notification(method, params))
+
+    # 注入进度通知回调：handler 经 deps/state 拿到（无注入时静默跳过）
+    state.notify = _notify
+
     # 计算启动耗时（v1.1 Patch-U3），再发送 ready
     state.startup_duration_ms = int((time.monotonic() - monotonic_start) * 1000)
 
     ready_params = await lifecycle.handle_ready(state)
-    await write_frame(writer, make_notification("runtime.ready", ready_params))
+    await _write_locked(make_notification("runtime.ready", ready_params))
     logger.info(
         "worker ready pid=%s protocol=%s startup_ms=%s",
         state.pid,
@@ -198,6 +279,33 @@ async def amain() -> int:
         name="runtime-heartbeat",
     )
 
+    # T1 并发 dispatch：跟踪 in-flight 任务，shutdown 时限时等待再取消
+    in_flight: set[asyncio.Task[None]] = set()
+
+    async def _dispatch_and_respond(frame: RpcFrame) -> None:
+        """并发路径：dispatch 一帧并（若有）写回响应；异常兜底不击垮循环。"""
+        try:
+            response = await _dispatch(frame, state)
+            if response is not None:
+                await _write_locked(response)
+        except ConnectionClosedError as exc:
+            logger.info("response write failed (peer gone): %s", exc)
+        except Exception as exc:
+            logger.exception("dispatch task crashed method=%s id=%s", frame.method, frame.id)
+            # 兜底响应：只记日志不回帧会让调用方一直等到超时（Rust 侧 30 分钟）。
+            # 尽力回一帧 -32603；写失败（对端已断等）自吞，绝不二次击垮任务。
+            if frame.id is not None:
+                try:
+                    await _write_locked(
+                        make_error_response(
+                            frame.id, JSONRPC_INTERNAL_ERROR, f"internal: {exc}"
+                        )
+                    )
+                except Exception:
+                    logger.exception(
+                        "failed to write internal-error response id=%s", frame.id
+                    )
+
     exit_code = 0
     try:
         while not state.shutdown_event.is_set():
@@ -205,15 +313,13 @@ async def amain() -> int:
                 frame = await read_frame(reader)
             except ParseError as exc:
                 logger.warning("parse error: %s", exc)
-                await write_frame(
-                    writer,
+                await _write_locked(
                     make_error_response(None, JSONRPC_PARSE_ERROR, f"Parse error: {exc}"),
                 )
                 break
             except FrameTooLargeError as exc:
                 logger.warning("frame too large: %s", exc)
-                await write_frame(
-                    writer,
+                await _write_locked(
                     make_error_response(
                         None,
                         JSONRPC_INVALID_REQUEST,
@@ -227,8 +333,7 @@ async def amain() -> int:
 
             if not _check_session_token(frame, state):
                 logger.warning("session token mismatch id=%s", frame.id)
-                await write_frame(
-                    writer,
+                await _write_locked(
                     make_error_response(
                         frame.id,
                         JSONRPC_UNAUTHORIZED,
@@ -237,11 +342,33 @@ async def amain() -> int:
                 )
                 continue
 
-            response = await _dispatch(frame, state)
-            if response is not None:
-                await write_frame(writer, response)
+            method = frame.method or ""
+            if frame.id is not None and method not in (
+                "runtime.health_check",
+                "runtime.shutdown",
+            ):
+                # request 帧并发处理：长任务不阻塞读循环，CancelJob 可乘隙抵达
+                task = asyncio.create_task(
+                    _dispatch_and_respond(frame),
+                    name=f"dispatch-{method}-{frame.id}",
+                )
+                in_flight.add(task)
+                task.add_done_callback(in_flight.discard)
+            else:
+                # health_check / shutdown（快路径，shutdown 需即刻置位事件）
+                # 与 notification 帧保持内联，语义与改造前一致
+                response = await _dispatch(frame, state)
+                if response is not None:
+                    await _write_locked(response)
     finally:
         state.shutdown_event.set()
+        # 限时等待 in-flight 任务收尾，超时后取消（避免卡死退出）
+        if in_flight:
+            _done, pending = await asyncio.wait(in_flight, timeout=5.0)
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
         heartbeat_task.cancel()
         try:
             await asyncio.wait_for(heartbeat_task, timeout=1.0)
@@ -260,6 +387,9 @@ async def amain() -> int:
 
 def main() -> None:
     """同步入口（``pyproject.toml [project.scripts]`` 注册点）。"""
+    # stdin/stdout I/O 使用线程桥接（_open_stdin_stdout），不依赖
+    # connect_read_pipe/connect_write_pipe，因此兼容默认事件循环策略。
+    # 不再需要 WindowsSelectorEventLoopPolicy hack。
     try:
         code = asyncio.run(amain())
     except KeyboardInterrupt:

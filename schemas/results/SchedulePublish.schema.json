@@ -1,0 +1,63 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "mode": {
+      "title": "Mode",
+      "type": "string"
+    },
+    "scheduled_at": {
+      "title": "Scheduled At",
+      "type": "string"
+    },
+    "platform": {
+      "title": "Platform",
+      "type": "string"
+    },
+    "platform_label": {
+      "title": "Platform Label",
+      "type": "string"
+    },
+    "unattended": {
+      "title": "Unattended",
+      "type": "boolean"
+    },
+    "note": {
+      "title": "Note",
+      "type": "string"
+    },
+    "issues": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Issues",
+      "type": "array"
+    },
+    "status": {
+      "title": "Status",
+      "type": "string"
+    },
+    "mode_description": {
+      "title": "Mode Description",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "mode",
+    "scheduled_at",
+    "platform",
+    "platform_label",
+    "unattended",
+    "note",
+    "issues",
+    "status",
+    "mode_description"
+  ],
+  "title": "SchedulePublishDetail",
+  "type": "object"
+}

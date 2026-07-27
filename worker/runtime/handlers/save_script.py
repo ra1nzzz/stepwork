@@ -9,6 +9,7 @@ import hashlib
 import json
 from typing import Any
 
+from worker.runtime.audit import EVENT_SCRIPT_SAVED, record_event
 from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
 from worker.runtime.models import (
@@ -51,6 +52,11 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         producer={"kind": "user-script", "editor": "tiptap"},
     )
     cv_id = repos.content_versions.insert(cv)
+    # PRD §14 埋点：脚本保存（此前 save_script 无 job 也无 audit）
+    record_event(
+        repos.conn, env, EVENT_SCRIPT_SAVED,
+        {"version_id": cv_id, "parent": parent_id, "chars": len(content_str)},
+    )
     return CommandResult(
         ok=True,
         commandId=env.commandId,

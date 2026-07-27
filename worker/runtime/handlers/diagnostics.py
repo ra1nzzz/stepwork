@@ -103,6 +103,19 @@ def _collect_config_snapshot(deps: Deps, workspace_id: str) -> dict[str, Any]:
     return ws.settings or {}
 
 
+def _collect_command_metrics(deps: Deps) -> list[dict[str, Any]]:
+    """命令级指标摘要（次数 / 失败率 / 耗时）。
+
+    取不到就返回空 —— 诊断包的价值在于「能导出」，不该因为某一节缺失就整体失败。
+    """
+    try:
+        from worker.runtime.observability import summarize
+
+        return summarize(deps.repos.conn)
+    except Exception:  # noqa: BLE001 - 诊断包不能因为某一节失败就导不出
+        return []
+
+
 def _collect_recent_logs(log_path: Path, max_lines: int = _DEFAULT_MAX_LOG_LINES) -> list[str]:
     """读最近 N 行 worker.log（文件不存在返空 list）。"""
     if not log_path.exists() or not log_path.is_file():
@@ -181,6 +194,9 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         "db_schema": _collect_db_schema_version(deps),
         "config": config_snapshot,
         "worker_log": _collect_recent_logs(log_path, max_log_lines),
+        # 命令指标：用户报「很慢」时，这里能直接看出慢在哪条命令、
+        # 是不是只有他慢。本地优先的产品不该为此拉一套监控栈。
+        "command_metrics": _collect_command_metrics(deps),
     }
 
     # 打 zip（_build_bundle 内按 desensitize 统一掩码）

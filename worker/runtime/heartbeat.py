@@ -9,7 +9,7 @@ import asyncio
 import contextlib
 
 from worker.runtime.handlers import lifecycle
-from worker.runtime.rpc import make_notification, write_frame
+from worker.runtime.rpc import FrameWriter, make_notification, write_frame
 from worker.runtime.state import WorkerState
 
 DEFAULT_HEARTBEAT_INTERVAL: float = 5.0
@@ -17,7 +17,7 @@ DEFAULT_HEARTBEAT_INTERVAL: float = 5.0
 
 
 async def heartbeat_loop(
-    writer: asyncio.StreamWriter,
+    writer: FrameWriter,
     state: WorkerState,
     shutdown_event: asyncio.Event,
     interval: float = DEFAULT_HEARTBEAT_INTERVAL,
@@ -37,8 +37,11 @@ async def heartbeat_loop(
         params = await lifecycle.handle_heartbeat(state)
         frame = make_notification("runtime.heartbeat", params)
         with contextlib.suppress(ConnectionError, OSError):
-            # 对端已关闭时静默退出循环；主循环会感知并清理
-            await write_frame(writer, frame)
+            # 对端已关闭时静默退出循环；主循环会感知并清理。
+            # T1 并发 dispatch 后，心跳与响应/notification 写并发，
+            # 经 ``state.write_lock`` 保证整帧互斥，避免字节交错。
+            async with state.write_lock:
+                await write_frame(writer, frame)
 
         with contextlib.suppress(TimeoutError, asyncio.TimeoutError):
             await asyncio.wait_for(shutdown_event.wait(), timeout=interval)

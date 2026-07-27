@@ -1,0 +1,19 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "running": {
+      "title": "Running",
+      "type": "boolean"
+    },
+    "url": {
+      "title": "Url",
+      "type": "string"
+    }
+  },
+  "required": [
+    "running",
+    "url"
+  ],
+  "title": "GetA2aServerStatusDetail",
+  "type": "object"
+}

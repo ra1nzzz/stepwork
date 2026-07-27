@@ -13,6 +13,7 @@ from typing import Any
 
 from worker.runtime.models import RenderResult, RenderSpec
 from worker.runtime.render.ffmpeg_runner import FFmpegRunner, FFmpegUnavailable
+from worker.runtime.render.templates import resolve_template
 
 
 def _esc(text: str) -> str:
@@ -48,16 +49,19 @@ class FFmpegRenderer:
         video_path = os.path.join(out_dir, f"draft_{spec.source_version_id}.mp4")
         w, h = spec.resolution
         caption = _esc((spec.caption_text or "STEPWORK")[:200])
+        # PRD-REN-005：模板决定背景/字号/字幕位置/字色（此前全部硬编码，
+        # 导致 UI 切换模板后画面完全相同）。未注册模板由 handler 提前拒绝。
+        tpl = resolve_template(spec.template)
         # argv list：绝不使用 shell 拼接（P0）
         args = [
             "-y",
             "-i", audio_path,
             "-f", "lavfi",
-            "-i", f"color=c=navy:s={w}x{h}:r={spec.fps}",
+            "-i", f"color=c={tpl.background}:s={w}x{h}:r={spec.fps}",
             "-vf",
             (
-                f"drawtext=text='{caption}':fontcolor=white:"
-                f"fontsize=48:x=(w-text_w)/2:y=h-120"
+                f"drawtext=text='{caption}':fontcolor={tpl.font_color}:"
+                f"fontsize={tpl.font_size}:x=(w-text_w)/2:y={tpl.caption_y}"
             ),
             "-c:v", "libx264",
             "-c:a", "aac",

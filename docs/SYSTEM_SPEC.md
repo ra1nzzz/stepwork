@@ -1119,5 +1119,6 @@ User → Command → AgentTask → External Agent → Artifact → ContentVersio
 - ADR-007：CLI/MCP MVP，A2A/ACP 后置实现但数据模型前置；
 - ADR-008：Publisher 默认 Fill and Preview；
 - ADR-009：插件独立进程；
-- ADR-010：Media Auto Pilot 作为迁移基础而非 Core。
+- ADR-010：Media Auto Pilot 作为迁移基础而非 Core；
+- ADR-011：剪辑数据交换选 OTIO/EDL，不做剪映草稿（剪映 6+ 起加密，写入需绕过技术保护措施）。
 

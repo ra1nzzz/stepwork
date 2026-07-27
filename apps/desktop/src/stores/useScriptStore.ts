@@ -1,30 +1,42 @@
 /**
- * 脚本创作 Store（W5 Batch1）
+ * 脚本创作 Store（W5 Batch1 → Tranche 2 扩展）
  * - 对转写/素材 dispatch GenerateTopic → 拿到差异化角度
  * - 选定角度 dispatch GenerateScript → 拿到脚本正文（seed 编辑器）
  * - 编辑器内容变化（TipTap JSON）经防抖后 dispatch SaveScript 自动保存，
  *   每次保存新建一条 script 版本并串 parent 链（防丢稿）
+ * - Tranche 2（WS-005 恢复闭环）：
+ *   loadVersions 经 ListContentVersions 恢复项目最近的 script 版本链，
+ *   并把最新版本内容 seed 回编辑器；loadVersionContent 经 GetContentVersion
+ *   加载任意历史版本全文；回滚 = 以历史内容 SaveScript 生成新版本，不覆盖历史
  *
- * 与 W3/W4 store 一致：经由 buildEnvelope + dispatchCommand；
- * 浏览器下由 tauri.ts mock 返回示例数据。
+ * 与 W3/W4 store 一致：经由 buildEnvelope + dispatchCommand
  */
 
 import { create } from "zustand";
-import { buildEnvelope, dispatchCommand } from "@/lib/tauri";
+import { buildEnvelope, dispatchCommand, getWorkspaceId } from "@/lib/tauri";
+import { useViewStore } from "@/stores/useViewStore";
 import type {
+  SimilarityWarning,
   TopicAngle,
+  VersionDiff,
   ScriptVersionRef,
   GenerateTopicPayload,
   GenerateScriptPayload,
   SaveScriptPayload,
+  ContentVersionSummary,
+  ContentVersionDetail,
 } from "@/lib/types";
 
-const WORKSPACE = "ws-local";
+// 当前工作区由 getWorkspaceId() 解析（用户可在设置页切换）
+
+/** 当前选中项目 id（envelope.projectId）；确实没有时才回落 null */
+const currentProjectId = (): string | null =>
+  useViewStore.getState().selectedProjectId ?? null;
 
 export type ScriptStatus = "idle" | "running" | "succeeded" | "failed";
 
 interface ScriptStoreState {
-  /** 选题来源的转写/素材版本 id（默认 mock 版，便于演示） */
+  /** 选题来源的转写/素材版本 id */
   sourceVersionId: string;
   angles: TopicAngle[];
   proposalVersionId: string | null;
@@ -37,17 +49,62 @@ interface ScriptStoreState {
   /** 当前已保存脚本版本 id（作为下次保存的 parent） */
   scriptVersionId: string | null;
   versionChain: ScriptVersionRef[];
+  /** PRD-SCR-004：与历史选题重复的提醒（只提示，不拦截） */
+  duplicateWarnings: SimilarityWarning[];
+  /** PRD-SCR-005：与历史脚本相似的原创性提醒（不做法律结论） */
+  similarityWarnings: SimilarityWarning[];
   isBusy: boolean;
   error: string | null;
 
   setSourceVersion: (id: string) => void;
   selectAngle: (id: string) => void;
+  /** PRD-BRD-002：生成时是否启用项目绑定的品牌档（默认启用） */
+  useBrandProfile: boolean;
+  setUseBrandProfile: (v: boolean) => void;
   generateTopics: () => Promise<void>;
   generateScript: () => Promise<void>;
   setScriptTitle: (t: string) => void;
-  /** 编辑器内容（TipTap JSON）防抖后调用，新建版本并串链 */
-  saveScript: (doc: Record<string, unknown>) => Promise<void>;
+  /** 保存正文（可选标题）到后端，新建版本并串链 */
+  saveScript: (text: string, title?: string) => Promise<void>;
+  /** 进入创作页时恢复项目的 script 版本链，并 seed 最新版本内容（WS-005） */
+  /**
+   * PRD-SCR-003：段落级生成/重写/扩写/压缩。
+   * 生成新版本（parent 指向当前版本），因此可经版本历史回滚撤销。
+   * 成功后返回新正文，调用方据此刷新编辑器。
+   */
+  editParagraph: (
+    index: number,
+    operation: "rewrite" | "expand" | "condense" | "generate",
+    instruction?: string,
+  ) => Promise<string | null>;
+  /**
+   * PRD-SCR-006：比较当前版本与 AI 初稿（baseVersionId 省略时后端自动
+   * 沿 parent 链定位 kind='ai-script' 的那一版）。
+   */
+  diffVersions: (baseVersionId?: string) => Promise<VersionDiff | null>;
+  loadVersions: () => Promise<void>;
+  /** 加载指定版本全文（版本 tab 点击查看/回滚用） */
+  loadVersionContent: (
+    versionId: string,
+  ) => Promise<{ title: string; body: string } | null>;
   reset: () => void;
+}
+
+/** 解析 script 版本内容：生成路径为 {title, body}，保存路径为 {text, title}，
+ *  历史/外部内容可能是裸文本 → 整体作为 body */
+function parseScriptContent(raw: string): { title: string; body: string } {
+  try {
+    const obj = JSON.parse(raw) as Record<string, unknown>;
+    const body =
+      typeof obj.body === "string"
+        ? obj.body
+        : typeof obj.text === "string"
+          ? obj.text
+          : raw;
+    return { title: typeof obj.title === "string" ? obj.title : "", body };
+  } catch {
+    return { title: "", body: raw };
+  }
 }
 
 function newVersionRef(
@@ -64,7 +121,7 @@ function newVersionRef(
 }
 
 export const useScriptStore = create<ScriptStoreState>((set, get) => ({
-  sourceVersionId: "cv-local",
+  sourceVersionId: "",
   angles: [],
   proposalVersionId: null,
   selectedAngleId: null,
@@ -73,12 +130,17 @@ export const useScriptStore = create<ScriptStoreState>((set, get) => ({
   seedBody: null,
   scriptVersionId: null,
   versionChain: [],
+  duplicateWarnings: [],
+  similarityWarnings: [],
   isBusy: false,
   error: null,
 
   setSourceVersion: (id) => set({ sourceVersionId: id }),
 
   selectAngle: (id) => set({ selectedAngleId: id }),
+
+  useBrandProfile: true,
+  setUseBrandProfile: (v) => set({ useBrandProfile: v }),
 
   generateTopics: async () => {
     if (get().isBusy) return;
@@ -87,11 +149,12 @@ export const useScriptStore = create<ScriptStoreState>((set, get) => ({
       const payload: GenerateTopicPayload = {
         source_version_id: get().sourceVersionId,
         count: 3,
+        use_brand_profile: get().useBrandProfile,
       };
       const env = buildEnvelope(
         "GenerateTopic",
-        WORKSPACE,
-        null,
+        getWorkspaceId(),
+        currentProjectId(),
         payload,
       );
       const res = await dispatchCommand(env);
@@ -103,6 +166,9 @@ export const useScriptStore = create<ScriptStoreState>((set, get) => ({
         proposalVersionId: res.artifact_ids[0] ?? null,
         selectedAngleId: angles[0]?.id ?? null,
         topicStatus: "succeeded",
+        // PRD-SCR-004：与历史选题重复的提醒
+        duplicateWarnings:
+          (detail.duplicate_warnings as SimilarityWarning[] | undefined) ?? [],
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -125,11 +191,12 @@ export const useScriptStore = create<ScriptStoreState>((set, get) => ({
         proposal_version_id: proposalId,
         topic_id: get().selectedAngleId,
         style: "short_video",
+        use_brand_profile: get().useBrandProfile,
       };
       const env = buildEnvelope(
         "GenerateScript",
-        WORKSPACE,
-        null,
+        getWorkspaceId(),
+        currentProjectId(),
         payload,
       );
       const res = await dispatchCommand(env);
@@ -144,6 +211,9 @@ export const useScriptStore = create<ScriptStoreState>((set, get) => ({
         versionChain: versionId
           ? [newVersionRef(versionId, s.scriptVersionId, "ai-script"), ...s.versionChain]
           : s.versionChain,
+        // PRD-SCR-005：与历史脚本相似的原创性提醒
+        similarityWarnings:
+          (detail.similarity_warnings as SimilarityWarning[] | undefined) ?? [],
       }));
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -155,15 +225,15 @@ export const useScriptStore = create<ScriptStoreState>((set, get) => ({
 
   setScriptTitle: (t) => set({ scriptTitle: t }),
 
-  saveScript: async (doc) => {
+  saveScript: async (text, title) => {
     const payload: SaveScriptPayload = {
-      content: doc,
+      content: { text, title: title ?? get().scriptTitle },
       parent_version_id: get().scriptVersionId,
     };
     const env = buildEnvelope(
       "SaveScript",
-      WORKSPACE,
-      null,
+      getWorkspaceId(),
+      currentProjectId(),
       payload,
     );
     try {
@@ -182,6 +252,125 @@ export const useScriptStore = create<ScriptStoreState>((set, get) => ({
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       set({ error: msg });
+    }
+  },
+
+  editParagraph: async (index, operation, instruction) => {
+    const versionId = get().scriptVersionId;
+    if (!versionId) {
+      set({ error: "请先保存脚本，再做段落级编辑" });
+      return null;
+    }
+    set({ isBusy: true, error: null });
+    try {
+      const env = buildEnvelope("EditParagraph", getWorkspaceId(), currentProjectId(), {
+        version_id: versionId,
+        paragraph_index: index,
+        operation,
+        ...(instruction ? { instruction } : {}),
+        use_brand_profile: get().useBrandProfile,
+      });
+      const res = await dispatchCommand(env);
+      if (!res.ok) {
+        set({ error: res.error ?? "EDIT_FAILED" });
+        return null;
+      }
+      const newVersionId = res.artifact_ids[0] ?? null;
+      if (newVersionId) set({ scriptVersionId: newVersionId });
+      await get().loadVersions();
+      // 拉回新版本全文，交给编辑器刷新
+      if (newVersionId) {
+        const detail = await get().loadVersionContent(newVersionId);
+        return detail?.body ?? null;
+      }
+      return null;
+    } catch (e) {
+      set({ error: e instanceof Error ? e.message : String(e) });
+      return null;
+    } finally {
+      set({ isBusy: false });
+    }
+  },
+
+  diffVersions: async (baseVersionId) => {
+    const versionId = get().scriptVersionId;
+    if (!versionId) {
+      set({ error: "请先保存脚本，再比较版本" });
+      return null;
+    }
+    try {
+      const env = buildEnvelope(
+        "DiffContentVersions",
+        getWorkspaceId(),
+        currentProjectId(),
+        {
+          versionId,
+          ...(baseVersionId ? { baseVersionId } : {}),
+        },
+      );
+      const res = await dispatchCommand(env);
+      if (!res.ok) {
+        set({ error: res.error ?? "DIFF_FAILED" });
+        return null;
+      }
+      return (res.detail ?? null) as VersionDiff | null;
+    } catch (e) {
+      set({ error: e instanceof Error ? e.message : String(e) });
+      return null;
+    }
+  },
+
+  loadVersions: async () => {
+    const projectId = currentProjectId();
+    if (!projectId) return;
+    try {
+      const env = buildEnvelope("ListContentVersions", getWorkspaceId(), projectId, {
+        projectId,
+        contentType: "script",
+        limit: 20,
+      });
+      const res = await dispatchCommand(env);
+      if (!res.ok) return;
+      const detail = (res.detail ?? {}) as { versions?: ContentVersionSummary[] };
+      const versions = detail.versions ?? [];
+      if (versions.length === 0) return;
+      const chain: ScriptVersionRef[] = versions.map((v) => ({
+        id: v.id,
+        parent_version_id: v.parent_version_id,
+        created_at: v.created_at,
+        producer_kind:
+          typeof v.producer?.kind === "string" ? (v.producer.kind as string) : null,
+      }));
+      set({ versionChain: chain });
+      // 恢复最新版本内容到编辑器（仅当本地尚无已保存版本，避免覆盖会话内进度）
+      if (!get().scriptVersionId) {
+        const latest = await get().loadVersionContent(chain[0].id);
+        if (latest) {
+          set((s) => ({
+            scriptVersionId: chain[0].id,
+            scriptTitle: latest.title || s.scriptTitle,
+            seedBody: latest.body,
+          }));
+        }
+      }
+    } catch {
+      /* 后端未连接：保持空链 */
+    }
+  },
+
+  loadVersionContent: async (versionId) => {
+    try {
+      const env = buildEnvelope("GetContentVersion", getWorkspaceId(), currentProjectId(), {
+        versionId,
+      });
+      const res = await dispatchCommand(env);
+      if (!res.ok) return null;
+      const detail = (res.detail ?? {}) as { version?: ContentVersionDetail };
+      const content = detail.version?.content;
+      if (content == null) return null;
+      return parseScriptContent(content);
+    } catch {
+      return null;
     }
   },
 

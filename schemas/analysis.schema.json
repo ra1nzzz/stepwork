@@ -43,6 +43,24 @@
         "null"
       ]
     },
+    "hook": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "structure": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "risks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "provider": {
       "type": "string"
     },
@@ -51,6 +69,41 @@
     },
     "confidence": {
       "type": "number"
+    },
+    "citations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "claim": {
+            "type": "string"
+          },
+          "start_sec": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "scene_index": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "quote": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "claim",
+          "start_sec",
+          "scene_index",
+          "quote"
+        ]
+      }
     }
   },
   "required": [
@@ -61,8 +114,12 @@
     "suggested_tags",
     "key_points",
     "target_audience",
+    "hook",
+    "structure",
+    "risks",
     "provider",
     "model",
-    "confidence"
+    "confidence",
+    "citations"
   ]
 }

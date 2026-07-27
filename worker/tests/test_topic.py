@@ -134,3 +134,97 @@ async def test_save_script_version_chain() -> None:
         "SELECT parent_version_id FROM content_versions WHERE id=?", (v2,)
     ).fetchone()
     assert row["parent_version_id"] == v1
+
+
+# ----- PRD-SCR-001：角度须含受众/观点/差异/风险 + 3—5 个约束 -----
+
+
+class _RichAI:
+    """返回 PRD-SCR-001 全字段角度的假 AI。"""
+
+    name = "rich-ai"
+    model = "rich-1"
+
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    async def complete(self, prompt: str, schema: Any = None) -> dict[str, Any]:
+        self.prompts.append(prompt)
+        return {
+            "angles": [
+                {
+                    "id": f"a{i}",
+                    "title": f"角度{i}",
+                    "rationale": "差异化依据",
+                    "hook": "钩子",
+                    "audience": "效率工具用户",
+                    "stance": "自动化优先于手工",
+                    "risks": ["样本有限"],
+                }
+                for i in range(1, 4)
+            ],
+            "title": "t",
+            "body": "b",
+        }
+
+
+def _seed_source(deps: Deps) -> str:
+    deps.repos.workspaces.ensure("ws-t")
+    prj = deps.repos.projects.get_or_create_default("ws-t").id
+    return deps.repos.content_versions.insert(
+        ContentVersion(
+            project_id=prj,
+            content_type="transcript",
+            content="素材文本",
+            content_hash="h",
+        )
+    )
+
+
+async def test_topic_angles_carry_audience_stance_risks() -> None:
+    c = in_memory()
+    run_migrations(c, _MIG_DIR)
+    ai = _RichAI()
+    deps = Deps(repos=Repos(c), ai=ai)
+    cv = _seed_source(deps)
+
+    res = await dispatch(
+        _env("GenerateTopic", {"source_version_id": cv, "count": 3}), deps
+    )
+    assert res["ok"] is True, res.get("error")
+
+    stored = deps.repos.content_versions.get(res["artifact_ids"][0])
+    assert stored is not None
+    angles = json.loads(stored.content)["angles"]
+    assert len(angles) == 3
+    # PRD-SCR-001 四要素齐备
+    for a in angles:
+        assert a["audience"]
+        assert a["stance"]
+        assert isinstance(a["risks"], list)
+        assert a["rationale"]
+
+    # prompt 明确索取这三项，否则模型不会产出
+    assert "audience" in ai.prompts[0]
+    assert "stance" in ai.prompts[0]
+    assert "risks" in ai.prompts[0]
+
+
+async def test_topic_count_must_be_between_3_and_5() -> None:
+    c = in_memory()
+    run_migrations(c, _MIG_DIR)
+    deps = Deps(repos=Repos(c), ai=_RichAI())
+    cv = _seed_source(deps)
+
+    for bad in (1, 2, 6, 100):
+        res = await dispatch(
+            _env("GenerateTopic", {"source_version_id": cv, "count": bad}), deps
+        )
+        assert res["ok"] is False, f"count={bad} 应被拒绝"
+        assert "INVALID_ARGUMENT" in res["error"]
+
+    for good in (3, 4, 5):
+        res = await dispatch(
+            _env("GenerateTopic", {"source_version_id": cv, "count": good}), deps
+        )
+        assert res["ok"] is True, f"count={good} 应被接受"

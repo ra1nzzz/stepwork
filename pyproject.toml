@@ -18,11 +18,21 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "Pillow>=12",
   "pytest>=8",
   "pytest-asyncio>=0.23",
   "pytest-cov>=5",
   "ruff>=0.5",
   "mypy>=1.10",
+]
+# 可选真实引擎（Tranche 3）：默认不装，按需 `pip install -e .[asr]` / `.[tts]`。
+# 缺失时 resolve_asr/resolve_tts 走 import 守卫回退 None（→ UNAVAILABLE），
+# 不影响离线 local Provider 与 worker 启动。
+asr = [
+  "faster-whisper>=1.0",  # STEPWORK_ASR_PROVIDER=whisper 本地离线识别
+]
+tts = [
+  "edge-tts>=6.1",  # STEPWORK_TTS_PROVIDER=edge 微软在线神经语音
 ]
 
 [project.scripts]
@@ -51,6 +61,12 @@ select = ["E", "F", "W", "I", "UP", "B", "ASYNC", "ANN"]
 # UP045: Optional[X] 与 X | None 的风格二选一，交由 mypy 统一；避免 churn
 ignore = ["ANN401", "UP045"]
 
+[tool.ruff.lint.per-file-ignores]
+# ASYNC109：该模块的 timeout 直接交给 httpx，用的是它自己的分阶段超时
+# （连接/读/写各自计时），比在外面裹一层 asyncio.timeout 更准确，
+# 也是 httpx 的推荐用法。规则在这里是误报。
+"worker/runtime/agents/a2a_client.py" = ["ASYNC109"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true
@@ -64,6 +80,13 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 warn_no_return = true
 warn_unreachable = true
+
+# 可选真实引擎（Tranche 3 extras .[asr]/.[tts]）：无类型 stub，且 CI 通常
+# 不安装。声明 ignore_missing_imports，使「装了/没装」两种环境都不报
+# 缺导入 / 未使用 ignore（避免 warn_unused_ignores 的环境相关抖动）。
+[[tool.mypy.overrides]]
+module = ["edge_tts.*", "faster_whisper.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

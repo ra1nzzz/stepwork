@@ -1,0 +1,29 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "approval_id": {
+      "title": "Approval Id",
+      "type": "string"
+    },
+    "publish_job_id": {
+      "title": "Publish Job Id",
+      "type": "string"
+    },
+    "content_hash": {
+      "title": "Content Hash",
+      "type": "string"
+    },
+    "state": {
+      "title": "State",
+      "type": "string"
+    }
+  },
+  "required": [
+    "approval_id",
+    "publish_job_id",
+    "content_hash",
+    "state"
+  ],
+  "title": "RequestPublishAuthorizationDetail",
+  "type": "object"
+}

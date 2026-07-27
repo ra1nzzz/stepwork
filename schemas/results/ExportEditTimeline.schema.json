@@ -1,0 +1,34 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "path": {
+      "title": "Path",
+      "type": "string"
+    },
+    "format": {
+      "title": "Format",
+      "type": "string"
+    },
+    "scene_count": {
+      "title": "Scene Count",
+      "type": "integer"
+    },
+    "marker_count": {
+      "title": "Marker Count",
+      "type": "integer"
+    },
+    "note": {
+      "title": "Note",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path",
+    "format",
+    "scene_count",
+    "marker_count",
+    "note"
+  ],
+  "title": "ExportEditTimelineDetail",
+  "type": "object"
+}

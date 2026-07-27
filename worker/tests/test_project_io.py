@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import os
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,16 @@ from worker.runtime.db.connection import in_memory
 from worker.runtime.db.migrations import run_migrations
 from worker.runtime.db.repos import Repos
 from worker.runtime.deps import Deps
+from worker.runtime.models import ContentProject, SourceAsset
+
+
+def _read_file_bytes(path: str) -> bytes | None:
+    """同步读文件（放在 async 测试外，避免 ruff ASYNC230/240）。"""
+    if not os.path.isfile(path):
+        return None
+    with open(path, "rb") as f:
+        return f.read()
+
 
 _MIG_DIR = Path(__file__).resolve().parents[2] / "migrations"
 
@@ -281,3 +292,131 @@ async def test_import_project_missing_bundle_path(
     res = await dispatch(_envelope("ImportProject", {}), deps)
     assert res["ok"] is False
     assert "INVALID_ARGUMENT" in res["error"]
+
+
+# ----- PRD-WS-004：bundle 必须带媒体本体，才能「在另一安装实例恢复」 -----
+
+
+async def test_export_bundle_includes_media_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """导出包内应含 assets/ 下的媒体本体（此前只有 JSON 行数据）。"""
+    monkeypatch.setenv("STEPWORK_HOME", str(tmp_path))
+    deps = _deps()
+    deps.repos.workspaces.ensure("ws-media")
+    prj = deps.repos.projects.insert(
+        ContentProject(workspace_id="ws-media", title="带素材项目")
+    )
+    media = tmp_path / "source.mp4"
+    media.write_bytes(b"FAKE-MEDIA-BYTES")
+    deps.repos.source_assets.insert_dedup(
+        SourceAsset(
+            project_id=prj,
+            kind="video",
+            local_uri=str(media),
+            content_hash="h-media",
+        )
+    )
+
+    res = await dispatch(
+        _envelope("ExportProject", {"projectId": prj}, project_id=prj), deps
+    )
+    assert res["ok"] is True, res.get("error")
+
+    with zipfile.ZipFile(res["detail"]["bundle_path"]) as zf:
+        names = zf.namelist()
+        media_members = [n for n in names if n.startswith("assets/")]
+        assert media_members, f"bundle 未包含媒体本体：{names}"
+        assert zf.read(media_members[0]) == b"FAKE-MEDIA-BYTES"
+
+
+async def test_import_restores_media_and_rewrites_local_uri(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """跨机导入：媒体落到本机 assets 目录，local_uri 改写为可用路径。
+
+    模拟「另一台机器」：导出后把源文件删掉，再用新的 STEPWORK_HOME 导入。
+    修复前 local_uri 仍指向导出机路径 → 素材失效。
+    """
+    export_home = tmp_path / "machine-a"
+    export_home.mkdir()
+    monkeypatch.setenv("STEPWORK_HOME", str(export_home))
+
+    deps = _deps()
+    deps.repos.workspaces.ensure("ws-a")
+    prj = deps.repos.projects.insert(
+        ContentProject(workspace_id="ws-a", title="跨机项目")
+    )
+    media = tmp_path / "original.mp4"
+    media.write_bytes(b"CROSS-MACHINE-MEDIA")
+    deps.repos.source_assets.insert_dedup(
+        SourceAsset(
+            project_id=prj, kind="video", local_uri=str(media), content_hash="h-x"
+        )
+    )
+    exported = await dispatch(
+        _envelope("ExportProject", {"projectId": prj}, project_id=prj), deps
+    )
+    assert exported["ok"] is True
+    bundle = exported["detail"]["bundle_path"]
+
+    # 「另一台机器」：源文件不存在、家目录不同、空库
+    media.unlink()
+    import_home = tmp_path / "machine-b"
+    import_home.mkdir()
+    monkeypatch.setenv("STEPWORK_HOME", str(import_home))
+    deps2 = _deps()
+    deps2.repos.workspaces.ensure("ws-b")
+
+    imported = await dispatch(
+        _envelope("ImportProject", {"bundlePath": bundle}, workspace_id="ws-b"), deps2
+    )
+    assert imported["ok"] is True, imported.get("error")
+
+    row = deps2.repos.conn.execute(
+        "SELECT local_uri FROM source_assets"
+    ).fetchone()
+    assert row is not None
+    restored = str(row["local_uri"])
+    # 关键：指向本机新路径且文件真实存在、内容一致
+    assert _read_file_bytes(restored) == b"CROSS-MACHINE-MEDIA", (
+        f"素材未落盘或内容不符：{restored}"
+    )
+    assert str(import_home) in restored
+
+
+async def test_import_without_media_keeps_original_uri(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """旧格式 bundle（无 assets/ 成员）导入仍可用，local_uri 沿用原值。"""
+    monkeypatch.setenv("STEPWORK_HOME", str(tmp_path))
+    deps = _deps()
+    deps.repos.workspaces.ensure("ws-old")
+    prj = deps.repos.projects.insert(
+        ContentProject(workspace_id="ws-old", title="无素材文件")
+    )
+    # local_uri 指向不存在的文件 → 导出时不会打包媒体
+    deps.repos.source_assets.insert_dedup(
+        SourceAsset(
+            project_id=prj,
+            kind="video",
+            local_uri=str(tmp_path / "missing.mp4"),
+            content_hash="h-missing",
+        )
+    )
+    exported = await dispatch(
+        _envelope("ExportProject", {"projectId": prj}, project_id=prj), deps
+    )
+    assert exported["ok"] is True
+    with zipfile.ZipFile(exported["detail"]["bundle_path"]) as zf:
+        assert not [n for n in zf.namelist() if n.startswith("assets/")]
+
+    imported = await dispatch(
+        _envelope(
+            "ImportProject",
+            {"bundlePath": exported["detail"]["bundle_path"]},
+            workspace_id="ws-old",
+        ),
+        deps,
+    )
+    assert imported["ok"] is True, imported.get("error")

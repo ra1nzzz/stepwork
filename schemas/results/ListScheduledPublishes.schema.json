@@ -1,0 +1,18 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "scheduled": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Scheduled",
+      "type": "array"
+    }
+  },
+  "required": [
+    "scheduled"
+  ],
+  "title": "ListScheduledPublishesDetail",
+  "type": "object"
+}

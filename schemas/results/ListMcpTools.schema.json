@@ -1,0 +1,23 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "connection_id": {
+      "title": "Connection Id",
+      "type": "string"
+    },
+    "tools": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Tools",
+      "type": "array"
+    }
+  },
+  "required": [
+    "connection_id",
+    "tools"
+  ],
+  "title": "ListMcpToolsDetail",
+  "type": "object"
+}

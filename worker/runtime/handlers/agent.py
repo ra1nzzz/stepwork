@@ -18,23 +18,17 @@
 
 from __future__ import annotations
 
-from typing import Any
+from datetime import UTC, datetime
 
 from worker.runtime.commands.bus import DispatchError
+from worker.runtime.db.rows import row_to_dict
 from worker.runtime.deps import Deps
 from worker.runtime.models import CommandEnvelope, CommandResult
 
 _NOTE = "Agent 互操作 V0.2 启用"
 
-
-def _row_to_dict(row: Any) -> dict[str, Any]:
-    """把 ``sqlite3.Row`` 转普通 dict（所有列名 → 值，原始类型保留）。
-
-    agent_tasks / agent_artifacts 的列在 0003 占位迁移里已定义；W8 L.31
-    只做只读列表，不做精确字段映射。TEXT 列 sqlite3 已返回 str，故 ``id``
-    等文本列天然是 str；REAL / INTEGER 保留原始数值类型；NULL 保留 None。
-    """
-    return {key: row[key] for key in row.keys()}
+#: PRD-AGT-007 连接状态：active 可用 / inactive 停用（该通道调用被拒）
+_CONNECTION_STATUSES: frozenset[str] = frozenset({"active", "inactive"})
 
 
 def _resolve_task_id(env: CommandEnvelope) -> str | None:
@@ -49,7 +43,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         rows = deps.repos.conn.execute(
             "SELECT * FROM agent_tasks ORDER BY created_at DESC"
         ).fetchall()
-        tasks = [_row_to_dict(r) for r in rows]
+        tasks = [row_to_dict(r) for r in rows]
         return CommandResult(
             ok=True,
             commandId=env.commandId,
@@ -60,7 +54,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         rows = deps.repos.conn.execute(
             "SELECT * FROM agent_artifacts ORDER BY created_at DESC"
         ).fetchall()
-        artifacts = [_row_to_dict(r) for r in rows]
+        artifacts = [row_to_dict(r) for r in rows]
         return CommandResult(
             ok=True,
             commandId=env.commandId,
@@ -79,7 +73,72 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         return CommandResult(
             ok=True,
             commandId=env.commandId,
-            detail={"task": _row_to_dict(row)},
+            detail={"task": row_to_dict(row)},
+        )
+
+    if env.commandType == "ListAgentConnections":
+        # PRD-AGT-007「Agent Connections 页面：可启停、测试、授权和删除连接」。
+        # agent_connections 表 0003 就建好了，此前无任何命令与页面；
+        # 现在 agent_record 会为每条协议通道自动建行（见 ensure_connection）。
+        rows = deps.repos.conn.execute(
+            "SELECT * FROM agent_connections ORDER BY created_at DESC"
+        ).fetchall()
+        connections = [row_to_dict(r) for r in rows]
+        # 任务数一次 GROUP BY 取回，而不是每条连接查一次。连接数少时两者
+        # 无差别，但 N+1 是会随数据增长而恶化的写法，没有理由留着。
+        counts = {
+            str(r["target_agent_id"]): int(r["n"])
+            for r in deps.repos.conn.execute(
+                "SELECT target_agent_id, COUNT(*) n FROM agent_tasks "
+                "GROUP BY target_agent_id"
+            ).fetchall()
+        }
+        for item in connections:
+            item["task_count"] = counts.get(str(item["id"]), 0)
+        return CommandResult(
+            ok=True, commandId=env.commandId, detail={"connections": connections}
+        )
+
+    if env.commandType == "SetAgentConnectionStatus":
+        # 启停连接（PRD-AGT-007）：停用后该通道的调用会被 bus 拒绝
+        payload = env.payload or {}
+        conn_id = payload.get("connectionId") or payload.get("connection_id")
+        status = str(payload.get("status") or "")
+        if not conn_id:
+            raise DispatchError("INVALID_ARGUMENT", "connectionId required")
+        if status not in _CONNECTION_STATUSES:
+            raise DispatchError(
+                "INVALID_ARGUMENT",
+                f"status must be one of {sorted(_CONNECTION_STATUSES)}",
+            )
+        cur = deps.repos.conn.execute(
+            "UPDATE agent_connections SET status=?, updated_at=? WHERE id=?",
+            (status, datetime.now(UTC).isoformat(), str(conn_id)),
+        )
+        deps.repos.conn.commit()
+        if cur.rowcount == 0:
+            raise DispatchError("NOT_FOUND", f"connection {conn_id!r} not found")
+        row = deps.repos.conn.execute(
+            "SELECT * FROM agent_connections WHERE id=?", (str(conn_id),)
+        ).fetchone()
+        return CommandResult(
+            ok=True, commandId=env.commandId, detail={"connection": row_to_dict(row)}
+        )
+
+    if env.commandType == "DeleteAgentConnection":
+        payload = env.payload or {}
+        conn_id = payload.get("connectionId") or payload.get("connection_id")
+        if not conn_id:
+            raise DispatchError("INVALID_ARGUMENT", "connectionId required")
+        cur = deps.repos.conn.execute(
+            "DELETE FROM agent_connections WHERE id=?", (str(conn_id),)
+        )
+        deps.repos.conn.commit()
+        if cur.rowcount == 0:
+            raise DispatchError("NOT_FOUND", f"connection {conn_id!r} not found")
+        # agent_tasks.target_agent_id 有 ON DELETE CASCADE，历史任务随之清理
+        return CommandResult(
+            ok=True, commandId=env.commandId, detail={"deleted": str(conn_id)}
         )
 
     raise DispatchError(

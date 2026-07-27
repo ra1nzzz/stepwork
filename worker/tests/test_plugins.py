@@ -29,6 +29,11 @@ from worker.runtime.deps import Deps
 
 _MIG_DIR = Path(__file__).resolve().parents[2] / "migrations"
 
+# Tranche 1：InstallPlugin 测试用的示例插件目录（仓库自带）
+_EXAMPLE_PLUGIN_DIR = (
+    Path(__file__).resolve().parents[2] / "plugins" / "examples" / "dummy-ai-provider"
+)
+
 
 def _env(
     command_type: str,
@@ -174,6 +179,97 @@ def test_enable_disable_plugin(tmp_path: Path) -> None:
         conn.close()
 
 
+def test_install_plugin_example_manifest(tmp_path: Path) -> None:
+    """安装示例插件目录 → 落库 enabled=0、status='installed'、manifest 完整。"""
+    conn, repos = _new_db(tmp_path)
+    try:
+        deps = Deps(repos=repos)
+        res = _run(_env("InstallPlugin", {"path": str(_EXAMPLE_PLUGIN_DIR)}), deps)
+        assert res["ok"] is True, res.get("error")
+        plugin = res["detail"]["plugin"]
+        assert plugin["id"] == "dummy-ai-provider"
+        assert plugin["enabled"] is False
+        assert plugin["status"] == "installed"
+        assert plugin["manifest"]["apiVersion"] == "1"
+        assert plugin["manifest"]["permissions"] == ["ai:complete"]
+        # DB 行确实是 enabled=0
+        row = conn.execute(
+            "SELECT enabled, status FROM installed_plugins WHERE id=?",
+            ("dummy-ai-provider",),
+        ).fetchone()
+        assert row is not None
+        assert int(row["enabled"]) == 0
+        assert str(row["status"]) == "installed"
+    finally:
+        conn.close()
+
+
+def test_install_plugin_incompatible_api_version(tmp_path: Path) -> None:
+    """apiVersion 主版本 != 1 → INCOMPATIBLE_API_VERSION（PRD-PLG-001）。"""
+    conn, repos = _new_db(tmp_path)
+    try:
+        plugin_dir = tmp_path / "bad-api-plugin"
+        plugin_dir.mkdir()
+        (plugin_dir / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "id": "bad-api-plugin",
+                    "name": "Bad API",
+                    "version": "0.1.0",
+                    "apiVersion": "2.0",
+                    "permissions": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        deps = Deps(repos=repos)
+        res = _run(_env("InstallPlugin", {"path": str(plugin_dir)}), deps)
+        assert res["ok"] is False
+        assert "INCOMPATIBLE_API_VERSION" in res["error"]
+        # 不落库
+        row = conn.execute(
+            "SELECT id FROM installed_plugins WHERE id=?", ("bad-api-plugin",)
+        ).fetchone()
+        assert row is None
+    finally:
+        conn.close()
+
+
+def test_install_plugin_missing_manifest(tmp_path: Path) -> None:
+    """目录无 manifest.json → INVALID_ARGUMENT。"""
+    conn, repos = _new_db(tmp_path)
+    try:
+        empty_dir = tmp_path / "no-manifest"
+        empty_dir.mkdir()
+        deps = Deps(repos=repos)
+        res = _run(_env("InstallPlugin", {"path": str(empty_dir)}), deps)
+        assert res["ok"] is False
+        assert "INVALID_ARGUMENT" in res["error"]
+    finally:
+        conn.close()
+
+
+def test_install_plugin_missing_required_fields(tmp_path: Path) -> None:
+    """manifest 缺必填字段（permissions）→ INVALID_ARGUMENT。"""
+    conn, repos = _new_db(tmp_path)
+    try:
+        plugin_dir = tmp_path / "incomplete-plugin"
+        plugin_dir.mkdir()
+        (plugin_dir / "manifest.json").write_text(
+            json.dumps(
+                {"id": "incomplete", "name": "x", "version": "0.1.0", "apiVersion": 1}
+            ),
+            encoding="utf-8",
+        )
+        deps = Deps(repos=repos)
+        res = _run(_env("InstallPlugin", {"path": str(plugin_dir)}), deps)
+        assert res["ok"] is False
+        assert "INVALID_ARGUMENT" in res["error"]
+        assert "permissions" in res["error"]
+    finally:
+        conn.close()
+
+
 def test_disable_plugin_then_core_command_still_works(tmp_path: Path) -> None:
     """Gate：禁用所有插件后核心命令 ``ListProjects`` 仍 ``ok=True``。
 
@@ -196,5 +292,310 @@ def test_disable_plugin_then_core_command_still_works(tmp_path: Path) -> None:
         res = _run(_env("ListProjects", workspace_id="ws-local"), deps)
         assert res["ok"] is True
         assert isinstance(res["detail"]["projects"], list)
+    finally:
+        conn.close()
+
+
+# ----- PRD-PLG-002：安装前显示所有权限 -----
+
+
+def test_preview_manifest_shows_permissions_without_installing(
+    tmp_path: Path,
+) -> None:
+    """预览只读取校验、不写库 —— 这是「安装前授权」环节的前提。
+
+    此前安装流是「选目录 → 直接 InstallPlugin → 刷新」，权限列表在**装完
+    之后**才展示，等于没有安装前确认。
+    """
+    conn, repos = _new_db(tmp_path)
+    try:
+        plugin_dir = tmp_path / "preview-plugin"
+        plugin_dir.mkdir()
+        (plugin_dir / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "id": "preview-plugin",
+                    "name": "预览插件",
+                    "version": "1.0.0",
+                    "apiVersion": "1.0",
+                    "permissions": ["read:project", "write:export"],
+                }
+            ),
+            encoding="utf-8",
+        )
+        deps = Deps(repos=repos)
+        res = _run(_env("PreviewPluginManifest", {"path": str(plugin_dir)}), deps)
+        assert res["ok"] is True, res.get("error")
+        assert res["detail"]["permissions"] == ["read:project", "write:export"]
+        assert res["detail"]["manifest"]["id"] == "preview-plugin"
+        assert res["detail"]["already_installed"] is False
+        # 关键：预览绝不写库
+        n = conn.execute("SELECT COUNT(*) n FROM installed_plugins").fetchone()["n"]
+        assert n == 0
+    finally:
+        conn.close()
+
+
+def test_preview_manifest_reports_already_installed(tmp_path: Path) -> None:
+    conn, repos = _new_db(tmp_path)
+    try:
+        plugin_dir = tmp_path / "installed-plugin"
+        plugin_dir.mkdir()
+        (plugin_dir / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "id": "installed-plugin",
+                    "name": "已装",
+                    "version": "1.0.0",
+                    "apiVersion": "1.0",
+                    "permissions": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        deps = Deps(repos=repos)
+        _run(_env("InstallPlugin", {"path": str(plugin_dir)}), deps)
+        res = _run(_env("PreviewPluginManifest", {"path": str(plugin_dir)}), deps)
+        assert res["ok"] is True
+        assert res["detail"]["already_installed"] is True
+    finally:
+        conn.close()
+
+
+def test_preview_manifest_rejects_incompatible_before_install(
+    tmp_path: Path,
+) -> None:
+    """不兼容插件在预览阶段就被拒，用户根本走不到安装。"""
+    conn, repos = _new_db(tmp_path)
+    try:
+        plugin_dir = tmp_path / "bad-preview"
+        plugin_dir.mkdir()
+        (plugin_dir / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "id": "bad-preview",
+                    "name": "不兼容",
+                    "version": "1.0.0",
+                    "apiVersion": "9.0",
+                    "permissions": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        deps = Deps(repos=repos)
+        res = _run(_env("PreviewPluginManifest", {"path": str(plugin_dir)}), deps)
+        assert res["ok"] is False
+        assert "INCOMPATIBLE_API_VERSION" in res["error"]
+    finally:
+        conn.close()
+
+
+# ----- PRD-PLG-003 卸载 / PLG-004 信任分级 / PLG-005 健康状态 -----
+
+
+def _install(tmp_path: Path, repos: Repos, pid: str, **manifest: Any) -> None:
+    plugin_dir = tmp_path / pid
+    plugin_dir.mkdir(exist_ok=True)
+    base = {
+        "id": pid,
+        "name": pid,
+        "version": "1.0.0",
+        "apiVersion": "1.0",
+        "permissions": [],
+    }
+    base.update(manifest)
+    (plugin_dir / "manifest.json").write_text(
+        json.dumps(base), encoding="utf-8"
+    )
+    res = _run(_env("InstallPlugin", {"path": str(plugin_dir)}), Deps(repos=repos))
+    assert res["ok"] is True, res.get("error")
+
+
+def test_uninstall_removes_plugin_only(tmp_path: Path) -> None:
+    """PRD-PLG-003：卸载删注册表行，绝不影响项目数据。"""
+    conn, repos = _new_db(tmp_path)
+    try:
+        _install(tmp_path, repos, "to-remove")
+        # 播一条项目数据，验证卸载不碰它
+        conn.execute(
+            "INSERT INTO workspaces (id, name, root_path, settings, created_at) "
+            "VALUES ('ws-p','w','/tmp','{}','t')"
+        )
+        conn.execute(
+            "INSERT INTO content_projects (id, workspace_id, title, status, "
+            "created_at, updated_at) VALUES ('prj-p','ws-p','t','draft','t','t')"
+        )
+        conn.commit()
+
+        res = _run(
+            _env("UninstallPlugin", {"pluginId": "to-remove"}), Deps(repos=repos)
+        )
+        assert res["ok"] is True, res.get("error")
+        assert res["detail"]["uninstalled"] == "to-remove"
+
+        n = conn.execute("SELECT COUNT(*) n FROM installed_plugins").fetchone()["n"]
+        assert n == 0
+        # 项目数据完整性不受影响
+        projects = conn.execute(
+            "SELECT COUNT(*) n FROM content_projects"
+        ).fetchone()["n"]
+        assert projects == 1
+    finally:
+        conn.close()
+
+
+def test_uninstall_unknown_plugin_not_found(tmp_path: Path) -> None:
+    conn, repos = _new_db(tmp_path)
+    try:
+        res = _run(_env("UninstallPlugin", {"pluginId": "nope"}), Deps(repos=repos))
+        assert res["ok"] is False
+        assert "NOT_FOUND" in res["error"]
+    finally:
+        conn.close()
+
+
+def test_trust_tier_defaults_and_cannot_self_declare_official(
+    tmp_path: Path,
+) -> None:
+    """PRD-PLG-004：默认 community；插件不得自封 official/verified。"""
+    conn, repos = _new_db(tmp_path)
+    try:
+        _install(tmp_path, repos, "plain")
+        _install(tmp_path, repos, "exp", trustTier="experimental")
+        _install(tmp_path, repos, "liar", trustTier="official")
+
+        res = _run(_env("ListPlugins", {}), Deps(repos=repos))
+        tiers = {p["id"]: p["trust_tier"] for p in res["detail"]["plugins"]}
+        assert tiers["plain"] == "community"
+        assert tiers["exp"] == "experimental"
+        # 自称 official 一律降级
+        assert tiers["liar"] == "community"
+    finally:
+        conn.close()
+
+
+def test_enable_records_last_loaded_at(tmp_path: Path) -> None:
+    """PRD-PLG-005：启用即记加载时间（此前 last_loaded_at 恒为 NULL）。"""
+    conn, repos = _new_db(tmp_path)
+    try:
+        _install(tmp_path, repos, "loadable")
+        before = _run(_env("ListPlugins", {}), Deps(repos=repos))
+        assert before["detail"]["plugins"][0]["last_loaded_at"] is None
+
+        _run(_env("EnablePlugin", {"pluginId": "loadable"}), Deps(repos=repos))
+        after = _run(_env("ListPlugins", {}), Deps(repos=repos))
+        assert after["detail"]["plugins"][0]["last_loaded_at"] is not None
+    finally:
+        conn.close()
+
+
+def test_check_health_ok_and_records_time(tmp_path: Path) -> None:
+    """PRD-PLG-005：健康检查落「最近测试时间和结果」。"""
+    conn, repos = _new_db(tmp_path)
+    try:
+        _install(tmp_path, repos, "healthy")
+        res = _run(
+            _env("CheckPluginHealth", {"pluginId": "healthy"}), Deps(repos=repos)
+        )
+        assert res["ok"] is True, res.get("error")
+        assert res["detail"]["healthy"] is True
+        plugin = res["detail"]["plugin"]
+        assert plugin["last_checked_at"]
+        assert plugin["last_check_result"] == "ok"
+    finally:
+        conn.close()
+
+
+def test_check_health_detects_broken_manifest(tmp_path: Path) -> None:
+    """manifest 损坏的已装插件，健康检查应报错并记录原因。"""
+    conn, repos = _new_db(tmp_path)
+    try:
+        _install(tmp_path, repos, "broken")
+        conn.execute(
+            "UPDATE installed_plugins SET manifest_json='{not json' WHERE id='broken'"
+        )
+        conn.commit()
+
+        res = _run(
+            _env("CheckPluginHealth", {"pluginId": "broken"}), Deps(repos=repos)
+        )
+        assert res["ok"] is True
+        assert res["detail"]["healthy"] is False
+        assert res["detail"]["plugin"]["last_check_result"] == "error"
+        assert res["detail"]["plugin"]["error_message"]
+    finally:
+        conn.close()
+
+
+# ----- 旧 schema（未跑 0006 迁移）降级 -----
+#
+# 读路径此前已用 ``_col`` 兜底缺列，但 InstallPlugin / CheckPluginHealth 的
+# 写路径仍硬写 trust_tier / last_checked_at，在 pre-0006 的库上直接
+# OperationalError。真实运行 bootstrap 一定跑过迁移，但外部工具或旧备份库
+# 打开时不该整个插件子系统崩掉。
+
+_LEGACY_PLUGIN_DDL = """
+CREATE TABLE installed_plugins (
+  id TEXT PRIMARY KEY,
+  manifest_json TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 0,
+  installed_at TEXT NOT NULL,
+  last_loaded_at TEXT,
+  status TEXT NOT NULL DEFAULT 'registered',
+  error_message TEXT
+)
+"""
+
+
+def _legacy_db(tmp_path: Path) -> tuple[sqlite3.Connection, Repos]:
+    """跑完迁移后把 installed_plugins 换成 0006 之前的形态。"""
+    conn, repos = _new_db(tmp_path)
+    conn.execute("DROP TABLE installed_plugins")
+    conn.execute(_LEGACY_PLUGIN_DDL)
+    conn.commit()
+    return conn, repos
+
+
+def test_install_plugin_on_legacy_schema(tmp_path: Path) -> None:
+    """旧库上 InstallPlugin 不写新列，仍应安装成功。"""
+    conn, repos = _legacy_db(tmp_path)
+    try:
+        res = _run(
+            _env("InstallPlugin", {"path": str(_EXAMPLE_PLUGIN_DIR)}),
+            Deps(repos=repos),
+        )
+        assert res["ok"] is True, res
+        rows = conn.execute("SELECT id, status FROM installed_plugins").fetchall()
+        assert len(rows) == 1
+        assert rows[0]["status"] == "installed"
+    finally:
+        conn.close()
+
+
+def test_check_health_on_legacy_schema(tmp_path: Path) -> None:
+    """旧库上健康检查不持久化 last_checked_at，但命令本身要成功。"""
+    conn, repos = _legacy_db(tmp_path)
+    try:
+        _insert_plugin(
+            conn,
+            pid="legacy",
+            manifest={"name": "legacy", "version": "1.0.0", "apiVersion": "1.0"},
+        )
+        res = _run(
+            _env("CheckPluginHealth", {"pluginId": "legacy"}), Deps(repos=repos)
+        )
+        assert res["ok"] is True, res
+    finally:
+        conn.close()
+
+
+def test_list_plugins_on_legacy_schema(tmp_path: Path) -> None:
+    """读路径在旧库上给出 None 而不是抛错。"""
+    conn, repos = _legacy_db(tmp_path)
+    try:
+        _insert_plugin(conn, pid="legacy")
+        res = _run(_env("ListPlugins"), Deps(repos=repos))
+        assert res["ok"] is True, res
+        assert len(res["detail"]["plugins"]) == 1
     finally:
         conn.close()

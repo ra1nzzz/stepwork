@@ -1,0 +1,14 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "deleted": {
+      "title": "Deleted",
+      "type": "string"
+    }
+  },
+  "required": [
+    "deleted"
+  ],
+  "title": "DeleteAgentConnectionDetail",
+  "type": "object"
+}

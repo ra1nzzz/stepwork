@@ -13,11 +13,12 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 
 import pytest
 
+from worker.runtime.results import strict_results
 from worker.runtime.state import WorkerState
 
 
@@ -91,3 +92,15 @@ def worker_state() -> WorkerState:
         新的 ``WorkerState`` 实例（不写入环境变量）。
     """
     return WorkerState()
+
+
+@pytest.fixture(autouse=True)
+def _strict_result_contracts() -> Iterator[None]:
+    """全测试期打开响应契约严格模式。
+
+    契约只有**真的会让测试变红**才有价值。生产侧刻意只记日志（契约漂移不该
+    在用户机器上制造新的失败模式），所以严格性必须由测试这一侧提供 ——
+    否则 registry 里那张表就是一份没人核对的文档。
+    """
+    with strict_results():
+        yield

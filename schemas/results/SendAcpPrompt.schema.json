@@ -1,0 +1,55 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "agent_task_id": {
+      "title": "Agent Task Id",
+      "type": "string"
+    },
+    "stop_reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Stop Reason"
+    },
+    "text": {
+      "title": "Text",
+      "type": "string"
+    },
+    "updates": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Updates",
+      "type": "array"
+    },
+    "pending_approvals": {
+      "title": "Pending Approvals",
+      "type": "integer"
+    },
+    "trust_level": {
+      "title": "Trust Level",
+      "type": "string"
+    },
+    "review_state": {
+      "title": "Review State",
+      "type": "string"
+    }
+  },
+  "required": [
+    "agent_task_id",
+    "text",
+    "updates",
+    "pending_approvals",
+    "trust_level",
+    "review_state"
+  ],
+  "title": "SendAcpPromptDetail",
+  "type": "object"
+}

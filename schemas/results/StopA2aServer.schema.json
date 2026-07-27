@@ -1,0 +1,19 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "stopped": {
+      "title": "Stopped",
+      "type": "boolean"
+    },
+    "running": {
+      "title": "Running",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "stopped",
+    "running"
+  ],
+  "title": "StopA2aServerDetail",
+  "type": "object"
+}

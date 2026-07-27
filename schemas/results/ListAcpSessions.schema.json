@@ -1,0 +1,18 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "sessions": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Sessions",
+      "type": "array"
+    }
+  },
+  "required": [
+    "sessions"
+  ],
+  "title": "ListAcpSessionsDetail",
+  "type": "object"
+}

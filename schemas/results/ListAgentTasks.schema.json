@@ -1,0 +1,23 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "tasks": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Tasks",
+      "type": "array"
+    },
+    "note": {
+      "title": "Note",
+      "type": "string"
+    }
+  },
+  "required": [
+    "tasks",
+    "note"
+  ],
+  "title": "ListAgentTasksDetail",
+  "type": "object"
+}

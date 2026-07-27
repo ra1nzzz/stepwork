@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -62,3 +63,36 @@ async def test_transcribe_without_provider_fails() -> None:
     res = await dispatch(_env("TranscribeSource", payload), deps)
     assert res["ok"] is False
     assert "UNAVAILABLE" in (res.get("error") or "")
+
+
+async def test_transcript_carries_timestamps() -> None:
+    """PRD-ANA-001 的验收是「输出**文本和时间戳**」。
+
+    此前只断言 ``len(content) > 0`` —— 那连是不是转写结果都证明不了，
+    更别说时间戳。时间戳是下游一切的地基：字幕、精确分析的引用锚点、
+    剪辑时间线的 marker 全靠它，丢了不会报错，只会静默退化。
+    """
+    deps = _deps()
+    res = await dispatch(
+        _env("TranscribeSource", {"local_uri": "file://a.mp4", "opts": {"duration_sec": 12}}),
+        deps,
+    )
+    assert res["ok"] is True
+
+    row = deps.repos.conn.execute(
+        "SELECT content, producer FROM content_versions WHERE id=?",
+        (res["artifact_ids"][0],),
+    ).fetchone()
+    # 正文是纯文本，时间戳在 producer.segments（见 transcribe_source）
+    assert row["content"].strip(), "转写正文不能为空"
+    producer = json.loads(row["producer"])
+    segments = producer["segments"]
+    assert segments, "必须有分段，否则没有任何时间戳"
+    for seg in segments:
+        assert isinstance(seg["start"], int | float)
+        assert isinstance(seg["end"], int | float)
+        assert seg["end"] >= seg["start"], f"结束时间早于开始时间：{seg}"
+        assert seg["text"].strip()
+    # 分段必须按时间递增，否则字幕与时间线会乱序
+    starts = [s["start"] for s in segments]
+    assert starts == sorted(starts), starts

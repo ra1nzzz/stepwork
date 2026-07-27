@@ -1,27 +1,52 @@
 /**
- * 插件视图（W8）
- * 列出已注册插件（ListPlugins），每个插件展示 id/name/version/status/enabled
- * + Enable / Disable 按钮（EnablePlugin / DisablePlugin）。
- * 空态：暂无已注册插件。示例插件在 plugins/examples/ 下。
+ * 插件视图（W8 → Tranche 1 / T4）
+ * 列出已注册插件（ListPlugins）。worker 返回行形如
+ * {id, enabled, status, manifest: {name, version, permissions, ...}, installed_at, error_message}
+ * —— name/version/permissions 都在 manifest 里（解析失败时 manifest 为 null，
+ * status 为 'error'）。每个插件展示 manifest.permissions 权限列表（PRD-PLG-002）。
+ *
+ * 操作：
+ * - Enable / Disable（EnablePlugin / DisablePlugin）
+ * - 安装插件：dialog 选择含 manifest.json 的目录 → InstallPlugin {path} → 刷新列表
  */
 
 import { useEffect, useState } from "react";
-import { buildEnvelope, dispatchCommand, getWorkspaceId } from "@/lib/tauri";
-import type { CommandResult } from "@/lib/types";
 
-interface PluginEntry {
-  id: string;
-  name: string;
-  version: string;
-  status: string;
-  enabled: boolean;
+/** PRD-PLG-004 信任分级展示（Official/Verified/Community/Experimental） */
+const TRUST_TIER_LABELS: Record<string, string> = {
+  official: "官方",
+  verified: "已验证",
+  community: "社区",
+  experimental: "实验性",
+};
+
+/** 越不可信越显眼，提醒用户谨慎授权 */
+function trustClass(tier: string): string {
+  if (tier === "official") return "success";
+  if (tier === "verified") return "ai";
+  if (tier === "experimental") return "danger";
+  return "warning";
 }
+import { buildEnvelope, dispatchCommand, getWorkspaceId, isTauri } from "@/lib/tauri";
+import type { CommandResult, InstalledPlugin, InstallPluginPayload } from "@/lib/types";
 
 export function PluginsView() {
-  const [plugins, setPlugins] = useState<PluginEntry[]>([]);
+  const [plugins, setPlugins] = useState<InstalledPlugin[]>([]);
   const [isBusy, setIsBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [installing, setInstalling] = useState(false);
+  // PRD-PLG-003：卸载不可逆，需二次确认
+  const [pendingUninstall, setPendingUninstall] = useState<string | null>(null);
+  // PRD-PLG-002：待确认的安装（读到 manifest 权限后、真正安装前）
+  const [pendingInstall, setPendingInstall] = useState<{
+    path: string;
+    name: string;
+    version: string;
+    permissions: string[];
+    alreadyInstalled: boolean;
+  } | null>(null);
+  const inTauri = isTauri();
 
   async function load() {
     setIsBusy(true);
@@ -33,7 +58,7 @@ export function PluginsView() {
         setError(res.error ?? "加载插件失败");
         setPlugins([]);
       } else {
-        const d = (res.detail ?? {}) as { plugins?: PluginEntry[] };
+        const d = (res.detail ?? {}) as { plugins?: InstalledPlugin[] };
         setPlugins(d.plugins ?? []);
       }
     } catch (e) {
@@ -48,7 +73,7 @@ export function PluginsView() {
     void load();
   }, []);
 
-  async function toggle(plugin: PluginEntry, enable: boolean) {
+  async function toggle(plugin: InstalledPlugin, enable: boolean) {
     setTogglingId(plugin.id);
     try {
       const commandType = enable ? "EnablePlugin" : "DisablePlugin";
@@ -72,6 +97,109 @@ export function PluginsView() {
     }
   }
 
+  /** PRD-PLG-005：健康检查 → 落最近测试时间与结果 */
+  async function checkHealth(pluginId: string) {
+    setTogglingId(pluginId);
+    setError(null);
+    try {
+      const env = buildEnvelope("CheckPluginHealth", getWorkspaceId(), null, {
+        pluginId,
+      });
+      const res: CommandResult = await dispatchCommand(env);
+      if (!res.ok) setError(res.error ?? "健康检查失败");
+      await load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setTogglingId(null);
+    }
+  }
+
+  /** PRD-PLG-003：卸载（只删注册表行，项目数据完整性不受影响） */
+  async function uninstall(pluginId: string) {
+    setTogglingId(pluginId);
+    setError(null);
+    try {
+      const env = buildEnvelope("UninstallPlugin", getWorkspaceId(), null, {
+        pluginId,
+      });
+      const res: CommandResult = await dispatchCommand(env);
+      if (!res.ok) {
+        setError(res.error ?? "卸载失败");
+        return;
+      }
+      setPendingUninstall(null);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setTogglingId(null);
+    }
+  }
+
+  /**
+   * PRD-PLG-002「安装前显示所有权限」：选目录 → PreviewPluginManifest
+   * 读取权限 → 展示确认卡 → 用户明确同意后才 InstallPlugin。
+   * 此前是选目录直接安装，权限在装完之后才显示。
+   */
+  async function pickPluginForInstall() {
+    if (!inTauri || installing) return;
+    setError(null);
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const dir = await open({
+        directory: true,
+        multiple: false,
+        title: "选择包含 manifest.json 的插件目录",
+      });
+      if (!dir || typeof dir !== "string") return;
+      const env = buildEnvelope("PreviewPluginManifest", getWorkspaceId(), null, {
+        path: dir,
+      });
+      const res: CommandResult = await dispatchCommand(env);
+      if (!res.ok) {
+        setError(res.error ?? "读取插件 manifest 失败");
+        return;
+      }
+      const detail = (res.detail ?? {}) as {
+        manifest?: { id?: string; name?: string; version?: string };
+        permissions?: string[];
+        already_installed?: boolean;
+      };
+      setPendingInstall({
+        path: dir,
+        name: detail.manifest?.name ?? detail.manifest?.id ?? "未知插件",
+        version: detail.manifest?.version ?? "-",
+        permissions: detail.permissions ?? [],
+        alreadyInstalled: Boolean(detail.already_installed),
+      });
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  /** 用户在权限确认卡上点「同意并安装」后才真正落库 */
+  async function confirmInstall() {
+    if (!pendingInstall || installing) return;
+    setInstalling(true);
+    setError(null);
+    try {
+      const payload: InstallPluginPayload = { path: pendingInstall.path };
+      const env = buildEnvelope("InstallPlugin", getWorkspaceId(), null, payload);
+      const res: CommandResult = await dispatchCommand(env);
+      if (!res.ok) {
+        setError(res.error ?? "安装插件失败");
+        return;
+      }
+      setPendingInstall(null);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setInstalling(false);
+    }
+  }
+
   const isEmpty = !isBusy && plugins.length === 0 && !error;
 
   return (
@@ -80,6 +208,79 @@ export function PluginsView() {
         <h1>插件</h1>
         <p className="feature-sub">查看与管理已注册插件</p>
       </header>
+
+      <div className="inline-actions stack-lg">
+        <button
+          type="button"
+          className="btn primary"
+          disabled={!inTauri || installing}
+          title={inTauri ? undefined : "安装插件需要在桌面应用中使用"}
+          onClick={() => void pickPluginForInstall()}
+          data-od-id="install-plugin"
+        >
+          {installing ? "安装中…" : "安装插件"}
+        </button>
+        <button
+          type="button"
+          className="btn ghost"
+          disabled={isBusy}
+          onClick={() => void load()}
+        >
+          刷新
+        </button>
+      </div>
+
+      {/* PRD-PLG-002：安装前权限确认卡 —— 用户看到全部权限并明确同意后才安装 */}
+      {pendingInstall && (
+        <article className="panel" data-od-id="plugin-install-confirm">
+          <div className="panel-head">
+            <div>
+              <h2 className="panel-title">确认安装插件</h2>
+              <div className="panel-meta">
+                {pendingInstall.name} · v{pendingInstall.version}
+                {pendingInstall.alreadyInstalled && " · 将覆盖已安装的同 id 插件"}
+              </div>
+            </div>
+          </div>
+          <div className="panel-body">
+            <p className="panel-meta flush-top">
+              该插件将获得以下权限：
+            </p>
+            {pendingInstall.permissions.length > 0 ? (
+              <ul className="plugin-permissions">
+                {pendingInstall.permissions.map((perm) => (
+                  <li key={perm} className="permission-badge">
+                    {perm}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="panel-meta">该插件未声明任何权限。</p>
+            )}
+            <p className="panel-meta mono" style={{ fontSize: 11 }}>
+              {pendingInstall.path}
+            </p>
+            <div className="inline-actions">
+              <button
+                type="button"
+                className="btn small primary"
+                disabled={installing}
+                onClick={() => void confirmInstall()}
+              >
+                {installing ? "安装中…" : "同意并安装"}
+              </button>
+              <button
+                type="button"
+                className="btn small ghost"
+                disabled={installing}
+                onClick={() => setPendingInstall(null)}
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </article>
+      )}
 
       {isBusy && <p className="feature-sub">加载中…</p>}
 
@@ -98,38 +299,116 @@ export function PluginsView() {
 
       {plugins.length > 0 && (
         <ul className="plugin-list">
-          {plugins.map((p) => (
-            <li key={p.id} className="plugin-item" data-od-id={`plugin-${p.id}`}>
-              <div className="plugin-head">
-                <span className="plugin-name">{p.name}</span>
-                <span className="status-badge" data-status={p.status}>
-                  {p.status}
-                </span>
-              </div>
-              <p className="plugin-meta">
-                id {p.id} · v{p.version} ·{" "}
-                {p.enabled ? "已启用" : "已禁用"}
-              </p>
-              <div className="plugin-actions">
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={p.enabled || togglingId === p.id}
-                  onClick={() => void toggle(p, true)}
-                >
-                  启用
-                </button>
-                <button
-                  type="button"
-                  className="btn ghost"
-                  disabled={!p.enabled || togglingId === p.id}
-                  onClick={() => void toggle(p, false)}
-                >
-                  禁用
-                </button>
-              </div>
-            </li>
-          ))}
+          {plugins.map((p) => {
+            const name = p.manifest?.name ?? p.id;
+            const version = p.manifest?.version ?? null;
+            const permissions = p.manifest?.permissions ?? [];
+            return (
+              <li key={p.id} className="plugin-item" data-od-id={`plugin-${p.id}`}>
+                <div className="plugin-head">
+                  <span className="plugin-name">{name}</span>
+                  <span className="status-badge" data-status={p.status}>
+                    {p.status}
+                  </span>
+                  {/* PRD-PLG-004：UI 明确显示信任等级 */}
+                  <span
+                    className={`status ${trustClass(p.trust_tier)}`}
+                    title="插件信任等级"
+                  >
+                    {TRUST_TIER_LABELS[p.trust_tier] ?? p.trust_tier}
+                  </span>
+                </div>
+                <p className="plugin-meta">
+                  id {p.id}
+                  {version ? ` · v${version}` : " · 版本未知"} ·{" "}
+                  {p.enabled ? "已启用" : "已禁用"}
+                  {/* PRD-PLG-005：最近测试时间与结果 */}
+                  {p.last_checked_at && (
+                    <>
+                      {" · 最近检测 "}
+                      {new Date(p.last_checked_at).toLocaleString()}
+                      {p.last_check_result === "ok" ? "（正常）" : "（异常）"}
+                    </>
+                  )}
+                </p>
+                {p.error_message && (
+                  <p className="error-text text-danger">
+                    {p.error_message}
+                  </p>
+                )}
+                <div className="plugin-permissions" data-od-id={`plugin-perms-${p.id}`}>
+                  <span className="panel-meta">权限：</span>
+                  {permissions.length === 0 ? (
+                    <span className="panel-meta">无声明权限</span>
+                  ) : (
+                    permissions.map((perm) => (
+                      <span key={perm} className="status-badge mono" data-status="permission">
+                        {perm}
+                      </span>
+                    ))
+                  )}
+                </div>
+                <div className="plugin-actions">
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={p.enabled || togglingId === p.id}
+                    onClick={() => void toggle(p, true)}
+                  >
+                    启用
+                  </button>
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    disabled={!p.enabled || togglingId === p.id}
+                    onClick={() => void toggle(p, false)}
+                  >
+                    禁用
+                  </button>
+                  {/* PRD-PLG-005：健康检查（写入最近测试时间与结果） */}
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    disabled={togglingId === p.id}
+                    onClick={() => void checkHealth(p.id)}
+                  >
+                    检测
+                  </button>
+                  {/* PRD-PLG-003：卸载（只删注册表，不动项目数据） */}
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    disabled={togglingId === p.id}
+                    onClick={() => setPendingUninstall(p.id)}
+                  >
+                    卸载
+                  </button>
+                </div>
+                {/* 卸载是不可逆操作 → 二次确认（PRD §10.5 高风险操作减速） */}
+                {pendingUninstall === p.id && (
+                  <div className="inline-actions section-gap">
+                    <span className="panel-meta">
+                      确认卸载「{name}」？插件数据会被移除，项目内容不受影响。
+                    </span>
+                    <button
+                      type="button"
+                      className="btn small danger"
+                      onClick={() => void uninstall(p.id)}
+                    >
+                      确认卸载
+                    </button>
+                    <button
+                      type="button"
+                      className="btn small ghost"
+                      onClick={() => setPendingUninstall(null)}
+                    >
+                      取消
+                    </button>
+                  </div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </section>

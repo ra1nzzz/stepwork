@@ -1,0 +1,34 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "connection_id": {
+      "title": "Connection Id",
+      "type": "string"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "server_info": {
+      "additionalProperties": true,
+      "title": "Server Info",
+      "type": "object"
+    },
+    "tools": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Tools",
+      "type": "array"
+    }
+  },
+  "required": [
+    "connection_id",
+    "name",
+    "server_info",
+    "tools"
+  ],
+  "title": "AddMcpServerDetail",
+  "type": "object"
+}

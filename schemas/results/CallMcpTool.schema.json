@@ -1,0 +1,39 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "agent_task_id": {
+      "title": "Agent Task Id",
+      "type": "string"
+    },
+    "tool": {
+      "title": "Tool",
+      "type": "string"
+    },
+    "text": {
+      "title": "Text",
+      "type": "string"
+    },
+    "trust_level": {
+      "title": "Trust Level",
+      "type": "string"
+    },
+    "review_state": {
+      "title": "Review State",
+      "type": "string"
+    },
+    "is_error": {
+      "title": "Is Error",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "agent_task_id",
+    "tool",
+    "text",
+    "trust_level",
+    "review_state",
+    "is_error"
+  ],
+  "title": "CallMcpToolDetail",
+  "type": "object"
+}

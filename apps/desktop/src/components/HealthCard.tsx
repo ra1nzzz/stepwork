@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useHealthStore } from "@/stores/useHealthStore";
+import { resetBridgeDetection } from "@/lib/tauri";
 
 interface DetailItem {
   label: string;
@@ -34,24 +35,32 @@ function runtimeString(
   return typeof v === "string" && v.length > 0 ? v : null;
 }
 
+function isBackendDisconnected(health: { status: string; degraded_reasons: string[] }): boolean {
+  return health.status === "down" && health.degraded_reasons.includes("backend_not_connected");
+}
+
 /**
  * 核心引擎状态卡片
  * - 顶部：标题 + 状态徽章 + 大字状态文本
  * - 中部：2 列详情 grid（版本/PID/启动耗时/心跳/活跃任务/Python/SQLite）
  * - degraded：渲染 degraded_reasons 列表（v1.1 Patch-U3）
- * - 底部：重启 Worker / 复制诊断信息
+ * - 底部：重启 Worker / 复制诊断信息 / 重连检测
  */
 export function HealthCard() {
   const health = useHealthStore((s) => s.health);
   const restart = useHealthStore((s) => s.restart);
+  const fetchHealth = useHealthStore((s) => s.fetchHealth);
   const [isRestarting, setIsRestarting] = useState(false);
   const [copied, setCopied] = useState(false);
 
   if (!health) return null;
 
   const status = health.status;
-  const statusText =
-    status === "ok"
+  const disconnected = isBackendDisconnected(health);
+
+  const statusText = disconnected
+    ? "未连接到后端"
+    : status === "ok"
       ? "核心引擎运行正常"
       : status === "degraded"
         ? "核心引擎性能下降"
@@ -85,6 +94,11 @@ export function HealthCard() {
       // 5s 防连点
       setTimeout(() => setIsRestarting(false), 5000);
     }
+  };
+
+  const handleRetryConnection = async () => {
+    resetBridgeDetection();
+    await fetchHealth();
   };
 
   const handleCopyDiagnostics = async () => {
@@ -122,6 +136,17 @@ export function HealthCard() {
 
       <p className="health-status-text">{statusText}</p>
 
+      {disconnected && (
+        <section className="degraded-reasons" aria-label="连接提示" data-od-id="connection-guide">
+          <div className="degraded-reasons-title">连接提示</div>
+          <p>当前未连接到后端 Worker。</p>
+          <ul>
+            <li>桌面环境：请确保 Worker 进程已正常启动</li>
+            <li>浏览器开发：请运行 python worker/dev_bridge.py 启动开发桥接</li>
+          </ul>
+        </section>
+      )}
+
       {status === "degraded" && health.degraded_reasons.length > 0 && (
         <section
           className="degraded-reasons"
@@ -147,7 +172,17 @@ export function HealthCard() {
       </section>
 
       <div className="health-actions">
-        {(status === "down" || status === "degraded") && (
+        {disconnected && (
+          <button
+            type="button"
+            className="btn primary"
+            onClick={() => void handleRetryConnection()}
+            data-od-id="retry-connection"
+          >
+            重试连接
+          </button>
+        )}
+        {(status === "down" || status === "degraded") && !disconnected && (
           <button
             type="button"
             className="btn primary"

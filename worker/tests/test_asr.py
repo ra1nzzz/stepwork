@@ -51,7 +51,9 @@ def _mock_transport() -> httpx.MockTransport:
 
 def test_cloud_with_mock() -> None:
     client = httpx.AsyncClient(transport=_mock_transport())
-    p = CloudASRProvider(api_key="test-key", client=client)
+    p = CloudASRProvider(
+        api_key="test-key", base_url="https://asr.mock.test", client=client
+    )
     t = asyncio.run(p.transcribe("file://a.mp4"))
     assert t.text == "云端转写结果。"
     assert t.language == "zh"
@@ -67,3 +69,14 @@ def test_cloud_requires_key() -> None:
     except RuntimeError:
         return
     raise AssertionError("expected RuntimeError when API key missing")
+
+
+def test_cloud_requires_base_url() -> None:
+    # 去掉虚构默认后：base_url 未配置（参数 + env 皆空）应抛错，绝不静默请求
+    os.environ.pop("STEPWORK_ASR_BASE_URL", None)
+    p = CloudASRProvider(api_key="test-key", base_url=None)
+    try:
+        asyncio.run(p.transcribe("file://a.mp4"))
+    except RuntimeError:
+        return
+    raise AssertionError("expected RuntimeError when base_url missing")

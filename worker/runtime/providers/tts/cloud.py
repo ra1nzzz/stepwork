@@ -36,11 +36,15 @@ class CloudTTSProvider:
         base_url: str,
         model: str | None = None,
         client: Any = None,
+        cost_per_1k: float | None = None,
     ) -> None:
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.model = model
         self._client = client
+        # PRD-REN-002 费用透明：每千字符单价，由设置页 tts.costPer1k 注入；
+        # 未配置时为 None → build_invocation 产出 estimated_cost=None（未知）
+        self.estimated_cost_per_1k = cost_per_1k
 
     async def synthesize(
         self, text: str, opts: dict[str, Any] | None = None

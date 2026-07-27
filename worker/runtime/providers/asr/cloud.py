@@ -37,10 +37,9 @@ class CloudASRProvider:
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.api_key = api_key or _env("STEPWORK_ASR_API_KEY")
-        self.base_url = (
-            base_url or _env("STEPWORK_ASR_BASE_URL")
-            or "https://api.stepwork.local/asr"
-        )
+        # base_url 仅来自显式参数 / env（配置项消费）；不再兜底任何虚构端点，
+        # 缺失时在 transcribe() 抛错，绝不静默打到不存在的服务器
+        self.base_url = base_url or _env("STEPWORK_ASR_BASE_URL")
         self._client = client
 
     @asynccontextmanager
@@ -56,6 +55,8 @@ class CloudASRProvider:
     ) -> Transcript:
         if not self.api_key:
             raise RuntimeError("CloudASRProvider requires STEPWORK_ASR_API_KEY")
+        if not self.base_url:
+            raise RuntimeError("CloudASRProvider requires STEPWORK_ASR_BASE_URL")
         opts = opts or {}
         async with self._client_cm() as client:
             resp = await client.post(

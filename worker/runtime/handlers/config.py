@@ -40,7 +40,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "sampling": {"temperature": 0.7, "topP": 0.9, "maxTokens": 2048},
     },
     "asr": {"provider": "cloud", "apiKey": "", "baseUrl": ""},
-    "tts": {"provider": "cloud", "apiKey": "", "baseUrl": "", "model": "StepAudio"},
+    # costPer1k：每千字符旁白合成单价（PRD-REN-002 费用透明）；
+    # 本地引擎为 0，云端按厂商定价填写。
+    "tts": {
+        "provider": "cloud",
+        "apiKey": "",
+        "baseUrl": "",
+        "model": "StepAudio",
+        "costPer1k": "0.008",
+    },
     "workspace": {"defaultPath": ""},
     "brand": {
         "name": "科技实测 · 克制判断",
@@ -52,6 +60,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "data": {
         "retentionDays": 30,
+        # Tranche 2（PRD-SRC-005）：临时/下载中间文件清理策略。
+        # immediate=导入完成后即删；scheduled=启动时按 retentionDays 清扫；
+        # manual=不自动清扫。
+        "cleanupMode": "scheduled",
         "desensitize": True,
         "projectDelete": False,
         "uploadScope": "",

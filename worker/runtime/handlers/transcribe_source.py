@@ -1,4 +1,7 @@
-"""``TranscribeSource`` 命令处理（W3，Batch 1）。
+"""``TranscribeSource`` 命令处理（W3 Batch 1；PRD-ANA-001 本地或云端 ASR）。
+
+PRD-ANA-001 的验收是「输出文本和时间戳」—— transcript 落库时带 segment
+级时间戳，Provider 可选本地（faster-whisper）或云端。
 
 职责：
 1. 解析素材（``asset_id`` 或 ``local_uri``）→ 解析目标 project
@@ -13,6 +16,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
+from worker.runtime.audit import build_invocation, record_provider_invocation
 from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
 from worker.runtime.jobs import content_job, persist_content_version
@@ -57,8 +61,12 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             "local_uri": local_uri,
             "provider": getattr(asr, "name", "unknown"),
         },
+        notify=deps.notify,
     ) as ctx:
+        # UX §10.2：转写进度此前恒为 0%（UI 进度条整段不动）
+        ctx.progress(0.15, JobStage.TRANSCRIBING)
         transcript = await asr.transcribe(local_uri, p.get("opts"))
+        ctx.progress(0.85, JobStage.TRANSCRIBING)
 
         # 字符上限保护（头脑风暴 P0）
         text = transcript.text
@@ -83,8 +91,12 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
                 "segments": [s.model_dump() for s in transcript.segments],
             },
             stage=JobStage.TRANSCRIBING,
+            notify=deps.notify,
         )
 
+    # 费用透明（Tranche 2）：detail.invocation + provider_invocation 审计行
+    invocation = build_invocation(asr, len(text))
+    record_provider_invocation(repos.conn, env, invocation)
     return CommandResult(
         ok=True,
         commandId=env.commandId,
@@ -98,5 +110,6 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             "segment_count": len(transcript.segments),
             "char_count": len(text),
             "capped": capped,
+            "invocation": invocation,
         },
     )

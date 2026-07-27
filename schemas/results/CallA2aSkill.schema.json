@@ -1,0 +1,46 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "agent_task_id": {
+      "title": "Agent Task Id",
+      "type": "string"
+    },
+    "skill": {
+      "title": "Skill",
+      "type": "string"
+    },
+    "text": {
+      "title": "Text",
+      "type": "string"
+    },
+    "remote_state": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Remote State"
+    },
+    "trust_level": {
+      "title": "Trust Level",
+      "type": "string"
+    },
+    "review_state": {
+      "title": "Review State",
+      "type": "string"
+    }
+  },
+  "required": [
+    "agent_task_id",
+    "skill",
+    "text",
+    "trust_level",
+    "review_state"
+  ],
+  "title": "CallA2aSkillDetail",
+  "type": "object"
+}

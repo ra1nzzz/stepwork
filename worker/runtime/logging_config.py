@@ -39,11 +39,31 @@ __all__ = ["configure_logging"]
 # 掩码符号（与 config._mask_secrets 保持一致）
 _MASK: str = "••••"
 
-# 匹配 ``keyword[:=]value`` 形式的密钥片段。
-# 关键字：apiKey / api_key / api-key / secret / token / password（不区分大小写）。
+# 匹配 ``keyword[:=]value`` 形式的敏感片段。
+# PRD §11.3 明确要求「日志不包含 Cookie、Token、二维码和验证码」——
+# 此前只覆盖 api_key/secret/token/password，cookie / 二维码 / 验证码
+# 三类全部漏网，故一并纳入（含中文关键字，日志里常直接写中文）。
 # 仅当关键字后紧跟 ``:`` 或 ``=``（允许两侧空白）时触发，避免误伤普通叙述。
 _SECRET_PATTERN: re.Pattern[str] = re.compile(
-    r"(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*\S+"
+    r"(?i)("
+    r"api[_-]?key|secret|token|password|passwd|"
+    r"cookie|set-cookie|session[_-]?id|authorization|bearer|"
+    r"qr[_-]?code|qrcode|captcha|verify[_-]?code|otp|"
+    r"二维码|验证码|密码|凭据"
+    # 关键字与分隔符之间允许一个引号：JSON 形态是 ``"apiKey": "sk-..."``，
+    # 不放行这个引号的话，日志里所有 JSON 形式的密钥都掩不掉 —— 而结构化
+    # 日志恰恰全是 JSON。
+    r")[\"']?\s*[:=]\s*"
+    # 值部分：允许先跟一个认证方案词（Bearer / Basic / Token）再跟真实凭据，
+    # 否则 "Authorization: Bearer <token>" 只会掩掉 "Bearer"，真 token 泄漏。
+    # 带引号的值整段吃掉，避免只掩到闭合引号之前。
+    r"(?:(?:bearer|basic|token|digest)\s+)?(?:\"[^\"]*\"|'[^']*'|\S+)"
+)
+
+# data URI 形式的二维码/截图（``data:image/png;base64,...``）：整段抹掉。
+# 二维码常以内联图片出现在日志里，上面的 keyword[:=] 规则抓不到。
+_DATA_URI_PATTERN: re.Pattern[str] = re.compile(
+    r"(?i)data:image/[a-z.+-]+;base64,[A-Za-z0-9+/=]+"
 )
 
 # JSON 行格式（与 W8 ``_configure_logging`` 的 basicConfig format 完全一致）
@@ -63,13 +83,24 @@ def _resolve_log_dir() -> Path:
     return Path(home) / "logs"
 
 
-def _mask_log_str(s: str) -> str:
-    """对格式化后的日志字符串做密钥模式掩码。
+def mask_secrets(s: str) -> str:
+    """公开别名：对任意字符串做 §11.3 掩码。
 
-    仅处理 ``keyword[:=]value`` 形式的片段，将值替换为 ``••••``。
-    掩码幂等：对已掩码的字符串再次应用不会改变结果。
+    日志之外也需要它 —— 例如外部 MCP Server 的 stderr 要回显给用户排查，
+    但那段文本很可能含 ``api_key=sk-...``，不能原样透出。
     """
-    return _SECRET_PATTERN.sub(lambda m: f"{m.group(1)}={_MASK}", s)
+    return _mask_log_str(s)
+
+
+def _mask_log_str(s: str) -> str:
+    """对格式化后的日志字符串做敏感信息掩码（PRD §11.3）。
+
+    两类：``keyword[:=]value`` 片段（含 cookie / 二维码 / 验证码）与
+    内联 ``data:image/...;base64,`` 二维码/截图。掩码幂等：对已掩码的
+    字符串再次应用不会改变结果。
+    """
+    masked = _SECRET_PATTERN.sub(lambda m: f"{m.group(1)}={_MASK}", s)
+    return _DATA_URI_PATTERN.sub(_MASK, masked)
 
 
 class MaskingFormatter(logging.Formatter):

@@ -1,8 +1,9 @@
 /**
  * 转写视图（W3 Batch3）
- * 发起转写，跟踪阶段 / 进度，支持取消与失败重试（PRD §338）
+ * 输入素材 ID 发起转写，跟踪阶段 / 进度，支持取消与失败重试（PRD §338）
  */
 
+import { useState } from "react";
 import { useTranscriptStore } from "@/stores/useTranscriptStore";
 
 function statusLabel(s: string): string {
@@ -20,22 +21,38 @@ export function TranscriptView() {
   const cancel = useTranscriptStore((s) => s.cancel);
   const retry = useTranscriptStore((s) => s.retry);
   const reset = useTranscriptStore((s) => s.reset);
+  const [assetId, setAssetId] = useState("");
+
+  const canTranscribe = assetId.trim().length > 0 && !isBusy;
 
   return (
     <section className="feature-view" data-od-id="transcript-view">
       <header className="feature-head">
         <h1>转写</h1>
-        <p className="feature-sub">选择素材发起转写，跟踪阶段 / 进度，失败可重试</p>
+        <p className="feature-sub">输入素材 ID 发起转写，跟踪阶段 / 进度，失败可重试</p>
       </header>
 
       <div className="transcript-actions">
+        <label className="input-row">
+          素材 ID
+          <input
+            value={assetId}
+            onChange={(e) => setAssetId(e.target.value)}
+            placeholder="asset-..."
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && canTranscribe) {
+                void transcribe(assetId.trim());
+              }
+            }}
+          />
+        </label>
         <button
           type="button"
           className="btn primary"
-          disabled={isBusy}
-          onClick={() => void transcribe(`asset-${Date.now()}`)}
+          disabled={!canTranscribe}
+          onClick={() => void transcribe(assetId.trim())}
         >
-          {isBusy ? "处理中…" : "对示例素材转写"}
+          {isBusy ? "处理中…" : "开始转写"}
         </button>
         {jobs.length > 0 && (
           <button type="button" className="btn ghost" onClick={() => reset()}>

@@ -1,10 +1,14 @@
 /**
  * 素材导入视图（W3 Batch3）
  * 拖放 / 文件选择 → 逐个 dispatch ImportSource，按内容哈希去重
+ *
+ * PRD-SRC-001「支持拖放和文件选择」+ PRD-SRC-004「重复导入时提示用户」的
+ * 前端落点（去重提示见 useImportStore 的 dedupNotice）。
  */
 
 import { useRef, useState, type DragEvent } from "react";
 import { useImportStore, type ImportFileInput } from "@/stores/useImportStore";
+import { isTauri } from "@/lib/tauri";
 
 function statusLabel(s: string): string {
   if (s === "done") return "已导入";
@@ -22,10 +26,12 @@ export function ImportView() {
   const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
+  const inTauri = isTauri();
+
   const handleFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;
     const inputs: ImportFileInput[] = Array.from(files).map((f) => ({
-      uri: f.name, // mock 路径；真实 Tauri 环境由 fs 解析绝对路径
+      uri: inTauri ? f.name : URL.createObjectURL(f),
       name: f.name,
       sizeBytes: f.size,
       mimeType: f.type || "application/octet-stream",

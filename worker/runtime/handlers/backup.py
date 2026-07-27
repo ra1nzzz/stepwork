@@ -5,7 +5,10 @@
 - ``BackupWorkspace``：把 ``$STEPWORK_HOME/stepwork.db`` 复制到
   ``$STEPWORK_HOME/backups/stepwork-<ts>[-label].db``，保留元数据（``shutil.copy2``）。
 - ``RestoreWorkspace``：从指定备份文件恢复 ``stepwork.db``，关闭旧连接、
-  复制文件、重新打开连接并 rebind 到 ``Repos`` 所有子 repo。
+  复制文件、重新打开连接并 rebind 到 ``Repos`` 所有子 repo；同时回写
+  ``deps.worker_state.db_conn``（T2 修复：``handlers.commands.handle_command``
+  每次 dispatch 都从 ``state.db_conn`` 重建 ``Repos``，只 rebind 本次请求的
+  ``Repos`` 会让恢复后的下一条命令拿到已关闭的旧连接而崩溃）。
 
 安全模型（P0 R3）：
 
@@ -172,6 +175,10 @@ async def _handle_restore(env: CommandEnvelope, deps: Deps) -> CommandResult:
     # 重新打开连接并 rebind 到 Repos（含所有子 repo）
     new_conn = connect(str(db_path))
     _rebind_conn(deps.repos, new_conn)
+    # T2 修复：worker 常驻态下，state.db_conn 是后续所有 dispatch 的连接源，
+    # 必须一并替换，否则 RestoreWorkspace 之后的任何命令都会拿到已关闭连接
+    if deps.worker_state is not None:
+        deps.worker_state.db_conn = new_conn
 
     size_bytes = db_path.stat().st_size
     return CommandResult(

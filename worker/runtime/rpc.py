@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import struct
-from typing import Any, Literal
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -162,7 +162,21 @@ async def read_frame(reader: asyncio.StreamReader) -> RpcFrame:
         raise ParseError(f"rpc frame schema validation failed: {exc}") from exc
 
 
-async def write_frame(writer: asyncio.StreamWriter, frame: RpcFrame) -> None:
+@runtime_checkable
+class FrameWriter(Protocol):
+    """write_frame / 心跳所需的最小写接口。
+
+    ``asyncio.StreamWriter`` 与 ``__main__._ThreadStdoutWriter``（Windows
+    SelectorEventLoop 下 connect_write_pipe 不可用时的线程写回退）均满足，
+    避免把自定义 writer 硬套 StreamWriter 而触发 mypy arg-type 错误。
+    """
+
+    def write(self, data: bytes) -> None: ...
+
+    async def drain(self) -> None: ...
+
+
+async def write_frame(writer: FrameWriter, frame: RpcFrame) -> None:
     """将 :class:`RpcFrame` 序列化并写入 writer。
 
     序列化规则：

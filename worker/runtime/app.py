@@ -24,6 +24,7 @@ from worker.runtime.providers.resolve import (
     resolve_ai,
     resolve_asr,
     resolve_renderer,
+    resolve_scene_detector,
     resolve_tts,
 )
 from worker.runtime.state import WorkerState
@@ -46,7 +47,11 @@ async def run_command(
     try:
         ws = raw.get("workspaceId") or "ws-local"
         state = WorkerState()
-        bootstrap_db(state, db_path=db_path)
+        # recover_jobs=False：进程内门面每条命令都 bootstrap，且可能与正在
+        # 跑长任务的桌面 worker 并存，不能把在途 RUNNING/LEASED 误判为孤儿；
+        # backup=False：每条命令整库复制一次备份会形成备份洪水（CLI 观测
+        # 2 分钟 17 份），备份只留给桌面 worker 启动路径
+        bootstrap_db(state, db_path=db_path, recover_jobs=False, backup=False)
         deps = Deps(
             repos=Repos(state.db_conn),
             ingest=ingest,
@@ -54,6 +59,7 @@ async def run_command(
             ai=resolve_ai(ws),
             tts=resolve_tts(ws),
             renderer=resolve_renderer(),
+            scene_detector=resolve_scene_detector(),
         )
         # ``dispatch`` 内部会 ``parse_envelope(raw)`` 校验信封并路由到
         # handler，最终对 ``CommandResult`` 调 ``model_dump()`` 返回 dict。

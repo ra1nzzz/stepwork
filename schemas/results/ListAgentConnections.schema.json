@@ -1,0 +1,18 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "connections": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Connections",
+      "type": "array"
+    }
+  },
+  "required": [
+    "connections"
+  ],
+  "title": "ListAgentConnectionsDetail",
+  "type": "object"
+}

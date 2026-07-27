@@ -1,17 +1,23 @@
 /**
  * 转写 Store（W3 Batch3）
  * - 对素材 dispatch TranscribeSource，跟踪 job 阶段 / 进度 / 失败
- * - 支持取消（本地标记）与失败重试（PRD §338）
+ * - 支持取消（dispatch CancelJob + 本地标记）与失败重试（PRD §338）
  *
  * 注：worker 端转写为同步执行（命令内 await ASR），故无实时进度流；
- * 真实环境由 content_version 回填正文，mock 环境仅保留状态与失败重试路径。
+ * 真实环境由 content_version 回填正文。cancel 仍会调 CancelJob 通知后端
+ * 把 content_jobs 记录标记为 cancelled。
  */
 
 import { create } from "zustand";
-import { buildEnvelope, dispatchCommand } from "@/lib/tauri";
-import type { TranscriptSegment } from "@/lib/types";
+import { buildEnvelope, dispatchCommand, getWorkspaceId } from "@/lib/tauri";
+import { useViewStore } from "@/stores/useViewStore";
+import type { JobProgressParams, TranscriptSegment } from "@/lib/types";
 
-const WORKSPACE = "ws-local";
+// 当前工作区由 getWorkspaceId() 解析（用户可在设置页切换）
+
+/** 当前选中项目 id（envelope.projectId）；确实没有时才回落 null */
+const currentProjectId = (): string | null =>
+  useViewStore.getState().selectedProjectId ?? null;
 
 export type TranscriptStatus =
   | "pending"
@@ -22,6 +28,8 @@ export type TranscriptStatus =
 
 export interface TranscriptJob {
   id: string;
+  /** 后端 content_jobs.id（用于 CancelJob）；可能为 null（后端未返回时） */
+  jobId: string | null;
   assetId: string | null;
   versionId: string | null;
   language: string | null;
@@ -38,14 +46,17 @@ interface TranscriptStoreState {
   isBusy: boolean;
   error: string | null;
   transcribe: (assetId: string, opts?: Record<string, unknown>) => Promise<void>;
-  cancel: (id: string) => void;
+  cancel: (id: string) => Promise<void>;
   retry: (id: string) => Promise<void>;
+  /** 应用后端 job.progress 通知（按后端 jobId 匹配本地任务条目） */
+  applyJobProgress: (p: JobProgressParams) => void;
   reset: () => void;
 }
 
 function newJob(assetId: string | null, opts?: Record<string, unknown>): TranscriptJob {
   return {
     id: `tj-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    jobId: null,
     assetId,
     versionId: null,
     language: (opts?.language as string | undefined) ?? null,
@@ -68,7 +79,7 @@ export const useTranscriptStore = create<TranscriptStoreState>((set, get) => ({
     set({ jobs: [...get().jobs, job], isBusy: true, error: null });
     try {
       set({ jobs: patch(get().jobs, job.id, { status: "running", progress: 0.1 }) });
-      const env = buildEnvelope("TranscribeSource", WORKSPACE, null, {
+      const env = buildEnvelope("TranscribeSource", getWorkspaceId(), currentProjectId(), {
         asset_id: assetId,
         opts: opts ?? {},
       });
@@ -83,6 +94,7 @@ export const useTranscriptStore = create<TranscriptStoreState>((set, get) => ({
           status: "succeeded",
           progress: 1,
           versionId: res.artifact_ids[0] ?? null,
+          jobId: res.job_id ?? null,
           language,
         }),
       });
@@ -97,10 +109,41 @@ export const useTranscriptStore = create<TranscriptStoreState>((set, get) => ({
     }
   },
 
-  cancel: (id) => {
-    set({
-      jobs: patch(get().jobs, id, { status: "cancelled", progress: 0 }),
-    });
+  cancel: async (id) => {
+    const job = get().jobs.find((j) => j.id === id);
+    if (!job) return;
+    // 本地立即标记 cancelled
+    set({ jobs: patch(get().jobs, id, { status: "cancelled", progress: 0 }) });
+    // 通知后端 CancelJob（如果有 jobId）
+    if (job.jobId) {
+      try {
+        const env = buildEnvelope("CancelJob", getWorkspaceId(), currentProjectId(), {
+          job_id: job.jobId,
+        });
+        const res = await dispatchCommand(env);
+        if (!res.ok) {
+          // 不回滚本地的 cancelled 标记（回滚会让界面来回跳），但必须说出来：
+          // 后端没取消成功意味着任务**还在跑**，而 UI 显示已取消
+          set({ error: `后端未确认取消，任务可能仍在运行：${res.error ?? ""}` });
+        }
+      } catch (e) {
+        set({ error: `后端未确认取消：${e instanceof Error ? e.message : String(e)}` });
+      }
+    }
+  },
+
+  applyJobProgress: (p) => {
+    const job = get().jobs.find((j) => j.jobId === p.job_id);
+    if (!job) return;
+    // 终态由 dispatch 返回值裁决；通知只推进 running 中的进度与失败态
+    const changes: Partial<TranscriptJob> = { progress: p.progress };
+    if (p.state === "running") changes.status = "running";
+    else if (p.state === "succeeded") changes.status = "succeeded";
+    else if (p.state === "failed") {
+      changes.status = "failed";
+      changes.error = p.error_code ?? job.error;
+    } else if (p.state === "cancelled") changes.status = "cancelled";
+    set({ jobs: patch(get().jobs, job.id, changes) });
   },
 
   retry: async (id) => {

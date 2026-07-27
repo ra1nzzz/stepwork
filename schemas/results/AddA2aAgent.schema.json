@@ -1,0 +1,38 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "connection_id": {
+      "title": "Connection Id",
+      "type": "string"
+    },
+    "agent_name": {
+      "title": "Agent Name",
+      "type": "string"
+    },
+    "url": {
+      "title": "Url",
+      "type": "string"
+    },
+    "skills": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Skills",
+      "type": "array"
+    },
+    "token_persisted": {
+      "title": "Token Persisted",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "connection_id",
+    "agent_name",
+    "url",
+    "skills",
+    "token_persisted"
+  ],
+  "title": "AddA2aAgentDetail",
+  "type": "object"
+}

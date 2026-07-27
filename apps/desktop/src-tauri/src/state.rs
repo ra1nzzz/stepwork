@@ -8,6 +8,7 @@ use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
+use crate::debug_config::DebugConfigHandle;
 use crate::sidecar::RpcClient;
 
 /// Global application state.
@@ -20,6 +21,10 @@ pub struct AppState {
     pub last_crash_at: Arc<Mutex<Option<DateTime<Utc>>>>,
     /// Sender used to request a sidecar restart (consumed by the monitor loop).
     pub restart_tx: Arc<Mutex<Option<mpsc::UnboundedSender<()>>>>,
+    /// 调试模式配置句柄（支持运行时热更新）
+    pub debug_config: DebugConfigHandle,
+    /// worker stderr 环形缓冲（诊断用，最近 4KB）
+    pub stderr_buf: Arc<Mutex<String>>,
 }
 
 impl AppState {
@@ -30,6 +35,8 @@ impl AppState {
             restart_count: Arc::new(AtomicU32::new(0)),
             last_crash_at: Arc::new(Mutex::new(None)),
             restart_tx: Arc::new(Mutex::new(None)),
+            debug_config: DebugConfigHandle::new(),
+            stderr_buf: Arc::new(Mutex::new(String::new())),
         }
     }
 }

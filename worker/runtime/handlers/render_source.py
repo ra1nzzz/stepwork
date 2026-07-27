@@ -1,4 +1,7 @@
-"""``RenderSource`` 命令处理（W6）。
+"""``RenderSource`` 命令处理（W6 + Tranche 2 渲染产物）。
+
+PRD-REN-004「RenderJob 进度、取消和重试」的落点；其验收「重启后任务状态
+可恢复」由 ``bootstrap.recover_orphan_jobs`` 配合租约完成。
 
 职责（对齐 transcribe_source）：
 1. 解析 RenderSpec（源 ContentVersion / 模板 / TTS 引擎）
@@ -7,9 +10,15 @@
 4. 调 Renderer 渲染（9:16 字幕/背景）→ 进度/取消/重试
 5. 渲染产物作为 ``content_versions(video_draft)`` 落库 → 回写 artifact id
 
+Tranche 2（PRD-REN-001/003）：
+- 生成 ``.srt`` 字幕 sidecar（与 mp4 同目录，按音频总时长等比分配）
+- TTS 音频**不再删除**，作为 artifact 保留并登记进 VideoDraftMeta
+- 成功 detail 增加 ``artifacts: {video, subtitles, audio}``（绝对路径）
+  与 ``invocation``（费用透明）
+
 生命周期骨架（workspace/创建/租约/RUNNING/SUCCEEDED/FAILED）经
-``content_job`` 去重；本文件只保留渲染特有的进度去抖、取消注册、
-TTS 临时文件清理与 FFmpeg 特定错误分支。
+``content_job`` 去重；本文件只保留渲染特有的进度去抖、取消注册与
+FFmpeg 特定错误分支。
 """
 
 from __future__ import annotations
@@ -22,10 +31,17 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
+from worker.runtime.audit import build_invocation, record_provider_invocation
 from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
-from worker.runtime.jobs import content_job, persist_content_version, transition
+from worker.runtime.jobs import (
+    content_job,
+    emit_job_progress,
+    persist_content_version,
+    transition,
+)
 from worker.runtime.jobs.cancel import clear, register
 from worker.runtime.models import (
     CommandEnvelope,
@@ -40,8 +56,18 @@ from worker.runtime.render.ffmpeg_runner import (
     FFmpegFailed,
     FFmpegUnavailable,
 )
+from worker.runtime.render.subtitles import (
+    probe_audio_duration,
+    write_srt_sidecar,
+)
+from worker.runtime.render.templates import resolve_resolution, resolve_template
 
 _MAX_DRAFT_META_CHARS = 20000
+
+
+def _abs_or_none(path: str | None) -> str | None:
+    """同步 helper：转绝对路径（避免 async handler 内触发 ASYNC240）。"""
+    return os.path.abspath(path) if path else None
 
 
 def _video_content_hash(video_uri: str) -> str:
@@ -79,22 +105,34 @@ def _truncate_meta_json(meta: VideoDraftMeta) -> str:
     return encoded
 
 
-def _delete_uri(uri: str) -> None:
-    """删除 ``file://`` 或裸路径指向的本地文件（忽略不存在/无权限）。"""
-    path = uri[7:] if uri.startswith("file://") else uri
-    try:
-        os.remove(path)
-    except OSError:
-        pass
-
-
 async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     """处理 ``RenderSource``。"""
     repos = deps.repos
+    payload = dict(env.payload)
+    # PRD-REN-005：可用 aspect（9:16 / 16:9 / 1:1）代替显式 resolution；
+    # 二者都给时以显式 resolution 为准（更精确）。
+    aspect = payload.pop("aspect", None)
+    if aspect is not None and "resolution" not in payload:
+        try:
+            payload["resolution"] = resolve_resolution(str(aspect))
+        except KeyError as e:
+            raise DispatchError("INVALID_ARGUMENT", str(e)) from None
     try:
-        spec = RenderSpec(**env.payload)
+        spec = RenderSpec(**payload)
     except Exception as e:
         raise DispatchError("INVALID_ARGUMENT", f"bad render spec: {e}") from None
+
+    # 模板必须已注册：未知模板绝不静默回退（旧行为是全部渲成同一个画面）
+    try:
+        template = resolve_template(spec.template)
+    except KeyError as e:
+        raise DispatchError("INVALID_ARGUMENT", str(e)) from None
+
+    # 调用方既没给 aspect 也没给 resolution 时，用**模板自己的默认画幅**，
+    # 而不是 RenderSpec 的全局默认 9:16 —— 否则选了横屏/方图模板仍会渲成
+    # 竖屏，模板形同虚设（default_aspect 只是展示用）。
+    if aspect is None and "resolution" not in payload:
+        spec.resolution = resolve_resolution(template.default_aspect)
 
     repos.workspaces.ensure(env.workspaceId)
     project_id = env.projectId or repos.projects.get_or_create_default(
@@ -122,8 +160,6 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
 
     cancel_event = threading.Event()
     tts_out_dir = os.path.join(tempfile.gettempdir(), "stepwork_tts")
-    # 仅追踪本地合成的 TTS 产物，供 finally 清理；user_audio 不删除用户文件
-    generated_audio: str | None = None
     async with content_job(
         repos,
         job_type="render_source",
@@ -131,16 +167,17 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         env=env,
         fail_code="RENDER_FAILED",
         lease="render_source",
+        notify=deps.notify,
     ) as ctx:
         register(ctx.job.id, cancel_event)
         try:
             if spec.tts_engine.value == "user_audio":
                 audio_uri = spec.user_audio_uri
             else:
+                # Tranche 2：TTS 音频作为 artifact 保留（不再删除）
                 audio_uri = await deps.tts.synthesize(
                     src.content, {"out_dir": tts_out_dir}
                 )
-                generated_audio = audio_uri
 
             spec.caption_text = (src.content or "")[:200]
 
@@ -148,7 +185,8 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             # 避免阻塞主事件循环。进度回调会跨线程触发，因此通过主线程的 loop
             # 把 DB 写入（transition）调度回主线程执行，确保所有 DB 访问留在
             # 创建连接的主线程（db_conn 使用 check_same_thread=True）。
-            # 进度写去抖（T5）：每 ~5% 或 ≥1s 才提交一次 UPDATE，抑制写放大。
+            # 进度写去抖（T5）：每 ~5% 或 ≥1s 才提交一次 UPDATE，抑制写放大；
+            # 每次落库同时 fire-and-forget 一条 job.progress 通知（Tranche 1）。
             loop = asyncio.get_running_loop()
             _last = {"progress": -1.0, "ts": 0.0}
 
@@ -158,13 +196,15 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
                     captured = prog
 
                     def _commit(p: float) -> None:
-                        transition(
+                        updated = transition(
                             repos,
                             ctx.job.id,
                             JobState.RUNNING,
                             progress=p,
                             stage=JobStage.RENDERING,
                         )
+                        # _commit 在主事件循环线程执行，可安全调度通知 task
+                        emit_job_progress(deps.notify, updated)
 
                     loop.call_soon_threadsafe(_commit, captured)
                     _last["progress"] = prog
@@ -174,6 +214,21 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
                 renderer.render, spec, audio_uri, _progress, cancel_event
             )
 
+            # Tranche 2（PRD-REN-003）：.srt 字幕 sidecar（与 mp4 同目录，
+            # 时长按 TTS 音频总时长等比分配）；失败降级为无字幕，不阻塞渲染
+            video_path = result.video_uri.removeprefix("file://")
+            audio_path = (audio_uri or "").removeprefix("file://")
+            subtitles_path: str | None = None
+            try:
+                audio_duration = probe_audio_duration(audio_path)
+                if audio_duration <= 0 and result.duration_seconds > 0:
+                    audio_duration = result.duration_seconds
+                subtitles_path = write_srt_sidecar(
+                    video_path, src.content or "", audio_duration
+                )
+            except OSError:
+                subtitles_path = None
+
             meta = VideoDraftMeta(
                 video_uri=result.video_uri,
                 duration_seconds=result.duration_seconds,
@@ -182,6 +237,8 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
                 resolution=spec.resolution,
                 fps=spec.fps,
                 source_version_id=spec.source_version_id,
+                subtitles_uri=subtitles_path,
+                audio_uri=audio_uri,
                 producer={
                     "kind": "renderer",
                     "provider": getattr(renderer, "name", "unknown"),
@@ -200,7 +257,18 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
                 producer=meta.producer,
                 stage=JobStage.RENDERING,
                 parent_version_id=spec.source_version_id,
+                notify=deps.notify,
             )
+            # 费用透明（Tranche 2 / PRD-REN-002）：
+            # - renderer：本机 ffmpeg，无外部费用 → estimated_cost=None
+            # - tts：真正产生费用的环节，按**实际合成字符数**计价并单独审计。
+            #   用户录音路径（user_audio）不调 TTS，故无 tts 调用记录。
+            invocation = build_invocation(renderer, 0, model=result.template)
+            record_provider_invocation(repos.conn, env, invocation)
+            tts_invocation: dict[str, Any] | None = None
+            if spec.tts_engine.value != "user_audio" and deps.tts is not None:
+                tts_invocation = build_invocation(deps.tts, len(src.content or ""))
+                record_provider_invocation(repos.conn, env, tts_invocation)
             return CommandResult(
                 ok=True,
                 commandId=env.commandId,
@@ -210,6 +278,15 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
                     "video_uri": result.video_uri,
                     "template": result.template,
                     "tts_engine": result.tts_engine,
+                    # Tranche 2（PRD-REN-001）：三产物绝对路径
+                    "artifacts": {
+                        "video": _abs_or_none(video_path),
+                        "subtitles": _abs_or_none(subtitles_path),
+                        "audio": _abs_or_none(audio_path),
+                    },
+                    "invocation": invocation,
+                    # PRD-REN-002：旁白合成的来源与预计费用（user_audio 时为 None）
+                    "tts_invocation": tts_invocation,
                 },
             )
         except FFmpegCancelled:
@@ -229,6 +306,5 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             raise
         # 其它未预期异常由 content_job 上下文统一转译为 FAILED + RENDER_FAILED
         finally:
+            # Tranche 2：TTS 音频作为 artifact 保留，不再在此清理
             clear(ctx.job.id)
-            if generated_audio:
-                _delete_uri(generated_audio)  # T5：清理孤儿 TTS 音频

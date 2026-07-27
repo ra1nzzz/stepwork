@@ -1,0 +1,15 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "connection": {
+      "additionalProperties": true,
+      "title": "Connection",
+      "type": "object"
+    }
+  },
+  "required": [
+    "connection"
+  ],
+  "title": "SetAgentConnectionStatusDetail",
+  "type": "object"
+}

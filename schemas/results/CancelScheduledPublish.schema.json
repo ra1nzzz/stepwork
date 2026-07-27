@@ -1,0 +1,14 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "cancelled": {
+      "title": "Cancelled",
+      "type": "string"
+    }
+  },
+  "required": [
+    "cancelled"
+  ],
+  "title": "CancelScheduledPublishDetail",
+  "type": "object"
+}

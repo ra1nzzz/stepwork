@@ -38,10 +38,9 @@ class CloudAIProvider:
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.api_key = api_key or _env("STEPWORK_AI_API_KEY")
-        self.base_url = (
-            base_url or _env("STEPWORK_AI_BASE_URL")
-            or "https://api.stepwork.local/ai/v1"
-        )
+        # base_url 仅来自显式参数 / env（配置项消费）；不再兜底任何虚构端点，
+        # 缺失时在 complete() 抛错，绝不静默打到不存在的服务器
+        self.base_url = base_url or _env("STEPWORK_AI_BASE_URL")
         self.model = model or _env("STEPWORK_AI_MODEL") or "stepwork-default"
         cost = _env("STEPWORK_AI_COST_PER_1K")
         self.estimated_cost_per_1k = float(cost) if cost else 0.01
@@ -60,6 +59,8 @@ class CloudAIProvider:
     ) -> dict[str, Any]:
         if not self.api_key:
             raise RuntimeError("CloudAIProvider requires STEPWORK_AI_API_KEY")
+        if not self.base_url:
+            raise RuntimeError("CloudAIProvider requires STEPWORK_AI_BASE_URL")
         messages = [
             {
                 "role": "system",

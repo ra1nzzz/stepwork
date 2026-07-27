@@ -192,15 +192,29 @@ class VideoDraftMeta(BaseModel):
     resolution: tuple[int, int]
     fps: int
     source_version_id: str
+    # Tranche 2（PRD-REN-001/003）：字幕 sidecar 与旁白音频 artifact 登记
+    subtitles_uri: str | None = None
+    audio_uri: str | None = None
     producer: dict[str, Any] = Field(default_factory=dict)
 
 
 class TopicAngle(BaseModel):
-    """单一选题角度（W5）。"""
+    """单一选题角度（W5 + PRD-SCR-001）。
+
+    PRD-SCR-001 验收标准要求「每个角度包含受众、观点、差异与风险」：
+    ``audience`` / ``stance`` / ``risks`` 为此补齐；``rationale`` 承担
+    「差异」。三个新字段给默认值，兼容旧版本落库内容（回读不炸）。
+    """
     id: str
     title: str
     rationale: str
     hook: str
+    #: 目标受众（PRD-SCR-001）
+    audience: str | None = None
+    #: 核心观点/立场（PRD-SCR-001）
+    stance: str | None = None
+    #: 风险点（PRD-SCR-001）
+    risks: list[str] = Field(default_factory=list)
 
 
 class TopicProposal(BaseModel):
@@ -209,19 +223,24 @@ class TopicProposal(BaseModel):
 
 
 class TopicProposalSpec(BaseModel):
-    """``GenerateTopic`` 命令输入（W5）。"""
+    """``GenerateTopic`` 命令输入（W5 + PRD-SCR-001/BRD-002）。"""
     source_version_id: str
-    count: int = 5
+    #: PRD-SCR-001「生成 3—5 个差异化角度」——超出区间即 INVALID_ARGUMENT
+    count: int = Field(default=5, ge=3, le=5)
     provider: dict[str, Any] | None = None
+    #: PRD-BRD-002「生成时可选择启用」：False 时即便项目已绑定品牌档也不注入
+    use_brand_profile: bool = True
 
 
 class ScriptSpec(BaseModel):
-    """``GenerateScript`` 命令输入（W5）。"""
+    """``GenerateScript`` 命令输入（W5 + PRD-BRD-002）。"""
     proposal_version_id: str | None = None
     topic_id: str | None = None
     outline: str | None = None
     style: str = "short_video"
     provider: dict[str, Any] | None = None
+    #: PRD-BRD-002「生成时可选择启用」：False 时不注入品牌画像
+    use_brand_profile: bool = True
 
 
 class CommandEnvelope(BaseModel):

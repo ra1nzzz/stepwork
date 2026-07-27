@@ -6,6 +6,7 @@
 
 import { useEffect, useState } from "react";
 import { buildEnvelope, dispatchCommand, getWorkspaceId } from "@/lib/tauri";
+import { errorText, runCommand } from "@/lib/useCommand";
 import type { CommandResult } from "@/lib/types";
 
 interface AgentTask {
@@ -15,8 +16,79 @@ interface AgentTask {
   created_at: string;
 }
 
+/**
+ * 信任等级中文名（PRD §10.4「分析和外部 Agent 结果显示来源及信任等级」）。
+ * 取值见 schemas/artifact-envelope.schema.json。
+ */
+const TRUST_LABELS: Record<string, string> = {
+  "trusted-local": "本地可信",
+  "trusted-remote": "远端可信",
+  "verified-external": "外部已验证",
+  "external-unverified": "外部未验证",
+  "generated-unverified": "生成未验证",
+  "human-reviewed": "人工已复核",
+};
+
+/** 未复核的外部产物用警示色，提醒用户先核对再采用 */
+function trustClass(level: string | null | undefined): string {
+  if (!level) return "warning";
+  if (level === "human-reviewed" || level.startsWith("trusted")) return "success";
+  if (level === "verified-external") return "ai";
+  return "warning";
+}
+
+/**
+ * 出站 MCP 连接的 protocol 值（PRD-AGT-004）。与入站 ``mcp`` 分开：
+ * 前者是「我们去连别人」，后者是「别人调我们」，能做的操作不同。
+ */
+const MCP_CLIENT_PROTOCOL = "mcp-client";
+
+/** 外部 MCP Server 暴露的一个工具 */
+interface McpTool {
+  name: string;
+  description: string;
+}
+
+/**
+ * 该连接的工具名摘要。优先用刚刷新到的内存结果，否则解析后端存的
+ * ``capabilities`` JSON —— 后者可能是坏数据（外部 Server 写的），
+ * 解析失败时降级成提示文案而不是让整个列表崩掉。
+ */
+function mcpToolNames(conn: AgentConnection, fresh?: McpTool[]): string {
+  let tools = fresh;
+  if (!tools) {
+    try {
+      const parsed: unknown = JSON.parse(conn.capabilities || "[]");
+      tools = Array.isArray(parsed) ? (parsed as McpTool[]) : [];
+    } catch {
+      return "工具目录不可读";
+    }
+  }
+  if (tools.length === 0) return "无工具";
+  return `工具：${tools.map((t) => t.name).join("、")}`;
+}
+
+/** PRD-AGT-007：Agent 协议连接 */
+interface AgentConnection {
+  id: string;
+  protocol: string;
+  endpoint_or_command: string;
+  local_or_remote: string;
+  trust_level: string;
+  status: string;
+  task_count: number;
+  created_at: string;
+  /** 出站连接的工具目录（JSON 字符串，后端写入） */
+  capabilities?: string | null;
+}
+
 interface AgentArtifact {
   id: string;
+  /** 信任等级（PRD-AGT-003 / §10.4） */
+  trust_level?: string | null;
+  review_state?: string | null;
+  producer_agent_id?: string | null;
+  artifact_type?: string | null;
   kind: string;
   produced_at: string;
 }
@@ -24,6 +96,181 @@ interface AgentArtifact {
 export function AgentView() {
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [artifacts, setArtifacts] = useState<AgentArtifact[]>([]);
+  // PRD-AGT-007：连接列表（可启停 / 删除）
+  const [connections, setConnections] = useState<AgentConnection[]>([]);
+  const [connBusy, setConnBusy] = useState<string | null>(null);
+  // 连接操作的失败必须显示出来：此前 setConnStatus/deleteConn 完全吞掉错误
+  const [connError, setConnError] = useState<string | null>(null);
+  // PRD-AGT-004：出站 MCP 客户端
+  const [mcpCommand, setMcpCommand] = useState("");
+  const [mcpBusy, setMcpBusy] = useState(false);
+  const [mcpError, setMcpError] = useState<string | null>(null);
+  const [mcpTools, setMcpTools] = useState<Record<string, McpTool[]>>({});
+  // PRD-AGT-005：A2A Server / 对端
+  const [a2aRunning, setA2aRunning] = useState(false);
+  const [a2aUrl, setA2aUrl] = useState("");
+  const [a2aToken, setA2aToken] = useState("");
+  const [a2aBusy, setA2aBusy] = useState(false);
+  const [a2aError, setA2aError] = useState<string | null>(null);
+  const [a2aPeerUrl, setA2aPeerUrl] = useState("");
+  const [a2aPeerToken, setA2aPeerToken] = useState("");
+  // PRD-AGT-006：本地 ACP Agent
+  const [acpCommand, setAcpCommand] = useState("");
+  const [acpBusy, setAcpBusy] = useState(false);
+  const [acpError, setAcpError] = useState<string | null>(null);
+
+  async function loadConnections() {
+    try {
+      // detail 现在是契约推导出来的强类型，不再需要 `as { connections?: ... }`
+      const d = await runCommand("ListAgentConnections");
+      setConnections((d.connections ?? []) as unknown as AgentConnection[]);
+    } catch (e) {
+      // 加载失败此前被静默吞掉 → 界面显示空列表，看起来像「没有连接」
+      setConnError(errorText(e));
+    }
+  }
+
+  async function setConnStatus(id: string, status: "active" | "inactive") {
+    setConnBusy(id);
+    setConnError(null);
+    try {
+      // 改造前这里不检查 res.ok：后端拒了也照常刷新，用户点了没反应且
+      // 看不到任何原因。现在统一走 runCommand，失败即抛。
+      await runCommand("SetAgentConnectionStatus", { connectionId: id, status });
+      await loadConnections();
+    } catch (e) {
+      setConnError(errorText(e));
+    } finally {
+      setConnBusy(null);
+    }
+  }
+
+  async function deleteConn(id: string) {
+    setConnBusy(id);
+    setConnError(null);
+    try {
+      await runCommand("DeleteAgentConnection", { connectionId: id });
+      await loadConnections();
+    } catch (e) {
+      setConnError(errorText(e));
+    } finally {
+      setConnBusy(null);
+    }
+  }
+
+  /* PRD-AGT-004：出站 MCP —— 连外部搜索/知识库 Server */
+
+  async function addMcpServer() {
+    const command = mcpCommand.trim();
+    if (!command) return;
+    setMcpBusy(true);
+    setMcpError(null);
+    try {
+      const env = buildEnvelope("AddMcpServer", getWorkspaceId(), null, { command });
+      const res = await dispatchCommand(env);
+      if (!res.ok) {
+        // 后端「登记即探测」：连不上就不落库，这里如实回显失败原因
+        setMcpError(res.error ?? "连接失败");
+        return;
+      }
+      setMcpCommand("");
+      await loadConnections();
+    } finally {
+      setMcpBusy(false);
+    }
+  }
+
+  /* PRD-AGT-005：A2A —— 入站 Server 开关 + 出站对端 */
+
+  async function loadA2aStatus() {
+    try {
+      const d = await runCommand("GetA2aServerStatus");
+      setA2aRunning(d.running);
+      setA2aUrl(d.url);
+    } catch (e) {
+      setA2aError(errorText(e));
+    }
+  }
+
+  async function toggleA2aServer() {
+    setA2aBusy(true);
+    setA2aError(null);
+    try {
+      const command = a2aRunning ? "StopA2aServer" : "StartA2aServer";
+      const res = await dispatchCommand(
+        buildEnvelope(command, getWorkspaceId(), null, {}),
+      );
+      if (!res.ok) {
+        setA2aError(res.error ?? "操作失败");
+        return;
+      }
+      const d = (res.detail ?? {}) as { url?: string; token?: string };
+      // 令牌只在启动时回一次且不落盘，必须当场展示给用户抄走
+      setA2aToken(d.token ?? "");
+      await loadA2aStatus();
+    } finally {
+      setA2aBusy(false);
+    }
+  }
+
+  async function addA2aAgent() {
+    const url = a2aPeerUrl.trim();
+    if (!url) return;
+    setA2aBusy(true);
+    setA2aError(null);
+    try {
+      const res = await dispatchCommand(
+        buildEnvelope("AddA2aAgent", getWorkspaceId(), null, {
+          url,
+          token: a2aPeerToken.trim() || undefined,
+        }),
+      );
+      if (!res.ok) {
+        setA2aError(res.error ?? "连接失败");
+        return;
+      }
+      setA2aPeerUrl("");
+      setA2aPeerToken("");
+      await loadConnections();
+    } finally {
+      setA2aBusy(false);
+    }
+  }
+
+  /* PRD-AGT-006：ACP —— 本地 Agent 子进程 */
+
+  async function addAcpAgent() {
+    const command = acpCommand.trim();
+    if (!command) return;
+    setAcpBusy(true);
+    setAcpError(null);
+    try {
+      const res = await dispatchCommand(
+        buildEnvelope("AddAcpAgent", getWorkspaceId(), null, { command }),
+      );
+      if (!res.ok) {
+        setAcpError(res.error ?? "启动失败");
+        return;
+      }
+      setAcpCommand("");
+      await loadConnections();
+    } finally {
+      setAcpBusy(false);
+    }
+  }
+
+  /** 刷新某条出站连接的工具目录（对方升级后用） */
+  async function refreshTools(id: string) {
+    setConnBusy(id);
+    setMcpError(null);
+    try {
+      const d = await runCommand("ListMcpTools", { connectionId: id });
+      setMcpTools((prev) => ({ ...prev, [id]: d.tools as unknown as McpTool[] }));
+      await loadConnections();
+    } finally {
+      setConnBusy(null);
+    }
+  }
   const [isBusy, setIsBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,6 +290,8 @@ export function AgentView() {
           setError(taskRes.error ?? "加载任务失败");
         }
 
+        void loadConnections();
+        void loadA2aStatus();
         const artEnv = buildEnvelope("ListAgentArtifacts", getWorkspaceId(), null, {});
         const artRes: CommandResult = await dispatchCommand(artEnv);
         if (cancelled) return;
@@ -102,13 +351,237 @@ export function AgentView() {
         </div>
       )}
 
+      {/* PRD-AGT-004：接入外部 MCP Server（出站方向） */}
+      <div className="agent-section" data-od-id="mcp-client-add">
+        <h2>连接外部 MCP Server</h2>
+        <p className="panel-meta">
+          接入外部搜索或知识库 Server。填写启动命令（stdio 传输），例如{" "}
+          <code>npx -y @modelcontextprotocol/server-filesystem D:\docs</code>。
+          添加时会立即握手验证，连不上则不会保存。
+        </p>
+        <div className="inline-actions">
+          <input
+            type="text"
+            className="text-input"
+            placeholder="启动命令，如：npx -y some-mcp-server --arg"
+            value={mcpCommand}
+            disabled={mcpBusy}
+            onChange={(e) => setMcpCommand(e.target.value)}
+            data-od-id="mcp-command-input"
+          />
+          <button
+            type="button"
+            className="btn small"
+            disabled={mcpBusy || !mcpCommand.trim()}
+            onClick={() => void addMcpServer()}
+          >
+            {mcpBusy ? "连接中…" : "添加并测试"}
+          </button>
+        </div>
+        {mcpError && (
+          <p className="error-text" data-od-id="mcp-error">
+            {mcpError}
+          </p>
+        )}
+        <p className="panel-meta">
+          外部 Server 返回的内容标记为「外部未验证」且需人工复核，不会自动写入正文。
+        </p>
+      </div>
+
+      {/* PRD-AGT-005：A2A 双向 */}
+      <div className="agent-section" data-od-id="a2a-panel">
+        <h2>A2A 互操作</h2>
+
+        <p className="panel-meta">
+          远程 Agent 服务默认<strong>不监听</strong>。开启后仅绑定 127.0.0.1，且能力面需要令牌；
+          Agent Card（能力发现）公开可读，不含项目数据。
+        </p>
+        <div className="inline-actions">
+          <span className={`status ${a2aRunning ? "success" : "warning"}`}>
+            {a2aRunning ? `已开启 ${a2aUrl}` : "未开启"}
+          </span>
+          <button
+            type="button"
+            className="btn small"
+            disabled={a2aBusy}
+            onClick={() => void toggleA2aServer()}
+          >
+            {a2aRunning ? "停止服务" : "开启服务"}
+          </button>
+        </div>
+        {a2aToken && a2aRunning && (
+          <p className="panel-meta" data-od-id="a2a-token">
+            访问令牌（仅本次运行有效，不会保存，请立即复制）：<code>{a2aToken}</code>
+          </p>
+        )}
+
+        <h3>连接远端 Agent</h3>
+        <div className="inline-actions">
+          <input
+            type="text"
+            className="text-input"
+            placeholder="远端地址，如 http://127.0.0.1:8790"
+            value={a2aPeerUrl}
+            disabled={a2aBusy}
+            onChange={(e) => setA2aPeerUrl(e.target.value)}
+            data-od-id="a2a-peer-url"
+          />
+          <input
+            // 令牌用 password 控件，避免录屏/旁人看到
+            type="password"
+            className="text-input"
+            placeholder="访问令牌（可选）"
+            value={a2aPeerToken}
+            disabled={a2aBusy}
+            onChange={(e) => setA2aPeerToken(e.target.value)}
+            data-od-id="a2a-peer-token"
+          />
+          <button
+            type="button"
+            className="btn small"
+            disabled={a2aBusy || !a2aPeerUrl.trim()}
+            onClick={() => void addA2aAgent()}
+          >
+            {a2aBusy ? "连接中…" : "拉取 Agent Card"}
+          </button>
+        </div>
+        {a2aError && (
+          <p className="error-text" data-od-id="a2a-error">
+            {a2aError}
+          </p>
+        )}
+        <p className="panel-meta">
+          令牌只保存在内存中，worker 重启后需重填 —— 与 API Key 一样绝不落盘。
+        </p>
+      </div>
+
+      {/* PRD-AGT-006：本地 ACP Agent */}
+      <div className="agent-section" data-od-id="acp-panel">
+        <h2>本地 Agent（ACP）</h2>
+        <p className="panel-meta">
+          以子进程方式启动本地 Agent。会话绑定到具体项目，Agent 只能在
+          <strong>该项目的素材目录</strong>下活动，看不到整个工作区。
+        </p>
+        <div className="inline-actions">
+          <input
+            type="text"
+            className="text-input"
+            placeholder="Agent 启动命令，如：my-agent --acp"
+            value={acpCommand}
+            disabled={acpBusy}
+            onChange={(e) => setAcpCommand(e.target.value)}
+            data-od-id="acp-command-input"
+          />
+          <button
+            type="button"
+            className="btn small"
+            disabled={acpBusy || !acpCommand.trim()}
+            onClick={() => void addAcpAgent()}
+          >
+            {acpBusy ? "启动中…" : "添加并测试"}
+          </button>
+        </div>
+        {acpError && (
+          <p className="error-text" data-od-id="acp-error">
+            {acpError}
+          </p>
+        )}
+        <p className="panel-meta">
+          Agent 要执行危险操作时会先请求授权：该请求进入「审批中心」等你决定，
+          本轮一律先拒绝 —— 不会因为没人在看就自动放行。
+        </p>
+      </div>
+
+      {/* PRD-AGT-007：连接管理（启停 / 删除；停用后该通道调用会被拒） */}
+      <div className="agent-section">
+        <h2>协议连接</h2>
+        {connError && (
+          <p className="error-text" data-od-id="conn-error">
+            {connError}
+          </p>
+        )}
+        {connections.length === 0 ? (
+          <p className="panel-meta">
+            尚无连接记录。外部 Agent（MCP / A2A / ACP）首次调用后会出现在这里。
+          </p>
+        ) : (
+          <ul className="agent-list">
+            {connections.map((c) => (
+              <li key={c.id} className="agent-item">
+                <span className="agent-kind">{c.protocol}</span>
+                <span className={`status ${c.status === "active" ? "success" : "warning"}`}>
+                  {c.status === "active" ? "已启用" : "已停用"}
+                </span>
+                <span className={`status ${trustClass(c.trust_level)}`}>
+                  {TRUST_LABELS[c.trust_level] ?? c.trust_level}
+                </span>
+                <span className="agent-meta">
+                  {c.local_or_remote} · {c.task_count} 个任务
+                </span>
+                {c.protocol === MCP_CLIENT_PROTOCOL && (
+                  <span className="agent-meta" title={c.endpoint_or_command}>
+                    {mcpToolNames(c, mcpTools[c.id])}
+                  </span>
+                )}
+                <span className="inline-actions">
+                  {/* 只有出站连接能刷新工具目录；入站连接没有可拉的目录 */}
+                  {c.protocol === MCP_CLIENT_PROTOCOL && (
+                    <button
+                      type="button"
+                      className="btn small ghost"
+                      disabled={connBusy === c.id}
+                      onClick={() => void refreshTools(c.id)}
+                    >
+                      刷新工具
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="btn small ghost"
+                    disabled={connBusy === c.id}
+                    onClick={() =>
+                      void setConnStatus(
+                        c.id,
+                        c.status === "active" ? "inactive" : "active",
+                      )
+                    }
+                  >
+                    {c.status === "active" ? "停用" : "启用"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn small ghost"
+                    disabled={connBusy === c.id}
+                    onClick={() => void deleteConn(c.id)}
+                  >
+                    删除
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
       {artifacts.length > 0 && (
         <div className="agent-section">
           <h2>产物</h2>
           <ul className="agent-list">
             {artifacts.map((a) => (
               <li key={a.id} className="agent-item">
-                <span className="agent-kind">{a.kind}</span>
+                <span className="agent-kind">{a.artifact_type ?? a.kind}</span>
+                {/* PRD §10.4：外部产物必须显示来源与信任等级 */}
+                <span className={`status ${trustClass(a.trust_level)}`}>
+                  {TRUST_LABELS[a.trust_level ?? ""] ?? a.trust_level ?? "未知信任等级"}
+                </span>
+                {a.review_state && (
+                  <span className="agent-meta">
+                    {a.review_state === "pending_review" ? "待复核" : a.review_state}
+                  </span>
+                )}
+                {a.producer_agent_id && (
+                  <span className="agent-meta">来源 {a.producer_agent_id}</span>
+                )}
                 <span className="agent-meta">{a.id.slice(0, 8)}</span>
               </li>
             ))}

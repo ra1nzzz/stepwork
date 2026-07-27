@@ -15,11 +15,13 @@
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import threading
 from typing import Any
 from urllib.parse import urlparse
 
+from worker.runtime.analysis.scene import FFmpegSceneDetector, SceneDetector
 from worker.runtime.providers.ai.base import AIProvider
 from worker.runtime.providers.ai.cloud import CloudAIProvider
 from worker.runtime.providers.ai.openai_compatible import (
@@ -40,6 +42,14 @@ def _env(key: str) -> str | None:
     """读取环境变量，空串视为未设置。"""
     v = os.environ.get(key)
     return v if v else None
+
+
+def _has_module(name: str) -> bool:
+    """可选依赖探测：包已安装才为真（不触发导入副作用）。"""
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError):
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -114,19 +124,49 @@ def _valid_base_url(url: str | None) -> bool:
     return parsed.scheme in ("http", "https") and bool(parsed.netloc)
 
 
+def _build_whisper(workspace_id: str | None) -> ASRProvider:
+    """构造 faster-whisper Provider（模型 size 取 env / 覆盖层 / 默认 small）。
+
+    调用前须确保 ``faster_whisper`` 已安装（``_has_module`` 守卫）。
+    """
+    ov = _override_for(workspace_id, "asr")
+    model = _env("STEPWORK_ASR_MODEL") or str(ov.get("model") or "") or "small"
+    from worker.runtime.providers.asr.whisper import FasterWhisperASRProvider
+
+    return FasterWhisperASRProvider(model_size=model)
+
+
 def resolve_asr(workspace_id: str | None = None) -> ASRProvider | None:
     """按 ``STEPWORK_ASR_PROVIDER`` 解析 ASR Provider。
 
-    默认 ``local``（离线确定性，满足转写可运行证伪）；设为 ``cloud``
-    时需要 ``STEPWORK_ASR_API_KEY`` + ``STEPWORK_ASR_BASE_URL``，否则
-    回退 ``None``（handler 转译为 ``UNAVAILABLE``）。
+    - ``auto``（默认）：装了 ``faster-whisper``（可选依赖 ``.[asr]``）就用
+      本地真实识别，否则回退确定性草稿转写。安装即启用——装可选引擎
+      本身就是用户的启用信号，无需再改配置。
+    - ``local``：强制离线确定性草稿转写（canned demo）。测试/纯离线复现
+      需确定结果时显式选它，绕开 auto 的真实引擎优先。
+    - ``whisper``（``faster-whisper``）：显式真实识别；未安装则回退
+      ``None`` → ``UNAVAILABLE``（区别于 auto 的静默回退 demo）。模型 size
+      取 ``STEPWORK_ASR_MODEL`` / 覆盖层 / 默认 ``small``。
+    - ``cloud``：需 ``STEPWORK_ASR_API_KEY`` + ``STEPWORK_ASR_BASE_URL``，
+      否则回退 ``None``。
 
     若 env 缺失，则回退到 ``workspace_id`` 对应的密钥覆盖层
     （来自设置页保存的密钥，仅存内存）。
     """
-    kind = (_env("STEPWORK_ASR_PROVIDER") or "local").lower()
+    kind = (_env("STEPWORK_ASR_PROVIDER") or "auto").lower()
+    if kind == "auto":
+        # 默认：真实引擎优先，缺失静默回退确定性 demo（永不返回 None）
+        if _has_module("faster_whisper"):
+            return _build_whisper(workspace_id)
+        return LocalASRProvider()
     if kind == "local":
         return LocalASRProvider()
+    if kind in ("whisper", "faster-whisper", "faster_whisper"):
+        # 显式选真实引擎：包缺失即回退 None（handler → UNAVAILABLE），
+        # 绝不因缺依赖崩掉解析。
+        if not _has_module("faster_whisper"):
+            return None
+        return _build_whisper(workspace_id)
     if kind == "cloud":
         ov = _override_for(workspace_id, "asr")
         key = _env("STEPWORK_ASR_API_KEY") or ov.get("apiKey")
@@ -195,16 +235,29 @@ def ai_provider_from_hint(hint: dict[str, Any] | None) -> AIProvider | None:
 
 
 def resolve_tts(workspace_id: str | None = None) -> TTSProvider | None:
-    """按 ``STEPWORK_TTS_PROVIDER`` 解析 TTS Provider（W6）。
+    """按 ``STEPWORK_TTS_PROVIDER`` 解析 TTS Provider（W6 / Tranche 3）。
 
-    默认 ``local``（离线确定性占位，满足渲染可运行证伪）；
-    设为 ``cloud`` 时需要 ``STEPWORK_TTS_API_KEY`` + ``STEPWORK_TTS_BASE_URL``，
-    否则回退 ``None``（handler 转译为 ``UNAVAILABLE``）。
+    - ``local``（默认）：离线确定性 WAV（静音但时长真实），满足渲染证伪。
+    - ``edge``（``edge-tts``）：微软在线神经语音（可选依赖 ``.[tts]``；
+      未安装则回退 ``None`` → ``UNAVAILABLE``）；声线取
+      ``STEPWORK_TTS_VOICE`` / 覆盖层 / provider 默认。
+    - ``cloud``：需 ``STEPWORK_TTS_API_KEY`` + ``STEPWORK_TTS_BASE_URL``，
+      否则回退 ``None``。
     env 缺失时回退到 ``workspace_id`` 的密钥覆盖层。
     """
     kind = (_env("STEPWORK_TTS_PROVIDER") or "local").lower()
     if kind == "local":
         return LocalTTSProvider()
+    if kind in ("edge", "edge-tts", "edge_tts"):
+        # 可选真实语音：缺包即回退 None（handler → UNAVAILABLE）。
+        # 声线取 env / 覆盖层 / provider 默认。
+        if not _has_module("edge_tts"):
+            return None
+        ov = _override_for(workspace_id, "tts")
+        voice = _env("STEPWORK_TTS_VOICE") or str(ov.get("voice") or "") or None
+        from worker.runtime.providers.tts.edge import EdgeTTSProvider
+
+        return EdgeTTSProvider(voice=voice)
     if kind == "cloud":
         ov = _override_for(workspace_id, "tts")
         key = _env("STEPWORK_TTS_API_KEY") or str(ov.get("apiKey") or "")
@@ -212,10 +265,32 @@ def resolve_tts(workspace_id: str | None = None) -> TTSProvider | None:
         model = _env("STEPWORK_TTS_MODEL") or str(ov.get("model") or "") or None
         if not key or not _valid_base_url(url):
             return None
-        return CloudTTSProvider(api_key=key, base_url=url, model=model)
+        # PRD-REN-002：每千字符单价来自 env / 设置页覆盖层；非法值视为未配置
+        raw_cost = _env("STEPWORK_TTS_COST_PER_1K") or ov.get("costPer1k")
+        cost: float | None = None
+        if raw_cost not in (None, ""):
+            try:
+                cost = float(raw_cost)
+            except (TypeError, ValueError):
+                cost = None
+        return CloudTTSProvider(
+            api_key=key, base_url=url, model=model, cost_per_1k=cost
+        )
     return None
 
 
 def resolve_renderer() -> RendererProvider | None:
     """W6 内置 FFmpeg 渲染器（vertical-caption-v1）。"""
     return FFmpegRenderer(FFmpegRunner())
+
+
+def resolve_scene_detector() -> SceneDetector | None:
+    """PRD-ANA-003 精确分析的场景切分器（ffmpeg 场景检测滤镜）。
+
+    ffmpeg 缺失时 ``available=False``，handler 精确模式转 ``UNAVAILABLE``；
+    始终返回实例（而非 None），由 handler 按 ``available`` 决定是否可用。
+    切点灵敏度取 ``STEPWORK_SCENE_THRESHOLD``（默认 0.4）。
+    """
+    thr = _env("STEPWORK_SCENE_THRESHOLD")
+    threshold = float(thr) if thr else 0.4
+    return FFmpegSceneDetector(threshold=threshold)

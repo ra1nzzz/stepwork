@@ -49,8 +49,12 @@ export interface BrandConfig {
   mustExecute: string[];
   defaultOutput: string[];
 }
+/** 清理策略（PRD-SRC-005：用户可选择立即、定时或手动） */
+export type CleanupMode = "immediate" | "scheduled" | "manual";
 export interface DataConfig {
   retentionDays: number;
+  /** PRD-SRC-005：临时/下载中间文件的清理时机 */
+  cleanupMode: CleanupMode;
   desensitize: boolean;
   projectDelete: boolean;
   uploadScope: string;
@@ -95,7 +99,13 @@ const DEFAULT_SETTINGS: SettingsConfig = {
     mustExecute: ["cite-sources", "check-similarity", "human-confirm-risk"],
     defaultOutput: ["<=90s", "9:16"],
   },
-  data: { retentionDays: 30, desensitize: true, projectDelete: false, uploadScope: "" },
+  data: {
+    retentionDays: 30,
+    cleanupMode: "scheduled",
+    desensitize: true,
+    projectDelete: false,
+    uploadScope: "",
+  },
   export: { format: "MP4", checkDeps: true },
   ui: { theme: "dark", language: "zh-CN", logLevel: "info" },
 };

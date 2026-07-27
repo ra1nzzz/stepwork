@@ -1,0 +1,29 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "running": {
+      "title": "Running",
+      "type": "boolean"
+    },
+    "url": {
+      "title": "Url",
+      "type": "string"
+    },
+    "card_url": {
+      "title": "Card Url",
+      "type": "string"
+    },
+    "token": {
+      "title": "Token",
+      "type": "string"
+    }
+  },
+  "required": [
+    "running",
+    "url",
+    "card_url",
+    "token"
+  ],
+  "title": "StartA2aServerDetail",
+  "type": "object"
+}

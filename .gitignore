@@ -84,3 +84,6 @@ coverage/
 .coverage
 .coverage.*
 .nyc_output/
+
+# PyInstaller sidecar build output
+build/
