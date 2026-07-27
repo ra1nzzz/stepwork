@@ -18,6 +18,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "Pillow>=12",
   "pytest>=8",
   "pytest-asyncio>=0.23",
   "pytest-cov>=5",

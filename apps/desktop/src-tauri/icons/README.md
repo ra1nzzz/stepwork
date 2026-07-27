@@ -1,8 +1,12 @@
-# Icons Placeholder
+# STEPWORK Icons
 
-Windows 图标 `icon.ico` 占位，正式发布前替换。
+图标由透明品牌母版 `brand/stepwork-icon-master.png` 生成。
 
-推荐规格：
-- 256x256 PNG 源图
-- 包含 16/32/48/256 多尺寸 ICO
-- 遵循 STEPWORK 品牌色 `--accent: oklch(78% 0.16 190)`
+重新生成：
+
+```powershell
+python scripts/gen_icons.py
+```
+
+`icon.ico` 内含 16/24/32/48/64/128/256 像素版本；独立 PNG 用于
+Tauri、安装包及品牌展示。
