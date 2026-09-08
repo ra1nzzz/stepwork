@@ -231,19 +231,21 @@ plugins/official  plugins/registry
 
 ### 7.1 自研（ra1nzzz）
 
-| 仓库 | License | 可复用点 |
-|---|---|---|
-| `orchdesk` | 自研（无声明） | 多 Agent 编排桌面工作台（Electron + Cordis/dsh）—— Agent 编排 UX 与插件装配参考 |
-| `OrchClaw-Lite` | **MIT** | 项目级多 Agent 协作零依赖 demo —— 可直接借鉴编排模型 |
-| `TencentDB-Agent-Memory` | NOASSERTION | Agent 长期记忆 4 层渐进管线 —— 记忆层参考 |
-| `douyin-live-info` | NOASSERTION | 抖音直播间信息获取（弹幕/统计/录制）—— **热点发现与平台数据采集参考** |
-| `huashu-design` | **MIT** | HTML 原生设计 skill（Agent-agnostic）—— 视觉模板与高保真原型 |
-| `model-router` | **MIT** | 按任务类型路由最优模型 —— LLM 成本控制 |
-| `harness-agent*` | 自研 | Agent 生命周期 6 阶段管理 —— 流水线阶段治理 |
-| `zhiyi-new-agent-onboarding` | 自研 | New Agent 一键入职 —— Agent 注册/发现 |
-| `ProAGI` | 自研 | Computer Use / 环境交互 —— 未来平台自动化发布参考 |
+| 仓库 | License | 归属 | 方式 | 可复用点 |
+|---|---|---|---|---|
+| `OrchClaw-Lite` | **MIT** | ✅ 自研 | **直接复用** | Agent 消息协议 + 任务状态机（pending→…→reviewing→completed/returned）+ 三维评审 + 结项报告 |
+| `model-router` | **MIT** | ✅ 自研 | **直接复用** | 任务类型→模型路由表、成本优先、失败计数自动降级 |
+| `huashu-design` | MIT（fork `alchaincyf/huashu-design`） | ❌ 非自研 | **仅借鉴方法论** | 三方向硬门、事实验证原则、分镜卡/镜头语言、MP4 导出规格、AI 看片评审 |
+| `douyin-live-info` | 🚨 **CC BY-NC 4.0**（fork `qq564118922/douyin-live-info`） | ❌ 非自研 | ⛔ **仅借鉴原理，禁止引入代码** | 弹幕作为热点信号源、长连接采集骨架、消息归一化保留 raw、本地落盘导出 |
+| `orchdesk` | 自研（无声明） | ✅ 自研 | 借鉴 | 多 Agent 编排桌面工作台（Electron + Cordis/dsh）—— Agent 编排 UX 与插件装配 |
+| `TencentDB-Agent-Memory` | NOASSERTION | ✅ 自研 | 借鉴/直接 | Agent 长期记忆 4 层渐进管线 |
+| `harness-agent*` | 自研 | ✅ 自研 | 借鉴 | Agent 生命周期 6 阶段管理 —— 流水线阶段治理 |
+| `zhiyi-new-agent-onboarding` | 自研 | ✅ 自研 | 借鉴 | New Agent 一键入职 —— Agent 注册/发现 |
+| `ProAGI` | 自研 | ✅ 自研 | 借鉴 | Computer Use / 环境交互 —— 未来平台自动化发布 |
 
 > 自研仓库（无 License 声明）视为自有代码，可直接复用。
+> ⛔ **授权红线**：`douyin-live-info` 为 **CC BY-NC 4.0（禁止商业使用）**，STEPWORK 有商业化意图，**禁止复制/改写/分发其任何源码与资源**，只允许借鉴架构思路并自行实现。
+> 逐项借鉴清单（文件/接口级）见 `REFERENCE.md §2.1`。
 
 ### 7.2 已验证的自有流水线（本 workspace）
 
