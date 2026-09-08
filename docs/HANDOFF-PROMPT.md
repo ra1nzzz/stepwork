@@ -10,10 +10,20 @@
 
 **STEPWORK** —— 一间 Agent 原生的短视频创作工厂：从选题开始，到成片结束。
 
-- **仓库**：`D:\Code\StepWork`（main @ bb31569，136 commits，AGPL-3.0-or-later）
+- **仓库**：`D:\Code\StepWork`（main @ `b0b2244`，AGPL-3.0-or-later，136 commits 全为 ra1nzzz 一人）
 - **技术栈**：Tauri 2 + React 18 + Vite 5（桌面端） + Python 3.12 worker sidecar + SQLite(WAL)
-- **流水线**：发现选题 → 文案 → 配音 → 配图 → 渲染 → 发布
+- **流水线**：发现选题 → 定角度 → 文案 → 配音 → 配图 → 渲染 → 发布
 - **北极星**：一个人，一条指令，出一條成片（端到端 ≤ 15 分钟，人工决策 ≤ 2 次）
+- **未推送**：本地有 2 个提交（`236a595` 文档重定位、`b0b2244` 授权修正）尚未 push，需要时自行推送
+
+### 六项不可违背原则（详见 REPOSITIONING.md）
+
+1. **Agent 原生，双向** —— 能操作其它 Agent，也能被其它 Agent 操作
+2. **GUI 与 CLI 同为一等公民** —— 任何能力先有 CLI/命令总线入口，GUI 只是它的一层皮
+3. **Ontology 为准** —— 以 `YT-Agent-Ontology` 统一语义，不建生态壁垒
+4. **`/docs` 即项目知识库** —— ROADMAP / COMPLETED / REFERENCE 三份职责不重合，用 `consolidate-project-knowledge-base` 治理防漂移
+5. **优先复用自研 / MIT** —— 不自研已有的轮子；授权不允许时借鉴原理，不抄代码
+6. **继续 AGPL** —— 接受第一个外部 PR 前必须定下 CLA 或双许可（否则永久锁死）
 
 ### 你在生态中的位置
 
@@ -25,11 +35,14 @@
 ## 开工前必读（按顺序）
 
 ```text
-1. D:\Code\StepWork\docs\REPOSITIONING.md   ← 定位、六项不可违背原则、目标架构
-2. D:\Code\StepWork\docs\ROADMAP.md         ← 北极星、在办任务（你是 S1）、S0-S8 路线
-3. D:\Code\StepWork\docs\COMPLETED.md       ← 已有什么；⛔ 假实现与空壳目录必看
-4. D:\Code\StepWork\docs\REFERENCE.md       ← 复用来源与授权
+1. D:\Code\StepWork\docs\README.md          ← 知识库索引与治理规则（先看这个）
+2. D:\Code\StepWork\docs\REPOSITIONING.md   ← 定位、六项不可违背原则、目标架构
+3. D:\Code\StepWork\docs\ROADMAP.md         ← 北极星、在办任务（你是 S1）、S0-S8 路线
+4. D:\Code\StepWork\docs\COMPLETED.md       ← 已有什么；⛔ 假实现与空壳目录必看
+5. D:\Code\StepWork\docs\REFERENCE.md       ← 复用来源与授权，§2.1 是文件级借鉴清单
 ```
+
+**知识库纪律**：完成一项 → 从 `ROADMAP.md` 移入 `COMPLETED.md`；引入任何外部来源 → 立即登记 `REFERENCE.md`。三份文件内容禁止重合。
 
 ---
 
@@ -90,6 +103,21 @@ STEPWORK 独有的概念（素材/脚本/草稿/发布/渠道）放在 **Content
 - `results/registry.py` 的契约注册与 `gen_result_types.py` 的 CI `--check`
 
 **迁移原则**：兼容 → 映射 → 迁移 → 删除。**禁止大爆炸式重写。**
+
+---
+
+## 可复用资产：归属、授权与借鉴方式（2026-09-08 核实）
+
+> 完整文件级清单见 `docs/REFERENCE.md §2.1`。以下四条是**已核实的硬事实**，不要凭仓库名想当然。
+
+| 仓库 | 归属 | 授权 | 方式 | 借鉴要点 |
+|---|---|---|---|---|
+| `OrchClaw-Lite` | ✅ 自研 | MIT | **直接复用** | `src/protocol.js` Agent 消息协议（11 种类型 + 逐字段校验 + `capabilities[]`）；`src/task-state-machine.js` 转移表 `pending→in_progress→submitted→reviewing→completed/returned`；三维评审（质量/效率/可复用）+ 结项报告 |
+| `model-router` | ✅ 自研 | MIT | **直接复用** | `models.json` 五类任务 `primary + fallbacks[]`；`handler.js` 成本优先 `priority:['free','flash','fast']` + `modelErrorTracker`（5min/3 次错误切 fallback）+ 超时重试。STEPWORK 目前**无 LLM 降级**，照搬 |
+| `huashu-design` | ❌ 非自研（fork `alchaincyf/huashu-design`） | MIT | **仅借鉴方法论**（授权允许直接复用，但策略上只借鉴） | 「三方向硬门」；**核心原则 #0 事实验证先于假设**（S5 选题事实核验必用）；`voiceover-pipeline.md` 铁律「先解说词、按音频实测时长驱动画面，失败模式 #1 = 带配音的 PPT」；`video-export.md` + `render-video-seek.js` 按时间轴 seek 直录（与我们逐帧方案同源）；`ai-video-review.md` 终渲喂视觉模型评审，带 `--context` 区分设计意图与 bug |
+| `douyin-live-info` | ❌ 非自研（fork `qq564118922/douyin-live-info`） | 🚨 **CC BY-NC 4.0** | ⛔ **仅借鉴原理，禁止引入任何代码** | 弹幕 = 热点信号源；采集器骨架 `subscribe→heartbeat→decompress→parse→normalize`；消息归一化**保留 raw**；SQLite 落盘 + CSV/JSON 导出 |
+
+⛔ **授权红线**：`douyin-live-info` 为 CC BY-NC 4.0（**禁止商业使用**）。STEPWORK 有商业化意图，**不得复制、改写、分发其任何源码或资源**（含 protobuf 定义与签名算法）。只允许借鉴架构思路并自行实现。
 
 ---
 
@@ -154,6 +182,10 @@ STEPWORK 独有的概念（素材/脚本/草稿/发布/渠道）放在 **Content
 | **生图并发会撞文件名覆盖** | 用「序号 + uuid」命名，不依赖时间戳 |
 | **StepFun 生图 2026-10-10 下线** | 图像层必须可插拔，别绑死；配图内不生成中文文字（字形不可靠），文字在 HTML 层叠加 |
 | **git 操作一律 `env -u NODE_OPTIONS git ...`** | NODE_OPTIONS 注入的 safe-delete shim 会劫持 `fs.unlink/rmdir`，曾删掉 `.git/refs` 与整个目录 |
+| **禁止 `git stash`** | 同一 shim 曾因此报废整个仓库。要基线对比就用临时目录 + `git show HEAD:<path>` |
+| **git 身份已全局配置** | `user.name=ra1nzzz`、`user.email=ra1nzzz@users.noreply.github.com`。**不要**再写 `-c user.name=...`；若报 `Author identity unknown` 说明配置被覆盖，先查 `git config --global --list --show-origin` |
+| **CC BY-NC 4.0 资源不得引入** | `douyin-live-info` 禁止商用，只可借鉴思路。引入任何外部代码前先确认 SPDX，NGPL/NC 类一律拒绝 |
+| **GitHub 走直连，代理不可用** | 推送/拉取用 `env -u NODE_OPTIONS -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY curl/git ...`，失败率高需重试循环 |
 
 ---
 
