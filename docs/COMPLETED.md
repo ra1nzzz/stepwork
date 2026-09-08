@@ -47,6 +47,7 @@
 | 字幕 | `render/subtitles.py::build_srt` | 真 SRT |
 | 时间线导出 | `render/edit_export.py` | 真 OTIO + CMX3600 EDL |
 | 素材导入 | `handlers/import_source.py` + `ingest/` | 直链下载 + hash + ffprobe 元数据 |
+| JobStage | `migrations/0002..0004` + `jobs/stage.py` | `proposing / scripting / synthesizing / rendering / publishing / verifying / drafting / approving` 9 段，与 JobState 解耦 |
 | 选题角度 | `topic/{prompt,parse}.py` + `handlers/generate_topic.py` | `TOPIC_SCHEMA` 强约束（标题/差异/hook/受众/观点/风险） |
 | 脚本生成 | `script/{prompt,parse,diff,history,paragraph,similarity}.py` + `handlers/generate_script.py` | 含版本 diff、历史、段落编辑、相似度 |
 | 品牌档 | `handlers/brand.py` + `migrations/0005` | `brand_profiles` + `brand_reference_scripts` + `format_brand_prompt_block()` + `RecordPreference` |
@@ -68,6 +69,51 @@
 | 公共层 | `agents/channel.py` | 连接加载、能力同步、调用记录 |
 
 > 注：以上均为**真实协议实现**，但联调用的是 `worker/tests/fakes/` 假 Agent 脚本，未接真实三方服务。
+
+### 1.5 S1 · Playwright 逐帧渲染器（S1 探路 · 2026-09-08）
+
+> **从 [`ROADMAP.md` §S1](./ROADMAP.md) 移入**：探路目标「逐帧渲染能否在 Job/进度/取消框架里工作」已验证——这是最大未知数，通过之后 S2–S8 均为照模式复制。
+
+**新增代码**
+
+| 模块 | 落点 | 说明 |
+|---|---|---|
+| 渲染器实现 | `worker/runtime/providers/renderer/playwright.py` | 实现 `RendererProvider` 协议（`render:frame-by-frame-v1`）。Chromium 逐帧截图 → ffmpeg `image2pipe` 管道直连，**不落盘中间帧**；真进度 = 已写帧数 / 总帧数；取消无僵尸（复用 `FFmpegRunner.supervise`） |
+| 默认文档 | `worker/runtime/render/assets/s1_probe.html` | 零外部依赖（无字体/无图片/无网络）HTML，仅用于让 provider 开箱即可跑通一次真渲染。**不是正式模板**（S3 才动 `templates.py`） |
+| 抽帧目检 | `scripts/still_frames.py` | 从 `*/scripts/still_*.py` 搬运并泛化，命令行 `--html / --durations / --out-dir / 时刻…`。照搬两坑：先回退 0.8s 让淡入完成；撞切句瞬间前移 0.6s |
+| 时长探测 | `worker/runtime/render/ffmpeg_runner.py::probe_duration` + `FFmpegRunner.probe` | ffprobe 优先，退回 `ffmpeg -i` 的 stderr Duration 行。ffprobe 候选：显式 → `PATH` → ffmpeg 同目录（WinGet 布局） |
+| 协议拆分 | `FFmpegRunner.{spawn, supervise}` + `run` | 把「启动」与「等待」拆开，使调用方能往 stdin 喂帧并**复用完全相同的取消/超时/回收语义**。`require_bin()`（原 `_require_bin`）变体：二进制路径不在文件即抛 |
+| `RenderSpec` 扩字段 | `worker/runtime/models.py` | `style_id="illustration"` / `art_style="xiaohei"` / `image_set_id=None`（全部带默认值，**既有调用方与现有表结构不受影响**） |
+| Provider 解析 | `worker/runtime/providers/resolve.py::resolve_renderer` | `STEPWORK_RENDER_PROVIDER=playwright`（默认仍 ffmpeg）；`STEPWORK_FFMPEG_BIN` 显式指定（WinGet 装的不在 PATH）；playwright 包缺失 → `None`（handler → UNAVAILABLE），**不静默回退 ffmpeg** |
+
+**测试**
+
+| 文件 | 数量 | 覆盖 |
+|---|---|---|
+| `worker/tests/test_playwright_renderer.py` | 10 + 1 perf | 正常（fake 数 JPEG SOI 确认帧进了 ffmpeg）/ 取消（elapsed < 15s + `last_proc.poll() is not None`）/ ffmpeg 不可用 / 协议一致性 / 音频不存在 / 文档缺 `__setTime` / resolve 三分支 / e2e（1080×1920 h264 30.0s 70.4s 墙钟） |
+| `worker/tests/fakes/fake_ffmpeg_pipe.py` | — | fake ffmpeg：`stdin.buffer.read()` 数 SOI 写入 JSON 报告；`STEPWORK_FAKE_FFMPEG_SLEEP=1` 时睡 30s，**让 cancel 测试能证明子进程被 terminate** |
+
+**验收结果**
+
+| 项 | 结果 |
+|---|---|
+| 30 秒 9:16 成片 | ✅ `D:/Code/StepWork/.workbuddy/s1-acceptance/draft_s1-acceptance.mp4`（2,607,475 B，wall=71.5s，progress=901 点单调递增） |
+| ffprobe 规格 | ✅ `h264 yuvj420p 1080×1920 r=30/1  dur=30.000000s · aac 44100Hz mono` |
+| `progress_cb` 真驱动 | ✅ 已写帧数 / 总帧数（非 ffmpeg stderr Duration 解析——管道输入 ffmpeg 读不出总时长） |
+| 中途取消 0 僵尸 | ✅ 第 10/25 帧取消；`FFmpegCancelled` 抛出 + `r.last_proc.poll() is not None`；实测 elapsed < 15s（fake `--sleep` 不让等 30s） |
+| 原 `FFmpegRenderer` 不受影响 | ✅ `test_render.py` 5 例 + `test_ffmpeg_runner.py` 3 例全绿；协议 dual-instance 通过 |
+| `mypy strict` | ✅ 203 source files / 0 errors |
+| `ruff` | ✅ `worker/` + `scripts/` All checks passed |
+| `pytest -m "not perf"` | ✅ 685 passed, 7 deselected in 197.76s |
+
+**搬运的已验证资产**
+
+| 来自 | 落点 |
+|---|---|
+| `C:/Users/my/WorkBuddy/2026-09-07-05-23-14/gender-video/scripts/render.py` | `worker/runtime/providers/renderer/playwright.py`（管道直连、image2pipe、进度墙钟、-shortest） |
+| `C:/Users/my/WorkBuddy/2026-09-07-05-23-14/gender-video/scripts/still.py` & `still_illust.py` | `scripts/still_frames.py`（合并泛化） |
+
+**新增遗留项**（写给 S2）——见 [§5 文档治理 / 新增未完成项](#5-文档治理)
 
 ---
 
@@ -132,3 +178,12 @@ plugins/{official,registry}
 | 2026-09-08 | 旧规划文档 22 份归档至 `docs/archive/legacy/`，建立 `REPOSITIONING` / `ROADMAP` / `COMPLETED` / `REFERENCE` 新体系 |
 | 2026-09-08 | 核实 YT-Agent-Ontology 契约：STEPWORK = `ContentOps` 域 Owner |
 | 2026-09-08 | 核实 StepFun 生图 2026-10-10 下线（官方无替代模型） |
+| 2026-09-08 | **S1 完成**：Playwright 逐帧渲染器探路通过；ROADMAP 打勾、COMPLETED §1.5 入账、REFERENCE 登记新依赖；详见上方 §1.5 |
+
+**S1 新增遗留项（S2 第一件事）**
+
+1. **`RenderSpec.style_id` 当前仅作默认值字段**，未被 `PlaywrightRenderer` / `FFmpegRenderer` 消费；S3 模板层按能力声明（`{image}`/`{}`）选型时接通
+2. **`STEPWORK_RENDER_PROVIDER` 只支持 env，**不支持 per-request hint**（`payload.renderer`）；如要让 GUI 端能动态切换渲染器，须在 `handlers/render_source.py` 加 per-request 路由（与 `ai_provider_from_at` 同型）——不引入会导致 P4 落空
+3. **`background_uri` 复用为「渲染文档 URI」语义**（原语义是「背景图」）；S3 模板层应考虑拆 `design_doc_uri` 独立字段，避免单字段多义
+4. **Playwright 浏览器二进制**需用户手动 `playwright install chromium`；建议在 `pyproject.toml` 加 `[project.optional-dependencies].render-playwright` 把 playwright 与 chromium 安装一起打包
+5. **抽帧目检撞切句瞬间仍会取到空字幕**：当前脚本照搬「先回 0.8s 再跳」的兜底，但 design.html 没暴露 `__getSentBorn`，修正无法生效；S2 与 `video_scenes` 表一起补 `born_at_sec` 字段后，可让脚本稳定取样

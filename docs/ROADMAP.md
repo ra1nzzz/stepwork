@@ -52,23 +52,13 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
 
 ---
 
-### S1 · 探路：Playwright 渲染器 🔜 待启动
+### S1 · 探路：Playwright 渲染器 ✅ 已完成（2026-09-08）
 
-**目标**：证明「逐帧渲染」能在现有 Job / 进度 / 取消框架里正常工作。
-
-**内容**
-- 新增 `worker/runtime/providers/renderer/playwright.py`，实现 `RendererProvider` 协议
-  （`render(spec, audio_uri, progress_cb, cancel_event) -> RenderResult`）
-- `providers/resolve.py` 加 `resolve_renderer` 的 `STEPWORK_RENDER_PROVIDER=playwright` 分支
-- 搬运已验证的渲染脚本：`scripts/render.py`（Playwright 逐帧 + ffmpeg 管道）
-
-**验收**
-- [ ] 用现成素材渲出一条 30 秒 9:16 片，1080×1920 / H.264+AAC
-- [ ] 进度回调能驱动前端进度条
-- [ ] 中途取消无僵尸进程（复用 `render/ffmpeg_runner.py` 的取消语义）
-- [ ] 原有 FFmpegRenderer 仍可用（兼容优先，不删除）
-
-**依赖**：无。**这是最高优先级的第一步**——通过后再加东西都是照模式复制。
+→ 完整条目移入 [`COMPLETED.md` §1.5](./COMPLETED.md#15-s1--playwright-逐帧渲染器-s1探路-2026-09-08)。
+关键事实：30 秒 9:16 成片（1080×1920 / H.264+AAC / 30 fps）实测 `1080×1920 h264 yuvj420p dur=30.000s`；
+`progress_cb` 由帧数真驱动；中途取消 `FFmpegCancelled` + `last_proc.poll()` 已回收（0 僵尸）；
+原 `FFmpegRenderer` 不受影响；新增 10 条单测 + 1 条 perf 端到端（`pytest -m perf -k real_assets`）；
+`mypy strict` / `ruff` / `pytest -m "not perf"` 全绿（685 passed / 7 deselected）。
 
 ---
 

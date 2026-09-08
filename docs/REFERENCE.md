@@ -115,7 +115,7 @@
 
 | 资产 | 来源项目 | 复用方式 | 对应模块 |
 |---|---|---|---|
-| Playwright 逐帧渲染 + ffmpeg 管道 | `gender-video/scripts/render.py` | 直接 | S1 `providers/renderer/playwright.py` |
+| Playwright 逐帧渲染 + ffmpeg 管道 | `gender-video/scripts/render.py` | 直接 | ✅ S1 `providers/renderer/playwright.py`（已落地） |
 | stepfun 复刻音色 + atempo 归一化 + MD5 缓存判重 | `*/scripts/gen_tts.py` | 直接 | S2 TTS provider |
 | 音频拼接 + timeline 生成 | `*/scripts/build_audio.py` | 直接 | S2 compose |
 | 分幕数据契约（`scenes.json`） | `*/scenes.json` | 直接 | S2 `video_scenes` 表设计 |
@@ -138,8 +138,9 @@
 | StepFun TTS `POST /step_plan/v1/audio/speech`（stepaudio-2.5-tts）+ 音色复刻 `/voices` | 厂商文档 + 实测 | 直接 | S2 TTS | **实测坑**：`instruction` 情绪指令会盖过 `speed` 参数 → 必须生成后用 `atempo` 归一化 |
 | StepFun 生图 `POST /v1/images/generations`（step-2x-large / step-image-edit-2） | 厂商文档 | 直接（**临时**） | S2 image provider | 🚨 **2026-10-10 下线，官方无替代模型**（2026-09-08 核实） |
 | StepFun 官方 ASR `/v1/audio/asr/file/submit+query` | 厂商文档 | 参考 | ASR 校验 | 用于验证 TTS 输出正确性 |
-| Playwright（Python） | 开源（Apache-2.0） | 直接 | S1 渲染 | 本机 Remotion 装不上，改用 Playwright 逐帧 + ffmpeg 管道 |
-| ffmpeg / ffprobe | 开源（GPL/LGPL，按构建） | 直接（外部二进制） | 渲染/合成 | 参数必须用 argv list，不拼 shell |
+| Playwright（Python · Apache-2.0，自带 Chromium） | 开源 | 直接 | **S1 `providers/renderer/playwright.py`** | 已实装「Chromium 逐帧截图 + ffmpeg `image2pipe` 管道直连」。本机装不上 Remotion 才用 Playwright；进度由帧数驱动（管道 ffmpeg 读不出总时长） |
+| `fakes/fake_ffmpeg_pipe.py`（仓库内） | 自研 | 直接 | 测试 | fake ffmpeg 读 stdin 数 JPEG SOI 写 JSON 报告；`STEPWORK_FAKE_FFMPEG_SLEEP=1` 睡 30s 给取消测试证明 terminate 真生效 |
+| ffmpeg / ffprobe | 开源（GPL/LGPL，按构建） | 直接（外部二进制） | 渲染/合成 / 时长探测 | 参数必须用 argv list，不拼 shell；WinGet 装的常不在 PATH，本仓库用 `STEPWORK_FFMPEG_BIN` 显式指定 |
 
 > ⚠️ **ffmpeg 授权**：STEPWORK 为 AGPL-3.0，与 GPL 兼容；若未来改双许可闭源，需确认 ffmpeg 构建版本（LGPL vs GPL）的链接方式。己见 `LICENSE_AUDIT.md`（已归档，待更新）。
 
