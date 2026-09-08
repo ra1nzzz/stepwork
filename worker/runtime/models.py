@@ -171,6 +171,15 @@ class RenderSpec(BaseModel):
     caption_text: str | None = None
     resolution: tuple[int, int] = (1080, 1920)
     fps: int = 30
+    # S1 起：版式风格 / 美术风格 / 配图集（风格层选型用，S3 才真正消费）。
+    # 三个字段全部带默认值——既有调用方（FFmpegRenderer、CreateRenderJob
+    # 的既有 payload）不受影响，无需改表、无需改前端。
+    #: 版式风格 id（如 ``ink_text`` 纸墨文字版 / ``illustration`` 插画版）
+    style_id: str = "illustration"
+    #: 美术风格（与版式正交：换美术风格不用改模板）
+    art_style: str = "xiaohei"
+    #: 配图集 id；``None`` 表示该风格不需要配图（A 版零素材依赖）
+    image_set_id: str | None = None
 
 
 class RenderResult(BaseModel):

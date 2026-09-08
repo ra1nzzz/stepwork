@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>STEPWORK S1 probe</title>
+<style>
+  /* S1 探路文档：零外部依赖（无字体/无图片/无网络），仅用于证明
+     「Playwright 逐帧 + ffmpeg 管道直连」链路可用。不是正式模板——
+     正式模板属 S3 风格层，届时改 render/templates.py，不动本文件。 */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1080px; height: 1920px; overflow: hidden; }
+  body {
+    background: #0B0D12;
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    color: #F5F7FA;
+    position: relative;
+  }
+  #glow {
+    position: absolute; left: 50%; top: 38%;
+    width: 1400px; height: 1400px; margin: -700px 0 0 -700px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(124,92,255,.55) 0%, rgba(124,92,255,0) 62%);
+    transform: translate3d(0,0,0);
+  }
+  #bar { position: absolute; left: 0; top: 0; height: 10px; width: 0%; background: #7C5CFF; }
+  #time {
+    position: absolute; left: 0; right: 0; top: 760px; text-align: center;
+    font-size: 150px; font-weight: 700; letter-spacing: 4px;
+    font-variant-numeric: tabular-nums;
+  }
+  #scene { position: absolute; left: 0; right: 0; top: 980px; text-align: center; font-size: 54px; color: #9AA4B2; }
+  #mark { position: absolute; left: 80px; bottom: 120px; font-size: 44px; color: #4A5364; letter-spacing: 2px; }
+</style>
+</head>
+<body>
+  <div id="bar"></div>
+  <div id="glow"></div>
+  <div id="time">0.00</div>
+  <div id="scene">scene 1</div>
+  <div id="mark">STEPWORK · S1 frame-by-frame probe</div>
+<script>
+  // 幕时长由渲染器通过 add_init_script 注入；没有则视为单幕。
+  var DUR = (window.SCENE_DURATIONS && window.SCENE_DURATIONS.length)
+    ? window.SCENE_DURATIONS
+    : [0];
+  var TOTAL = DUR.reduce(function (a, b) { return a + b; }, 0);
+
+  function sceneAt(t) {
+    var acc = 0;
+    for (var i = 0; i < DUR.length; i++) {
+      acc += DUR[i];
+      if (t < acc) return { idx: i + 1, local: t - (acc - DUR[i]), dur: DUR[i] };
+    }
+    return { idx: DUR.length, local: DUR[DUR.length - 1], dur: DUR[DUR.length - 1] };
+  }
+
+  // 渲染器逐帧调用：必须是时间的纯函数（同一 t 出同一画面）。
+  window.__setTime = function (t) {
+    if (t < 0) t = 0;
+    var s = sceneAt(t);
+    document.getElementById('time').textContent = t.toFixed(2);
+    document.getElementById('scene').textContent = 'scene ' + s.idx + ' / ' + DUR.length;
+    var pct = TOTAL > 0 ? Math.min(100, (t / TOTAL) * 100) : 0;
+    document.getElementById('bar').style.width = pct + '%';
+    // 光晕随幕内进度上浮 + 轻微位移，保证每一帧画面确实不同
+    var k = s.dur > 0 ? s.local / s.dur : 0;
+    document.getElementById('glow').style.transform =
+      'translate3d(0,' + (-60 + k * 120).toFixed(2) + 'px,0) scale(' + (0.9 + k * 0.2).toFixed(4) + ')';
+    document.getElementById('glow').style.opacity = (0.55 + 0.35 * Math.sin(t * 1.7)).toFixed(3);
+  };
+  window.__setTime(0);
+</script>
+</body>
+</html>

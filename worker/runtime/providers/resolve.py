@@ -280,8 +280,25 @@ def resolve_tts(workspace_id: str | None = None) -> TTSProvider | None:
 
 
 def resolve_renderer() -> RendererProvider | None:
-    """W6 内置 FFmpeg 渲染器（vertical-caption-v1）。"""
-    return FFmpegRenderer(FFmpegRunner())
+    """按 ``STEPWORK_RENDER_PROVIDER`` 解析渲染器（默认仍是 ffmpeg）。
+
+    - ``ffmpeg``（默认）：W6 内置 vertical-caption-v1 字幕渲染器。
+    - ``playwright``（S1）：Playwright 逐帧渲染（HTML 视觉稿 → 管道直连
+      ffmpeg）。``playwright`` 包缺失即回退 ``None`` → handler 转
+      ``UNAVAILABLE``——**绝不静默回退成 ffmpeg 渲出另一条片子**。
+
+    ffmpeg 可执行名可用 ``STEPWORK_FFMPEG_BIN`` 显式指定（WinGet 安装的
+    ffmpeg 常不在 PATH 里）；未指定则走 ``shutil.which("ffmpeg")``。
+    """
+    runner = FFmpegRunner(bin_path=_env("STEPWORK_FFMPEG_BIN"))
+    kind = (_env("STEPWORK_RENDER_PROVIDER") or "ffmpeg").lower()
+    if kind in ("playwright", "pw"):
+        if not _has_module("playwright"):
+            return None
+        from worker.runtime.providers.renderer.playwright import PlaywrightRenderer
+
+        return PlaywrightRenderer(runner)
+    return FFmpegRenderer(runner)
 
 
 def resolve_scene_detector() -> SceneDetector | None:
