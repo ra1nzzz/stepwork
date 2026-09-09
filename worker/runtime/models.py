@@ -267,6 +267,10 @@ class VideoDraftMeta(BaseModel):
     resolution: tuple[int, int]
     fps: int
     source_version_id: str
+    # S3：实际生效的版式风格；``None`` = 渲染器不消费风格（FFmpeg drawtext
+    # 路径）。降级时 degraded_from 记录用户原本要的风格（不静默）。
+    style_id: str | None = None
+    degraded_from: str | None = None
     # Tranche 2（PRD-REN-001/003）：字幕 sidecar 与旁白音频 artifact 登记
     subtitles_uri: str | None = None
     audio_uri: str | None = None

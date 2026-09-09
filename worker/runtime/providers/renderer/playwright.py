@@ -43,6 +43,7 @@ from worker.runtime.render.ffmpeg_runner import (
     FFmpegRunner,
     FFmpegUnavailable,
 )
+from worker.runtime.render.styles import style_document
 
 #: 内置 S1 探路文档（零外部依赖：无字体 / 无图片 / 无网络）。
 #: 未显式指定文档时用它，保证 provider 开箱即可跑通一次「真渲染」。
@@ -169,14 +170,23 @@ class PlaywrightRenderer:
         if not os.path.isfile(audio_path):
             raise PlaywrightRenderError(f"audio not found: {audio_path}")
 
-        # design_doc_uri 是正名；background_uri 是 S1 的遗留别名（当时未加新
-        # 字段，复用了它）。二者同时给时以 design_doc_uri 为准。
-        document = (
-            spec.design_doc_uri
-            or spec.background_uri
-            or self.document_uri
-            or str(DEFAULT_DOCUMENT)
+        # 文档解析（S3 起）：
+        # 1. 显式文档（spec.design_doc_uri 正名 / background_uri S1 遗留别名 /
+        #    构造参数 document_uri 供测试注入）→ 给了就用，**不碰风格**：
+        #    style_id 对自定义视觉稿只是说明性字段。
+        # 2. 没给显式文档 → 按 spec.style_id 取内置视觉稿（A/B 两版）。
+        #    未知风格**当场报错**——绝不像旧行为那样静默回退成另一张画面。
+        # 3. DEFAULT_DOCUMENT（S1 探路文档）仅作代码层兜底。
+        explicit = (
+            spec.design_doc_uri or spec.background_uri or self.document_uri
         )
+        if explicit:
+            document: str = explicit
+        else:
+            try:
+                document = str(style_document(spec.style_id))
+            except KeyError as exc:
+                raise PlaywrightRenderError(str(exc)) from None
         doc_path = document.replace("file://", "")
         if not os.path.isfile(doc_path):
             raise PlaywrightRenderError(f"render document not found: {doc_path}")

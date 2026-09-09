@@ -27,6 +27,7 @@ from worker.runtime.commands.bus import DispatchError
 from worker.runtime.db.repos import _row_to_job, _row_to_source_asset
 from worker.runtime.deps import Deps
 from worker.runtime.models import CommandEnvelope, CommandResult, Job
+from worker.runtime.render.styles import list_styles
 from worker.runtime.render.templates import ASPECT_PRESETS, list_templates
 from worker.runtime.script.diff import (
     diff_lines,
@@ -457,6 +458,8 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             commandId=env.commandId,
             detail={
                 "templates": list_templates(),
+                # S3：版式风格（能力声明）同理——前端下拉据此渲染
+                "styles": list_styles(),
                 "aspects": [
                     {"id": name, "resolution": list(size)}
                     for name, size in ASPECT_PRESETS.items()

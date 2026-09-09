@@ -58,6 +58,7 @@ from worker.runtime.render.ffmpeg_runner import (
     FFmpegFailed,
     FFmpegUnavailable,
 )
+from worker.runtime.render.styles import DEFAULT_FALLBACK_STYLE, resolve_style
 from worker.runtime.render.subtitles import (
     build_srt_from_scenes,
     probe_audio_duration,
@@ -193,6 +194,62 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             for s in timed_scenes
         ]
 
+    # S3 风格层：版式风格（style_id）决定内置视觉稿，能力声明决定它需要
+    # 什么输入。必须已注册——未知风格绝不静默回退成另一张画面。
+    try:
+        style = resolve_style(spec.style_id)
+    except KeyError as exc:
+        raise DispatchError("INVALID_ARGUMENT", str(exc)) from None
+
+    # 降级策略（S3 核心，A 版纸墨文字是 B 版插画的降级路径）：
+    # 只有逐帧渲染器消费 style_id；风格需要每幕配图但 scenes 缺失/未配图时
+    # → 回落到 fallback（默认 ink_text）出片成功，但**必须明确标记降级**，
+    # 绝不静默 —— detail 与 VideoDraftMeta 都带 degradedFrom / reason，
+    # 拿到成片的人能看出「这不是我要的插画版」。
+    degraded_from: str | None = None
+    degraded_reason: str | None = None
+    is_frame_renderer = getattr(renderer, "capability", "") == "render:frame-by-frame-v1"
+    if style.needs_image and is_frame_renderer:
+        missing = (
+            []
+            if spec.scenes is None
+            else [s.seq for s in spec.scenes if not s.image_uri]
+        )
+        if spec.scenes is None or missing:
+            fallback = str(
+                payload.get("fallbackStyle")
+                or os.environ.get("STEPWORK_RENDER_FALLBACK_STYLE")
+                or DEFAULT_FALLBACK_STYLE
+            )
+            try:
+                fallback_style = resolve_style(fallback)
+            except KeyError as exc:
+                raise DispatchError(
+                    "INVALID_ARGUMENT", f"bad fallbackStyle: {exc}"
+                ) from None
+            if fallback_style.needs_image:
+                raise DispatchError(
+                    "RENDER_FAILED",
+                    f"style {spec.style_id!r} needs per-scene images but "
+                    f"{len(missing)} scene(s) lack image_uri, and fallback "
+                    f"{fallback!r} also needs images; run IllustrateScenes first",
+                )
+            degraded_from = spec.style_id
+            degraded_reason = (
+                f"style {spec.style_id!r} requires an image per scene, but "
+                + (
+                    "the version has no scenes"
+                    if spec.scenes is None
+                    else f"{len(missing)} scene(s) lack image_uri (run IllustrateScenes)"
+                )
+                + f"; rendered with fallback style {fallback!r}"
+            )
+            spec.style_id = fallback
+
+    # 只有逐帧渲染器真的消费 style_id；FFmpeg drawtext 路径不渲染视觉稿，
+    # 如实记 None（否则 meta 会说「用了插画」，画面却是纯色 drawtext）。
+    effective_style = spec.style_id if is_frame_renderer else None
+
     cancel_event = threading.Event()
     tts_out_dir = os.path.join(tempfile.gettempdir(), "stepwork_tts")
     async with content_job(
@@ -293,6 +350,8 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
                 resolution=spec.resolution,
                 fps=spec.fps,
                 source_version_id=spec.source_version_id,
+                style_id=effective_style,
+                degraded_from=degraded_from,
                 subtitles_uri=subtitles_path,
                 audio_uri=audio_uri,
                 producer={
@@ -334,6 +393,10 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
                     "video_uri": result.video_uri,
                     "template": result.template,
                     "tts_engine": result.tts_engine,
+                    # S3：实际生效的版式风格；降级时带来源与原因（不静默）
+                    "styleId": effective_style,
+                    "degradedFrom": degraded_from,
+                    "degradedReason": degraded_reason,
                     # Tranche 2（PRD-REN-001）：三产物绝对路径
                     "artifacts": {
                         "video": _abs_or_none(video_path),

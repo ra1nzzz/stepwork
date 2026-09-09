@@ -205,6 +205,38 @@ def test_scene_data_reaches_probe_doc_and_born_measured(
     assert result.scene_born_sec == [0.0, 0.1], result.scene_born_sec
 
 
+def test_style_doc_render_end_to_end(tmp_path: Any, chromium: None) -> None:
+    """S3：内置 ink_text 视觉稿在真实浏览器里能出片（含 born 实测）。
+
+    不传任何显式文档 → 渲染器按 style_id=ink_text 取内置稿。这同时证明
+    内置稿满足逐帧契约、共享骨架 + 画面函数拼接没有 JS 语法错。
+    """
+    audio = _audio(tmp_path)
+    scenes = [
+        RenderScene(seq=0, text="纸墨第一幕。", start_sec=0.0, duration_sec=0.1),
+        RenderScene(seq=1, text="纸墨第二幕。", start_sec=0.1, duration_sec=0.1),
+    ]
+    r = PlaywrightRenderer(
+        _runner(),
+        ffmpeg_bin=FAKE,
+        duration_seconds=0.2,  # 0.2s × 25 = 5 帧
+        warmup_ms=50,
+    )
+    result = r.render(
+        RenderSpec(source_version_id="cv-style", fps=25, style_id="ink_text", scenes=scenes),
+        audio,
+        lambda _p: None,
+        threading.Event(),
+    )
+    assert result.video_uri.endswith("draft_cv-style.mp4")
+    out = result.video_uri.replace("file://", "")
+    assert os.path.isfile(out)
+    report = json.loads(open(out, encoding="utf-8").read())
+    assert report["frames"] == 5, report
+    # ink_text 无前摇 → __getSentBorn 实测 = startSec
+    assert result.scene_born_sec == [0.0, 0.1], result.scene_born_sec
+
+
 def test_render_cancel_no_zombie(tmp_path: Any, chromium: None, monkeypatch: Any) -> None:
     doc = tmp_path / "doc.html"
     doc.write_text(TINY_DOC, encoding="utf-8")
