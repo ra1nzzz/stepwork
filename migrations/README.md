@@ -22,6 +22,13 @@ NNNN_description.sql
 | 0003 | `0003_agent_placeholder.sql` | Agent / Publisher / Provenance 占位表 | ✅ W1 |
 | 0004 | `0004_plugin_registry.sql` | 插件注册表（installed_plugins） | ✅ W8 |
 | 0005 | `0005_brand_profiles.sql` | brand_profiles 表 + audit_events 补 event_type/payload + platform_variants 补 project_id/video_version_id | ✅ Tranche 2 |
+| 0006 | `0006_plugin_trust_tier.sql` | installed_plugins 补 trust_tier（插件信任分级） | ✅ W8 |
+| 0007 | `0007_project_tags_access.sql` | 项目标签与访问控制 | ✅ W8 |
+| 0008 | `0008_brand_reference_scripts.sql` | brand_reference_scripts（历史范文）+ user_preference_events（采纳/改写/丢弃偏好） | ✅ Tranche 2 |
+| 0009 | `0009_idempotency.sql` | 命令幂等表 | ✅ W9 |
+| 0010 | `0010_scheduled_publishes.sql` | 定时发布表 | ✅ W9 |
+| 0011 | `0011_command_metrics.sql` | command_metrics（命令级本地指标：耗时/错误码/correlation_id） | ✅ W9 |
+| 0012 | `0012_video_scenes.sql` | video_scenes（分幕事实表：配音/配图/起止秒/时长；S2 地基） | ✅ S2 |
 
 ## 执行规则
 
