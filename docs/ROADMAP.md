@@ -62,16 +62,24 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
 
 ---
 
-### S2 · 打通：一条流水线端到端
+### S2 · 打通：一条流水线端到端 🔜 进行中
 
 **目标**：选题 → 文案 → 配音 → 配图 → 渲染，全链路跑通（插画版）。
 
+**已完成（2026-09-09，S1 衔接部分）**
+- [x] `JobStage.ILLUSTRATING = "illustrating"`（`models.py`，只增不改名）
+- [x] `migrations/0012_video_scenes.sql` + `.down.sql`（分幕事实表，真往返测试通过）
+- [x] `RenderSpec.design_doc_uri`（`background_uri` 降为遗留别名）
+- [x] per-request renderer hint（`payload.renderer`，补 P4 缺口）
+- [x] `pyproject.toml` 加 `[project.optional-dependencies].render`
+
+**待办**（含选型前置依赖，见 [`COMPLETED.md` §1.5 剩余遗留项](./COMPLETED.md#15-s1--playwright-逐帧渲染器-s1探路-2026-09-08)）
+
 **内容**
+- **⏭ 第一件事**：`repos.video_scenes` + 至少一个命令总线入口（表已建但无代码读写=空表）
 - 新增 `worker/runtime/providers/image/{base,stepfun}.py`（照 `ai/base.py` 范式）+ `resolve_image`
-- `JobStage` 加 `ILLUSTRATING = "illustrating"`
-- 新增 `migrations/0012_video_scenes.sql`：`video_scenes(id, version_id, seq, text, emotion, highlight, audio_uri, image_uri, start_sec, duration_sec)`
+  —— ⚠️ **接口先于厂商实现**：StepFun 生图 2026-10-10 下线，选型未定，别把接口绑死某家
 - TTS 加 stepfun 复刻音色 provider（含 `atempo` 语速归一化 + MD5 缓存判重）
-- `RenderSpec` 扩 `style_id` / `art_style` / `image_set_id`
 
 **验收**
 - [ ] 一条 60 秒以上成片，字幕与配音对齐（抽帧检测 ≥ 5 个时间点有字）

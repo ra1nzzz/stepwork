@@ -115,6 +115,17 @@
 
 **新增遗留项**（写给 S2）——见 [§5 文档治理 / 新增未完成项](#5-文档治理)
 
+**S1 → S2 衔接（2026-09-09 · 本轮清理结果）**
+
+| 项 | 落点 | 说明 |
+|---|---|---|
+| per-request renderer hint | `resolve.py::renderer_from_hint` + `handlers/render_source.py` | `payload.renderer`（字符串或 `{"kind": ...}`）覆盖 `deps.renderer`；复用调用方 `FFmpegRunner`；缺失/未知回落默认。**补上 P4 缺口**——只靠 env 时同一进程无法按项目换渲染器 |
+| `design_doc_uri` 正名 | `models.py::RenderSpec` + `providers/renderer/playwright.py` | 新增字段作正名，`background_uri` 降为遗留别名（优先级：design_doc_uri → background_uri → 构造参数 → 内置探路文档），避免单字段多义 |
+| `render` 可选依赖 | `pyproject.toml` | `[project.optional-dependencies].render = ["playwright>=1.40"]`；装完仍需 `playwright install chromium`（pip 装不了浏览器二进制） |
+| `JobStage.ILLUSTRATING` | `models.py::JobStage` | 配图阶段；只增不改名，既有 11 个取值不变（`jobs.stage` 列是 TEXT，无 CHECK 约束） |
+| `video_scenes` 表 | `migrations/0012_video_scenes.sql` + `.down.sql` | S2 地基：`(id, version_id, seq, text, emotion, highlight, audio_uri, image_uri, start_sec, duration_sec, born_at_sec, created_at)`；`UNIQUE(version_id, seq)` 防并发写幕互相覆盖 |
+| 迁移清单漂移修复 | `migrations/README.md` | 清单原停在 0005，补登记 0006–0012（README 自己规定「新增迁移必须追加一行」，此前 6 个版本漏登） |
+
 ---
 
 ## 2. 已验证的创作流水线（本 workspace 资产，可直接搬）
@@ -180,10 +191,13 @@ plugins/{official,registry}
 | 2026-09-08 | 核实 StepFun 生图 2026-10-10 下线（官方无替代模型） |
 | 2026-09-08 | **S1 完成**：Playwright 逐帧渲染器探路通过；ROADMAP 打勾、COMPLETED §1.5 入账、REFERENCE 登记新依赖；详见上方 §1.5 |
 
-**S1 新增遗留项（S2 第一件事）**
+**S2 剩余遗留项（2026-09-09 更新）**
 
-1. **`RenderSpec.style_id` 当前仅作默认值字段**，未被 `PlaywrightRenderer` / `FFmpegRenderer` 消费；S3 模板层按能力声明（`{image}`/`{}`）选型时接通
-2. **`STEPWORK_RENDER_PROVIDER` 只支持 env，**不支持 per-request hint**（`payload.renderer`）；如要让 GUI 端能动态切换渲染器，须在 `handlers/render_source.py` 加 per-request 路由（与 `ai_provider_from_at` 同型）——不引入会导致 P4 落空
-3. **`background_uri` 复用为「渲染文档 URI」语义**（原语义是「背景图」）；S3 模板层应考虑拆 `design_doc_uri` 独立字段，避免单字段多义
-4. **Playwright 浏览器二进制**需用户手动 `playwright install chromium`；建议在 `pyproject.toml` 加 `[project.optional-dependencies].render-playwright` 把 playwright 与 chromium 安装一起打包
-5. **抽帧目检撞切句瞬间仍会取到空字幕**：当前脚本照搬「先回 0.8s 再跳」的兜底，但 design.html 没暴露 `__getSentBorn`，修正无法生效；S2 与 `video_scenes` 表一起补 `born_at_sec` 字段后，可让脚本稳定取样
+1. ~~**per-request renderer hint**~~ → ✅ 已落地（见上表）
+2. ~~**`background_uri` 多义**~~ → ✅ 已拆 `design_doc_uri`（见上表）
+3. ~~**Playwright 依赖未声明**~~ → ✅ 已加 `[project.optional-dependencies].render`
+4. **抽帧目检撞切句瞬间取空字幕** → `video_scenes.born_at_sec` 列已建；待 S2 有代码写幕时回填，目检脚本改读该列（不再依赖 `__getSentBorn`）
+5. **`RenderSpec.style_id` / `art_style` / `image_set_id` 仍未被 Renderer 消费** —— S3 模板层按能力声明（`{image}` / `{}`）选型时接通
+6. **生图 Provider 选型未定**：StepFun 生图 2026-10-10 下线，`REFERENCE.md §6` 标「未定」（通义万相 / CogView-4 / 硅基流动 / 本地 SDXL 待实测）。**S2 的 image provider 接口应先于厂商实现落地**，别把接口绑死在某家
+7. **TTS Provider（stepfun 复刻音色）未做**：`atempo` 语速归一化 + MD5&字节数双判据缓存均已验证，照搬即可
+8. ⚠️ **`video_scenes` 表尚无 repo 层与命令总线入口**：表已建但没有任何代码读写它。**S2 下一步必须先补 `repos.video_scenes` + 至少一个命令**，否则就是一张空表（正是本仓「空壳目录」的老毛病，别重犯）
