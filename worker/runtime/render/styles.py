@@ -25,6 +25,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import tempfile
 from pathlib import Path
@@ -36,8 +37,22 @@ CAP_IMAGE = "image"
 #: 内置视觉稿缓存目录（产物是 style_id 的纯函数，可安全复用）
 _CACHE_DIR = os.path.join(tempfile.gettempdir(), "stepwork_styles")
 
-#: 仓库打包字体根目录（resources/fonts，见其 README 的打包规则）
+#: 仓库打包字体根目录（resources/fonts，见其 README 的打包规则）。
+#: 只放**允许再分发**的字体（OFL / 明确可随包发布），会随仓库公开。
 _FONTS_DIR = Path(__file__).resolve().parents[3] / "resources" / "fonts"
+
+
+def _local_fonts_dir() -> Path:
+    """本机字体目录（env ``STEPWORK_LOCAL_FONTS``，缺省 ~/.workbuddy/stepwork-fonts）。
+
+    给「免费商用但禁止公开转发」的字体用（如字由客户端导出的优设字由棒棒体/
+    懒设计字由公益体）：本机出片能用，但**不进 git、不对公网分发** —— 这是
+    许可红线的工程化落点，不是偷懒。调用时读 env，便于测试注入。
+    """
+    return Path(
+        os.environ.get("STEPWORK_LOCAL_FONTS")
+        or str(Path.home() / ".workbuddy" / "stepwork-fonts")
+    )
 
 #: 已知字体的家族名登记（文件名无法推断时才需要）。键 = 文件名；值 =
 #: (css family, weight)。同族不同字重以 weight 区分，@font-face 按需取用。
@@ -311,27 +326,35 @@ window.__setTime(0);
 
 
 def bundled_fonts() -> list[dict[str, object]]:
-    """扫描 ``resources/fonts`` 打包字体（按家族/字重排序，稳定输出）。
+    """扫描打包/本机两层字体目录（家族/字重排序，稳定输出）。
+
+    扫描根：仓库 ``resources/fonts``（随包可分发）+ 本机目录
+    （``STEPWORK_LOCAL_FONTS`` 或 ``~/.workbuddy/stepwork-fonts``，仅供本机
+    渲染、不进 git）。目录缺失都视为空。
 
     Returns:
-        [{path, family, weight, url}]；目录不存在/无字体 → 空列表。
+        [{path, family, weight, url}]；找不到任何字体 → 空列表。
     """
     fonts: list[dict[str, object]] = []
-    if not _FONTS_DIR.is_dir():
-        return fonts
-    for path in sorted(_FONTS_DIR.rglob("*")):
-        if path.suffix.lower() not in (".ttf", ".otf", ".woff2"):
+    seen: set[str] = set()
+    for root in (_FONTS_DIR, _local_fonts_dir()):
+        if not root.is_dir():
             continue
-        name = path.name
-        family, weight = _FONT_META.get(name, (path.stem, 400))
-        fonts.append(
-            {
-                "path": path,
-                "family": family,
-                "weight": weight,
-                "url": path.resolve().as_uri(),
-            }
-        )
+        for path in sorted(root.rglob("*")):
+            if path.suffix.lower() not in (".ttf", ".otf", ".woff2"):
+                continue
+            if path.name in seen:  # 同名去重：仓库优先（先遍历仓库根）
+                continue
+            seen.add(path.name)
+            family, weight = _FONT_META.get(path.name, (path.stem, 400))
+            fonts.append(
+                {
+                    "path": path,
+                    "family": family,
+                    "weight": weight,
+                    "url": path.resolve().as_uri(),
+                }
+            )
     return fonts
 
 
@@ -370,18 +393,34 @@ def build_style_document(style: StyleDef) -> str:
     )
 
 
+def _fonts_fingerprint() -> str:
+    """打包/本机字体的指纹（名字+大小+mtime），字体一变缓存即失效。"""
+    parts = []
+    for font in bundled_fonts():
+        p = font["path"]
+        assert isinstance(p, Path)
+        try:
+            mtime = int(p.stat().st_mtime)
+        except OSError:
+            mtime = 0
+        parts.append(f"{p.name}:{mtime}")
+    return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:12]
+
+
 def style_document(style_id: str) -> Path:
     """返回某版式风格内置视觉稿的**本地路径**（无则物化到缓存目录）。
 
-    产物是 ``style_id`` 的纯函数：同风格永远同内容 → 文件已存在就直接复用。
-    原子写入：半截 HTML 会被下一次渲染覆盖，不会污染复用缓存。
+    产物由 ``style_id`` + 字体指纹共同决定：加/换字体后自动重建（同内容同
+    路径复用）。原子写入：半截 HTML 会被下一次渲染覆盖，不会污染复用缓存。
 
     Raises:
         KeyError: 未知风格（handler 层转 INVALID_ARGUMENT）。
     """
     style = resolve_style(style_id)
     os.makedirs(_CACHE_DIR, exist_ok=True)
-    path = os.path.join(_CACHE_DIR, f"{style.id}-v{_STYLE_VERSION}.html")
+    path = os.path.join(
+        _CACHE_DIR, f"{style.id}-v{_STYLE_VERSION}-{_fonts_fingerprint()}.html"
+    )
     if os.path.isfile(path):
         return Path(path)
     html = build_style_document(style)

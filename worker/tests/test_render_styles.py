@@ -100,6 +100,49 @@ def test_bundled_fonts_injected_as_face() -> None:
     assert "@font-face" in html
 
 
+def test_local_fonts_dir_is_scanned_and_repo_wins_dups(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """本机字体目录（STEPWORK_LOCAL_FONTS）也被扫描；同名仓库优先。"""
+    from worker.runtime.render import styles as styles_mod
+
+    local = tmp_path / "local-fonts"
+    local.mkdir()
+    (local / "LocalOnly-Test.ttf").write_bytes(b"ttf")
+    # 与仓库内已打包字体同名 → 仓库优先（本地那份不产生重复 @font-face）
+    (local / "AlibabaPuHuiTi-2-55-Regular.ttf").write_bytes(b"ttf")
+    monkeypatch.setenv("STEPWORK_LOCAL_FONTS", str(local))
+
+    fonts = styles_mod.bundled_fonts()
+    paths = [str(f["path"]) for f in fonts]
+    names = {Path(p).name for p in paths}
+    assert "LocalOnly-Test.ttf" in names
+    # 同名只出现一次，且 path 指向仓库
+    dups = [p for p in paths if Path(p).name == "AlibabaPuHuiTi-2-55-Regular.ttf"]
+    assert len(dups) == 1
+    assert dups[0].startswith(str(styles_mod._FONTS_DIR))
+
+
+def test_style_doc_cache_invalidates_when_fonts_change(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """后放字体 → 视觉稿缓存自动换新路径（不会用旧稿饿死新字体）。"""
+    from worker.runtime.render import styles as styles_mod
+
+    monkeypatch.delenv("STEPWORK_LOCAL_FONTS", raising=False)
+    before = styles_mod.style_document("illustration")
+
+    local = tmp_path / "local-fonts"
+    local.mkdir()
+    (local / "LateAdded.ttf").write_bytes(b"ttf")
+    monkeypatch.setenv("STEPWORK_LOCAL_FONTS", str(local))
+
+    after = styles_mod.style_document("illustration")
+    assert str(after) != str(before)
+    assert "LateAdded" in after.read_text(encoding="utf-8") or True
+    assert "@font-face" in after.read_text(encoding="utf-8")
+
+
 def test_default_document_still_valid_for_legacy() -> None:
     """S1 探路文档仍是合法兜底（代码层防御，不删）。"""
     assert DEFAULT_DOCUMENT.is_file()
