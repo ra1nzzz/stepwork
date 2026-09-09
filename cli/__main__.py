@@ -384,6 +384,44 @@ def build_parser() -> argparse.ArgumentParser:
     wa.set_defaults(command_type="ArchiveWorkspace")
     wa.add_argument("workspace_id", help="工作区 id")
 
+    # ----- scenes（S2：分幕 video_scenes）-----
+    # P4：命令总线加了入口就必须同时给 CLI，否则「GUI 能用 CLI 用不了」。
+    sc = sub.add_parser("scenes", help="分幕命令（S2 video_scenes）")
+    sc_sub = sc.add_subparsers(dest="scenes_action", required=True)
+
+    scs = sc_sub.add_parser("save", help="保存分幕（SaveVideoScenes）")
+    scs.set_defaults(command_type="SaveVideoScenes")
+    scs.add_argument("--version-id", dest="version_id", required=True, help="脚本版本 id")
+    scs.add_argument(
+        "--file",
+        metavar="PATH",
+        help='分幕 JSON 文件：[{"seq":0,"text":"...","highlight":"..."}]',
+    )
+    scs.add_argument(
+        "--stdin", action="store_true", help="从标准输入读取分幕 JSON"
+    )
+    scs.add_argument(
+        "--append",
+        action="store_true",
+        help="追加而非替换（默认替换该版本的全部分幕）",
+    )
+
+    scl = sc_sub.add_parser("list", help="列出分幕（ListVideoScenes）")
+    scl.set_defaults(command_type="ListVideoScenes")
+    scl.add_argument("--version-id", dest="version_id", required=True, help="脚本版本 id")
+
+    scu = sc_sub.add_parser("update", help="回填单幕产出（UpdateVideoScene）")
+    scu.set_defaults(command_type="UpdateVideoScene")
+    scu.add_argument("--scene-id", dest="scene_id", required=True, help="分幕 id")
+    scu.add_argument("--audio-uri", dest="audio_uri", help="该幕配音 uri")
+    scu.add_argument("--image-uri", dest="image_uri", help="该幕配图 uri")
+    scu.add_argument(
+        "--duration-sec", dest="duration_sec", type=float, help="TTS 实测时长（秒）"
+    )
+    scu.add_argument(
+        "--born-at-sec", dest="born_at_sec", type=float, help="该幕首句起始秒（抽帧目检用）"
+    )
+
     # ----- versions（Tranche 2：内容版本查询） -----
     ver = sub.add_parser("versions", help="内容版本查询命令")
     ver_sub = ver.add_subparsers(dest="versions_action", required=True)
@@ -621,6 +659,45 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
                 "parent_version_id": getattr(args, "parent_version_id", None),
             }
         raise ValueError(f"unknown script action: {action!r}")
+
+    if command == "scenes":
+        action = getattr(args, "scenes_action", None)
+        if action == "save":
+            raw = None
+            if getattr(args, "stdin", False):
+                raw = sys.stdin.read()
+            elif getattr(args, "file", None):
+                with open(args.file, encoding="utf-8") as f:
+                    raw = f.read()
+            if not raw:
+                raise ValueError("scenes save requires --file or --stdin")
+            try:
+                scenes = json.loads(raw)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"scenes JSON 解析失败: {e}") from None
+            if not isinstance(scenes, list):
+                raise ValueError("scenes JSON 必须是数组")
+            return {
+                "versionId": args.version_id,
+                "scenes": scenes,
+                # 默认替换；--append 显式改为追加
+                "replace": not getattr(args, "append", False),
+            }
+        if action == "list":
+            return {"versionId": args.version_id}
+        if action == "update":
+            scene_payload: dict[str, Any] = {"sceneId": args.scene_id}
+            # 契约：只回填配音/配图产出，None 一律不下发（handler 会拒空）
+            for camel, value in (
+                ("audioUri", getattr(args, "audio_uri", None)),
+                ("imageUri", getattr(args, "image_uri", None)),
+                ("durationSec", getattr(args, "duration_sec", None)),
+                ("bornAtSec", getattr(args, "born_at_sec", None)),
+            ):
+                if value is not None:
+                    scene_payload[camel] = value
+            return scene_payload
+        raise ValueError(f"unknown scenes action: {action!r}")
 
     if command == "import":
         return _import_payload(args.file)

@@ -952,3 +952,93 @@ def test_idempotency_key_threads_into_envelope(
     captured = _capture_run_command(monkeypatch, {"ok": True, "detail": {}})
     assert main(["--idempotency-key", "run-42", "analyze", "--text", "x"]) == 0
     assert captured["env"]["idempotencyKey"] == "run-42"
+
+
+# ---------------------------------------------------------------------------
+# S2 分幕（scenes）：P4 —— 命令总线加了入口，CLI 必须同时可达
+# ---------------------------------------------------------------------------
+def test_scenes_save_builds_savevideoscenes_payload(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    scene_file = tmp_path / "scenes.json"
+    scene_file.write_text(
+        json.dumps([{"seq": 0, "text": "第一幕", "highlight": "第一幕"}]),
+        encoding="utf-8",
+    )
+    rc = main(["scenes", "save", "--version-id", "cv-1", "--file", str(scene_file)])
+
+    assert rc == 0
+    env = captured["env"]
+    assert env["commandType"] == "SaveVideoScenes"
+    assert env["payload"]["versionId"] == "cv-1"
+    assert env["payload"]["scenes"] == [{"seq": 0, "text": "第一幕", "highlight": "第一幕"}]
+    # 默认替换；--append 才改为追加
+    assert env["payload"]["replace"] is True
+
+
+def test_scenes_save_append_flag_flips_replace(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    scene_file = tmp_path / "s.json"
+    scene_file.write_text('[{"seq": 0, "text": "x"}]', encoding="utf-8")
+    assert (
+        main(
+            [
+                "scenes",
+                "save",
+                "--version-id",
+                "cv-1",
+                "--file",
+                str(scene_file),
+                "--append",
+            ]
+        )
+        == 0
+    )
+    assert captured["env"]["payload"]["replace"] is False
+
+
+def test_scenes_list_builds_listvideoscenes_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    assert main(["scenes", "list", "--version-id", "cv-1"]) == 0
+    env = captured["env"]
+    assert env["commandType"] == "ListVideoScenes"
+    assert env["payload"] == {"versionId": "cv-1"}
+
+
+def test_scenes_update_omits_unset_optional_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """契约：None 一律不下发（handler 会拒空 update）。"""
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    rc = main(
+        [
+            "scenes",
+            "update",
+            "--scene-id",
+            "vs-1",
+            "--duration-sec",
+            "6.946",
+        ]
+    )
+    assert rc == 0
+    env = captured["env"]
+    assert env["commandType"] == "UpdateVideoScene"
+    assert env["payload"] == {"sceneId": "vs-1", "durationSec": 6.946}
+
+
+def test_scenes_save_rejects_malformed_json(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """畸形 JSON 要给出可读的 CLI_ARGUMENT 错误，而不是 traceback。"""
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json", encoding="utf-8")
+    rc = main(["scenes", "save", "--version-id", "cv-1", "--file", str(bad)])
+    assert rc == 2  # 2 = 用法错误（参数问题），与命令执行失败区分
+    # 没走到 dispatch：畸形输入不该发到 worker
+    assert "env" not in captured
