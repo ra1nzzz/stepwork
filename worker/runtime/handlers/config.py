@@ -51,6 +51,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "baseUrl": "",
         "model": "StepAudio",
         "costPer1k": "0.008",
+        # 复刻音色 id（stepfun 必需）。缺省会退化成「换了个主播」，
+        # resolve_tts 宁可返回 None（UNAVAILABLE）也不拿默认音色出片
+        "voice": "",
     },
     "workspace": {"defaultPath": ""},
     "brand": {
@@ -164,6 +167,9 @@ def _derive_resolved(cfg: dict[str, Any]) -> dict[str, Any]:
             "provider": tts.get("provider"),
             "model": tts.get("model"),
             "hasKey": bool(tts.get("apiKey")),
+            # 复刻音色 provider（stepfun）缺 voice 就等于没法说话，
+            # 单独暴露出来，免得「配了 key 却还是 UNAVAILABLE」无从查起
+            "hasVoice": bool(tts.get("voice")),
         },
         "image": {
             "provider": image.get("provider"),

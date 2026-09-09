@@ -13,7 +13,8 @@ import { persist, createJSONStorage } from "zustand/middleware";
 
 export type LlmProvider = "cloud" | "openai-compatible" | "ollama";
 export type AsrProvider = "local" | "cloud";
-export type TtsProvider = "local" | "cloud";
+/** 与后端 ``resolve_tts`` 的 kind 对齐；``stepfun`` = 复刻音色（需 voice id） */
+export type TtsProvider = "local" | "cloud" | "edge" | "stepfun";
 export type ExportFormat = "MP4" | "SRT" | "WAV";
 export type Theme = "dark" | "light";
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -37,6 +38,8 @@ export interface TtsConfig {
   apiKey: string;
   baseUrl: string;
   model: string;
+  /** 复刻音色 id（stepfun 必需，形如 voice-tone-xxxx）；缺省会退化成默认音色 */
+  voice: string;
 }
 export interface WorkspaceConfig {
   /** 项目默认文件夹 / STEPWORK_HOME */
@@ -90,7 +93,7 @@ const DEFAULT_SETTINGS: SettingsConfig = {
     sampling: { temperature: 0.7, topP: 0.9, maxTokens: 2048 },
   },
   asr: { provider: "cloud", apiKey: "", baseUrl: "" },
-  tts: { provider: "cloud", apiKey: "", baseUrl: "", model: "StepAudio" },
+  tts: { provider: "cloud", apiKey: "", baseUrl: "", model: "StepAudio", voice: "" },
   workspace: { defaultPath: "" },
   brand: {
     name: "科技实测 · 克制判断",

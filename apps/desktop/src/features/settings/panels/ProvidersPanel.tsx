@@ -167,6 +167,8 @@ export function ProvidersPanel({
         >
           <option value="local">local</option>
           <option value="cloud">cloud</option>
+          <option value="edge">edge</option>
+          <option value="stepfun">stepfun（复刻音色）</option>
         </select>
       </div>
       <KeyField
@@ -193,6 +195,16 @@ export function ProvidersPanel({
           className="field"
           value={tts.model}
           onChange={(e) => update({ tts: { ...tts, model: e.target.value } })}
+        />
+      </div>
+      <div className="form-row">
+        <label htmlFor="ttsVoice">复刻音色 ID</label>
+        <input
+          id="ttsVoice"
+          className="field"
+          placeholder="stepfun 复刻音色必填，如 voice-tone-xxxx"
+          value={tts.voice}
+          onChange={(e) => update({ tts: { ...tts, voice: e.target.value } })}
         />
       </div>
 

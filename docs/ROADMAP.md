@@ -176,7 +176,8 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
       素材与驱动：`.workbuddy/s4-acceptance/`（mapping.json 存真实对应）
 
 **待办（收尾）**
-- 前端「创作者风格」下拉 → 归 S6；stepfun 复刻音色 TTS provider（§S2 待办）
+- 前端「创作者风格」下拉 → 归 S6
+- ~~stepfun 复刻音色 TTS provider~~ → ✅ 已落地（2026-09-09，见 `COMPLETED` 文档治理第 7 条）
 
 **验收**
 - [x] 切换 profile 后，同一选题的文案风格可被区分（人工盲评 2/2 正确）

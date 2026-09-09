@@ -462,7 +462,12 @@ export interface ConfigView {
   resolved: {
     ai: { provider: string | null; model: string | null; hasKey: boolean };
     asr: { provider: string | null; hasKey: boolean };
-    tts: { provider: string | null; model: string | null; hasKey: boolean };
+    tts: {
+      provider: string | null;
+      model: string | null;
+      hasKey: boolean;
+      hasVoice: boolean;
+    };
     image: { provider: string | null; model: string | null; hasKey: boolean };
   };
 }

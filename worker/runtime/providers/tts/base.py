@@ -9,6 +9,19 @@ from __future__ import annotations
 from typing import Any, Protocol, runtime_checkable
 
 
+class TTSError(RuntimeError):
+    """TTS 调用失败。
+
+    为什么继承 ``RuntimeError`` 而不是自定义 ``Exception``：handler 转译时
+    用的是 ``f"{type(e).__name__}: {e}"``，类名会**直接进用户可见的错误
+    串**——所以类名必须是人能读懂的词，不能是 ``TtsUpstreamFailure`` 这种
+    只有开发者看得懂的代号。详见 :class:`ImageProviderError`（同因）。
+
+    消息必须带**厂商响应体片段**：模型不存在 / 余额不足 / 音色 id 失效，
+    原因全在 body 里，只报 ``HTTP 400`` 等于没报。
+    """
+
+
 @runtime_checkable
 class TTSProvider(Protocol):
     """旁白（Text-to-Speech）Provider 协议。"""

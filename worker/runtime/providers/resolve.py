@@ -40,6 +40,7 @@ from worker.runtime.providers.renderer.ffmpeg import FFmpegRenderer
 from worker.runtime.providers.tts.base import TTSProvider
 from worker.runtime.providers.tts.cloud import CloudTTSProvider
 from worker.runtime.providers.tts.local import LocalTTSProvider
+from worker.runtime.providers.tts.stepfun import StepFunTTSProvider
 from worker.runtime.render.ffmpeg_runner import FFmpegRunner
 
 
@@ -246,6 +247,9 @@ def resolve_tts(workspace_id: str | None = None) -> TTSProvider | None:
     - ``edge``（``edge-tts``）：微软在线神经语音（可选依赖 ``.[tts]``；
       未安装则回退 ``None`` → ``UNAVAILABLE``）；声线取
       ``STEPWORK_TTS_VOICE`` / 覆盖层 / provider 默认。
+    - ``stepfun``：复刻音色（``stepaudio-2.5-tts``），需
+      ``STEPWORK_TTS_API_KEY`` + ``STEPWORK_TTS_VOICE``（音色 id），
+      否则回退 ``None``。
     - ``cloud``：需 ``STEPWORK_TTS_API_KEY`` + ``STEPWORK_TTS_BASE_URL``，
       否则回退 ``None``。
     env 缺失时回退到 ``workspace_id`` 的密钥覆盖层。
@@ -263,6 +267,28 @@ def resolve_tts(workspace_id: str | None = None) -> TTSProvider | None:
         from worker.runtime.providers.tts.edge import EdgeTTSProvider
 
         return EdgeTTSProvider(voice=voice)
+    if kind in ("stepfun", "stepfun-tts", "stepfun_tts"):
+        ov = _override_for(workspace_id, "tts")
+        key = _env("STEPWORK_TTS_API_KEY") or str(ov.get("apiKey") or "")
+        voice = _env("STEPWORK_TTS_VOICE") or str(ov.get("voice") or "")
+        # 复刻音色缺音色 id 等于没法说话：宁可 UNAVAILABLE 也别拿默认音色出片
+        if not key or not voice:
+            return None
+        kwargs: dict[str, Any] = {}
+        tts_model = _env("STEPWORK_TTS_MODEL") or str(ov.get("model") or "")
+        if tts_model:
+            kwargs["model"] = tts_model
+        base_url = _env("STEPWORK_TTS_BASE_URL") or str(ov.get("baseUrl") or "")
+        if base_url:
+            kwargs["base_url"] = base_url
+        # 非法语速视为未配置，回落到 provider 默认值（1.25）
+        raw_speed = _env("STEPWORK_TTS_SPEED") or ov.get("speed")
+        if raw_speed not in (None, ""):
+            try:
+                kwargs["speed"] = float(raw_speed)
+            except (TypeError, ValueError):
+                pass
+        return StepFunTTSProvider(api_key=key, voice=voice, **kwargs)
     if kind == "cloud":
         ov = _override_for(workspace_id, "tts")
         key = _env("STEPWORK_TTS_API_KEY") or str(ov.get("apiKey") or "")

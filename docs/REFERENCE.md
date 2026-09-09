@@ -125,7 +125,7 @@
 | 资产 | 来源项目 | 复用方式 | 对应模块 |
 |---|---|---|---|
 | Playwright 逐帧渲染 + ffmpeg 管道 | `gender-video/scripts/render.py` | 直接 | ✅ S1 `providers/renderer/playwright.py`（已落地） |
-| stepfun 复刻音色 + atempo 归一化 + MD5 缓存判重 | `*/scripts/gen_tts.py` | 直接 | S2 TTS provider |
+| stepfun 复刻音色 + atempo 归一化 + MD5 缓存判重 | `*/scripts/gen_tts.py` | 直接 | ✅ S2 `providers/tts/stepfun.py`（已落地，2026-09-09 真机验收） |
 | 音频拼接 + timeline 生成 | `*/scripts/build_audio.py` | 直接 | S2 compose |
 | 分幕数据契约（`scenes.json`） | `*/scenes.json` | 直接 | S2 `video_scenes` 表设计 |
 | 视觉模板（楷体/Ken Burns/不闪烁/分屏特写） | `*/design_*.html` | 直接 | S3 模板层 |

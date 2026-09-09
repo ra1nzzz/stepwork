@@ -203,7 +203,18 @@ plugins/{official,registry}
    不再依赖 `__getSentBorn`
 5. **`RenderSpec.style_id` / `art_style` / `image_set_id` 仍未被 Renderer 消费** —— S3 模板层按能力声明（`{image}` / `{}`）选型时接通
 6. **生图 Provider 选型未定**：StepFun 生图 2026-10-10 下线，`REFERENCE.md §6` 标「未定」（通义万相 / CogView-4 / 硅基流动 / 本地 SDXL 待实测）。**image provider 接口已先落地**（`ImageProvider` 协议），厂商适配器后补
-7. **TTS Provider（stepfun 复刻音色）未做**：`atempo` 语速归一化 + MD5&字节数双判据缓存均已验证，照搬即可
+7. ✅ **TTS Provider（stepfun 复刻音色）已落地**（2026-09-09）：
+   `providers/tts/stepfun.py` + `resolve_tts(kind=stepfun)` +
+   设置页 `tts.voice`（复刻音色 id）+ 前端 provider 下拉补 `edge` / `stepfun`。
+   **真机验收通过**（`.workbuddy/tts-acceptance/`，本机密钥 +
+   `voice-tone-U9dkIJs8Ey`）：两句各出 mp3，MD5 不同（未命中错误缓存）、
+   时长可实测、语速归一化生效（5.31→5.99、4.63→5.42 字/秒，目标 6.0）。
+   三个踩过的坑已写进实现：① 复刻音色走 `/step_plan/v1/audio/speech`
+   （少了 `step_plan` 直接 404）；② **命中错误缓存**（不同文本返回同一段
+   固定音频）判据用 **MD5**（只比字节数 CBR 会撞车误报），命中即报错；
+   ③ `instruction` 里写「缓慢/舒缓」会盖过 `speed`（实测差 1.4 倍），
+   故按 字/秒 `atempo` 归一化（不变调；单次 0.5–2.0，超出串联）。
+   **未验**：音频内容正确性需人工听一遍（本机 ASR 是假实现，不能自检）
 8. ✅ **`video_scenes` 读写层已补**（repo + 3 命令 + CLI + Agent 白名单）—— 表不再空转
 9. ✅ **分幕已有「生产端」调用方**（2026-09-09）：新增 `script/segment.py`
    （确定性切分纯函数）+ `jobs.lifecycle.persist_script_scenes`，

@@ -309,7 +309,15 @@ function deriveResolved(s: SettingsConfig): ConfigResult["resolved"] {
   return {
     ai: { provider: s.llm.provider, model: s.llm.model, hasKey: !!s.llm.apiKey },
     asr: { provider: s.asr.provider, hasKey: !!s.asr.apiKey },
-    tts: { provider: s.tts.provider, model: s.tts.model, hasKey: !!s.tts.apiKey },
+    tts: {
+      provider: s.tts.provider,
+      model: s.tts.model,
+      hasKey: !!s.tts.apiKey,
+      hasVoice: !!s.tts.voice,
+    },
+    // 配图段后端已支持，但设置页暂无 UI：bridge 未启用时按「未配置」降级，
+    // 不能因为缺字段就让整个摘要编译不过
+    image: { provider: null, model: null, hasKey: false },
   };
 }
 
