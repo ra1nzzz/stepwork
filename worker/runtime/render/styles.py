@@ -60,6 +60,7 @@ _FONT_META: dict[str, tuple[str, int]] = {
     "AlibabaPuHuiTi-2-55-Regular.ttf": ("Alibaba PuHuiTi", 400),
     "AlibabaPuHuiTi-2-65-Medium.ttf": ("Alibaba PuHuiTi", 500),
     "AlibabaPuHuiTi-2-85-Bold.ttf": ("Alibaba PuHuiTi", 700),
+    "SmileySans-Oblique.ttf": ("Smiley Sans", 400),
 }
 
 
