@@ -12,6 +12,7 @@
 | 来源 | 类型 | 授权 | 复用方式 | 对应模块 |
 |---|---|---|---|---|
 | `github.com/ra1nzzz/YT-Agent-Ontology`（private，PHASE 0 complete） | 母规范仓库 | 自有 | **直接（契约遵循）** | 全局语义层 |
+| `github.com/ra1nzzz/stepwork-hotspot-mcp`（public，0.1.0） | 独立 MCP Server | 自有（AGPL） | **进程外调用**（`AddMcpServer` / `CallMcpTool`） | S5 上游热点发现；零运行时依赖，独立发版 |
 
 **关键引用点**
 

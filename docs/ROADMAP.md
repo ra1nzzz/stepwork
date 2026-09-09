@@ -201,9 +201,28 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
 **验收**
 - [ ] `stepwork-cli` 能列出热点并一键转为 `TopicProposal`
 - [ ] 重复选题被相似度过滤拦截
-- [ ] 该 MCP Server 可独立安装运行（不依赖 STEPWORK）
+- [x] 该 MCP Server 可独立安装运行（不依赖 STEPWORK）
 
 **依赖**：S2。**风险**：需求未验证——建议先做最小版验证真伪，再扩展连接器。
+
+**最小验证结果（2026-09-09）** —— 独立仓库 `ra1nzzz/stepwork-hotspot-mcp`（AGPL，零运行时依赖）
+
+- ✅ **通道已通**：STEPWORK 的 `McpStdioClient` 直连该服务，
+  `initialize` / `tools/list` / `tools/call` 全通，真实出 12 条热点、0 errors
+  （未改 STEPWORK 一行代码）
+- ✅ **能稳定拿到的源**（全部免密钥）：HuggingFace Daily Papers（AI 论文）、
+  GitHub Trending（开源项目）、RSS/Atom（默认少数派，中文）
+- ❌ **拿不到的源**：arXiv（本机连不通）、RSSHub 公共实例（403）、
+  36氪 `/feed`（返回 HTML 不是真 RSS）、InfoQ（451）、微博热搜第三方镜像（不可达）
+- ⚠️ **由此得出的产品结论**：中文「社会热搜」这条线在这台机器上**拿不到**
+  （无官方 RSS + 反爬 + 镜像不可达）。上游形态因此被数据源决定 ——
+  不是「追社会热点」，而是「追技术圈正在讨论什么」
+- ⏸ **待弈韬裁决后再决定是否继续**：这些热点（英文仓库名、英文论文标题、
+  少数派数码文）里有多少是**真会拍**的选题？若命中率低，应换源方向
+  （例如找有官方 RSS 的中文 AI 资讯源）或承认该需求优先级后移
+- 未做（等裁决）：CLI `mcp` 子命令（CLI 现在**没有** mcp 入口，属 S6 的
+  GUI/CLI 对等缺口）、`DiscoverHotspots` 命令 + `hotspot_items` 表、
+  热点 → `GenerateTopic` 的一键转换
 
 ---
 
