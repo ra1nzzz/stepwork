@@ -48,6 +48,7 @@ from worker.runtime.models import (
     CommandResult,
     JobStage,
     JobState,
+    RenderScene,
     RenderSpec,
     VideoDraftMeta,
 )
@@ -168,6 +169,30 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         if deps.tts is None:
             raise DispatchError("UNAVAILABLE", "tts provider not configured")
 
+    # S2：渲染消费分幕 —— 画面按幕切换（文本 / 配图 / 起止秒都来自
+    # video_scenes 的实测值）。Provider 不碰 DB，组装在这里做。
+    # 只取「有实测时长」的幕：时长为 0 的幕没有配音，喂给渲染器会让画面
+    # 与音频错位（配音步骤失败过就是这种半截数据）。
+    timed_scenes = [
+        s
+        for s in repos.video_scenes.list_by_version(spec.source_version_id)
+        if s.duration_sec > 0
+    ]
+    if timed_scenes:
+        spec.scenes = [
+            RenderScene(
+                id=s.id,
+                seq=s.seq,
+                text=s.text,
+                highlight=s.highlight,
+                start_sec=s.start_sec,
+                duration_sec=s.duration_sec,
+                image_uri=s.image_uri,
+                emotion=s.emotion,
+            )
+            for s in timed_scenes
+        ]
+
     cancel_event = threading.Event()
     tts_out_dir = os.path.join(tempfile.gettempdir(), "stepwork_tts")
     async with content_job(
@@ -238,21 +263,27 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
                 audio_duration = probe_audio_duration(audio_path)
                 if audio_duration <= 0 and result.duration_seconds > 0:
                     audio_duration = result.duration_seconds
-                timed = [
-                    s
-                    for s in repos.video_scenes.list_by_version(spec.source_version_id)
-                    if s.duration_sec > 0 and (s.text or "").strip()
-                ]
-                if timed:
-                    subtitles_path = write_srt_text(
-                        video_path, build_srt_from_scenes(timed)
-                    )
+                # 有分幕 → 用实测时间轴；算不出字幕（如全是空幕）才退回等比分配
+                srt_text = (
+                    build_srt_from_scenes(timed_scenes) if timed_scenes else ""
+                )
+                if srt_text:
+                    subtitles_path = write_srt_text(video_path, srt_text)
                 else:
                     subtitles_path = write_srt_sidecar(
                         video_path, src.content or "", audio_duration
                     )
             except OSError:
                 subtitles_path = None
+
+            # 渲染实测的各幕首句出现秒 → 回填（抽帧目检据此前移取样点）。
+            # 长度必须严格对齐：半截列表会让某一幕默默前移错位的秒数。
+            born_sec = list(result.scene_born_sec or [])
+            if born_sec and len(born_sec) == len(timed_scenes):
+                repos.video_scenes.apply_born_times(
+                    spec.source_version_id,
+                    [(s.id, born_sec[i]) for i, s in enumerate(timed_scenes)],
+                )
 
             meta = VideoDraftMeta(
                 video_uri=result.video_uri,

@@ -37,7 +37,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from worker.runtime.models import RenderResult, RenderSpec
+from worker.runtime.models import RenderResult, RenderScene, RenderSpec
 from worker.runtime.render.ffmpeg_runner import (
     FFmpegFailed,
     FFmpegRunner,
@@ -59,6 +59,35 @@ class PlaywrightUnavailable(Exception):
 
 class PlaywrightRenderError(Exception):
     """渲染文档不满足逐帧契约（缺 ``window.__setTime`` / 页面报错 / 时长非法）。"""
+
+
+def _scene_image_uri(raw: str) -> str:
+    """配图路径 → 页面可用的 ``file://`` uri；文件缺失直接报错。
+
+    缺失不降级为「裂图」：配图挂了渲出来就是一张破图，属于静默出坏片，
+    必须当场失败让人看见（与 S2「生图失败不是静默空片」同一条原则）。
+    """
+    path = Path(raw.replace("file://", "")).resolve()
+    if not path.is_file():
+        raise PlaywrightRenderError(f"scene image not found: {path}")
+    return path.as_uri()
+
+
+def _scenes_payload(scenes: list[RenderScene] | None) -> list[dict[str, Any]]:
+    """分幕 → 注入视觉稿的 JSON（``window.SCENES``）。"""
+    if not scenes:
+        return []
+    return [
+        {
+            "seq": s.seq,
+            "text": s.text,
+            "highlight": s.highlight,
+            "startSec": s.start_sec,
+            "durationSec": s.duration_sec,
+            "imageUri": _scene_image_uri(s.image_uri) if s.image_uri else None,
+        }
+        for s in scenes
+    ]
 
 
 def _safe_id(raw: str) -> str:
@@ -120,6 +149,8 @@ class PlaywrightRenderer:
         self.timeout_sec = timeout_sec
         #: 最近一次 ffmpeg 子进程句柄（测试据此断言「取消后已回收」）
         self.last_proc: subprocess.Popen[Any] | None = None
+        #: 上一次渲染实测到的各幕首句出现秒（``__getSentBorn``）；见 RenderResult
+        self.last_born_sec: list[float] = []
 
     # ------------------------------------------------------------------
     # RendererProvider
@@ -184,12 +215,15 @@ class PlaywrightRenderer:
         if self.ffmpeg_bin is not None:
             args = [self.ffmpeg_bin, *args]
 
+        # 每轮渲染先清空：上一轮的实测值绝不能泄漏到这一轮的结果里
+        self.last_born_sec = []
         proc = self.runner.spawn(args)
         self.last_proc = proc
         progress_cb(0.0)
         try:
             self._feed_frames(
-                proc, nframes, fps, w, h, doc_path, progress_cb, cancel_event
+                proc, nframes, fps, w, h, doc_path, progress_cb, cancel_event,
+                spec.scenes,
             )
             _close_stdin(proc)
             self.runner.supervise(
@@ -216,11 +250,39 @@ class PlaywrightRenderer:
             tts_engine=spec.tts_engine.value
             if isinstance(spec.tts_engine, str)
             else str(spec.tts_engine),
+            # 视觉稿没暴露 __getSentBorn 时为空列表（「没测到」，不是 0）
+            scene_born_sec=self.last_born_sec,
         )
 
     # ------------------------------------------------------------------
     # 内部
     # ------------------------------------------------------------------
+    def _collect_born_sec(self, page: Any, scene_count: int) -> None:
+        """实测各幕首句在画面上的出现秒（视觉稿需暴露 ``__getSentBorn``）。
+
+        抽帧目检撞在切句瞬间会取到空字幕，据此前移取样点（S1 遗留项）。
+        取不到（文档没暴露 / 中途返回 null）就**整体不填** —— 半截的
+        born 列表比没有更危险，它会让某一幕默默前移错位的秒数。
+        """
+        if scene_count <= 0:
+            return
+        if not page.evaluate("typeof window.__getSentBorn === 'function'"):
+            return
+        born: list[float] = []
+        for i in range(scene_count):
+            try:
+                value = page.evaluate(f"window.__getSentBorn({i})")
+            except Exception:  # noqa: BLE001 - 文档脚本异常按「取不到」处理
+                return
+            if value is None:
+                return
+            try:
+                born.append(float(value))
+            except (TypeError, ValueError):
+                return
+        if len(born) == scene_count:
+            self.last_born_sec = born
+
     def _feed_frames(
         self,
         proc: subprocess.Popen[Any],
@@ -231,6 +293,7 @@ class PlaywrightRenderer:
         doc_path: str,
         progress_cb: Callable[[float], None],
         cancel_event: Any,
+        scenes: list[RenderScene] | None = None,
     ) -> None:
         """逐帧截图写入 ffmpeg stdin；取消时提前返回（不抛，交给 supervise）。"""
         try:
@@ -241,10 +304,19 @@ class PlaywrightRenderer:
                 "and `playwright install chromium`"
             ) from exc
 
-        durations = self.scene_durations or []
+        durations = (
+            [s.duration_sec for s in scenes]
+            if scenes
+            else (self.scene_durations or [])
+        )
         url = Path(doc_path).resolve().as_uri()
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=self.headless)
+            # --allow-file-access-from-files：视觉稿是 file:// 页面，要显示
+            # 同为本机文件的配图（``<img src="file:///...">``）必须开这个，
+            # 否则 Chromium 默认拒绝 file→file 访问，图全裂。
+            browser = pw.chromium.launch(
+                headless=self.headless, args=["--allow-file-access-from-files"]
+            )
             try:
                 page = browser.new_page(
                     viewport={"width": width, "height": height},
@@ -252,8 +324,13 @@ class PlaywrightRenderer:
                 )
                 page_errors: list[str] = []
                 page.on("pageerror", lambda e: page_errors.append(str(e)))
+                # SCENE_DURATIONS 是 S1 就有的契约（老视觉稿只认它）；
+                # SCENES 是 S2 的完整分幕（文本 / 配图 / 高亮）。
                 page.add_init_script(
                     script="window.SCENE_DURATIONS=" + json.dumps(durations) + ";"
+                )
+                page.add_init_script(
+                    script="window.SCENES=" + json.dumps(_scenes_payload(scenes)) + ";"
                 )
                 page.goto(url)
                 page.wait_for_timeout(self.warmup_ms)
@@ -265,6 +342,7 @@ class PlaywrightRenderer:
                     raise PlaywrightRenderError(
                         f"document does not define window.__setTime: {doc_path}"
                     )
+                self._collect_born_sec(page, len(scenes or []))
                 stdin = proc.stdin
                 if stdin is None:
                     raise PlaywrightRenderError("ffmpeg stdin unavailable")

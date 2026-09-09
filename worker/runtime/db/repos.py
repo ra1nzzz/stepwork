@@ -481,6 +481,24 @@ class VideoSceneRepo:
             [(s.audio_uri, s.duration_sec, s.start_sec, s.id) for s in scenes],
         )
 
+    def apply_born_times(
+        self, version_id: str, rows: list[tuple[str, float]]
+    ) -> int:
+        """**单事务**回填各幕首句出现秒（``born_at_sec``）。
+
+        ``rows`` 为 ``(scene_id, born_sec)``。抽帧目检撞在切句瞬间会取到空
+        字幕，这个值让取样点可以前移（S1 遗留项，由渲染步骤实测填入）。
+
+        Returns:
+            更新行数。
+        """
+        with self.conn:
+            self.conn.executemany(
+                "UPDATE video_scenes SET born_at_sec=? WHERE id=? AND version_id=?",
+                [(born, scene_id, version_id) for scene_id, born in rows],
+            )
+        return len(rows)
+
     def apply_images(self, version_id: str, scenes: list[VideoScene]) -> int:
         """**单事务**回填各幕配图（``image_uri``）。
 

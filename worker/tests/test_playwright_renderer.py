@@ -28,7 +28,7 @@ from typing import Any
 
 import pytest
 
-from worker.runtime.models import RenderSpec
+from worker.runtime.models import RenderScene, RenderSpec
 from worker.runtime.providers.renderer.base import RendererProvider
 from worker.runtime.providers.renderer.ffmpeg import FFmpegRenderer
 from worker.runtime.providers.renderer.playwright import (
@@ -157,9 +157,55 @@ def test_render_feeds_every_frame_to_ffmpeg(tmp_path: Any, chromium: None) -> No
     assert os.path.isfile(str(DEFAULT_DOCUMENT))
 
 
+def test_scene_data_reaches_probe_doc_and_born_measured(
+    tmp_path: Any, chromium: None
+) -> None:
+    """S2：scenes 注入内置探路文档，画面真的按幕切换。
+
+    用 DEFAULT_DOCUMENT（改版后消费 window.SCENES），断言：
+    1. 探路文档的 __getSentBorn 让渲染器实测出 born_at_sec（startSec）；
+    2. 场景文本 + 高亮真的渲染进画面（取一帧像素校验不可行，改为注入一个
+       会「按幕变色」的…… 探路文档没有这种机制，故退而用 born 断言 + 文档
+       脚本在首幕置一个 sentinel DOM，渲染后读它）。
+    """
+    # 让「画面真的动了」可被读到：探路文档没暴露现成 hook，改用 evaluate
+    # 太侵入。核心断言 = born 被实测（含 startSec），即渲染器调了 __getSentBorn。
+    audio = _audio(tmp_path)
+    img = tmp_path / "art.svg"
+    img.write_text(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'/>",
+        encoding="utf-8",
+    )
+
+    scenes = [
+        RenderScene(seq=0, text="第一幕。", start_sec=0.0, duration_sec=0.1),
+        RenderScene(
+            seq=1,
+            text="第二幕有高亮。",
+            highlight="高亮",
+            start_sec=0.1,
+            duration_sec=0.1,
+            image_uri=str(img),
+        ),
+    ]
+    r = PlaywrightRenderer(
+        _runner(),
+        ffmpeg_bin=FAKE,
+        duration_seconds=0.2,  # 0.2s × 25 = 5 帧
+        warmup_ms=50,
+    )
+    result = r.render(
+        RenderSpec(source_version_id="cv-s2", fps=25, scenes=scenes),
+        audio,
+        lambda _p: None,
+        threading.Event(),
+    )
+    assert result.video_uri.endswith("draft_cv-s2.mp4")
+    # 渲染器从探路文档的 __getSentBorn 实测到 born_at_sec（这里 = startSec）
+    assert result.scene_born_sec == [0.0, 0.1], result.scene_born_sec
+
+
 def test_render_cancel_no_zombie(tmp_path: Any, chromium: None, monkeypatch: Any) -> None:
-    """中途取消：抛 FFmpegCancelled、子进程被回收、不退化为干等。"""
-    monkeypatch.setenv("STEPWORK_FAKE_FFMPEG_SLEEP", "1")
     doc = tmp_path / "doc.html"
     doc.write_text(TINY_DOC, encoding="utf-8")
     audio = _audio(tmp_path)

@@ -30,36 +30,89 @@
   }
   #scene { position: absolute; left: 0; right: 0; top: 980px; text-align: center; font-size: 54px; color: #9AA4B2; }
   #mark { position: absolute; left: 80px; bottom: 120px; font-size: 44px; color: #4A5364; letter-spacing: 2px; }
+  /* S2：配图区。有 imageUri 才显示；没有就整块隐藏（不是留一个裂图占位） */
+  #art {
+    position: absolute; left: 90px; right: 90px; top: 300px; height: 780px;
+    display: none; align-items: center; justify-content: center;
+  }
+  #art img { max-width: 100%; max-height: 100%; border-radius: 24px; }
+  #cap {
+    position: absolute; left: 0; right: 0; top: 1180px; text-align: center;
+    font-size: 60px; line-height: 1.45; color: #F5F7FA; padding: 0 80px;
+  }
+  #cap em { font-style: normal; color: #7C5CFF; }
 </style>
 </head>
 <body>
   <div id="bar"></div>
   <div id="glow"></div>
+  <div id="art"><img id="artimg" alt=""></div>
   <div id="time">0.00</div>
   <div id="scene">scene 1</div>
+  <div id="cap"></div>
   <div id="mark">STEPWORK · S1 frame-by-frame probe</div>
 <script>
-  // 幕时长由渲染器通过 add_init_script 注入；没有则视为单幕。
-  var DUR = (window.SCENE_DURATIONS && window.SCENE_DURATIONS.length)
-    ? window.SCENE_DURATIONS
-    : [0];
+  // 幕数据由渲染器通过 add_init_script 注入（S2）。
+  // SCENES 是完整的（文本/配图/高亮/起止秒）；SCENE_DURATIONS 是 S1 就有的
+  // 老契约，只给时长 —— 没有 SCENES 时（老调用方）退化成「只按时长切幕」。
+  var SCENES = (window.SCENES && window.SCENES.length) ? window.SCENES : null;
+  var DUR = SCENES
+    ? SCENES.map(function (s) { return s.durationSec || 0; })
+    : ((window.SCENE_DURATIONS && window.SCENE_DURATIONS.length)
+        ? window.SCENE_DURATIONS
+        : [0]);
   var TOTAL = DUR.reduce(function (a, b) { return a + b; }, 0);
 
   function sceneAt(t) {
     var acc = 0;
     for (var i = 0; i < DUR.length; i++) {
       acc += DUR[i];
-      if (t < acc) return { idx: i + 1, local: t - (acc - DUR[i]), dur: DUR[i] };
+      if (t < acc) return { i: i, local: t - (acc - DUR[i]), dur: DUR[i] };
     }
-    return { idx: DUR.length, local: DUR[DUR.length - 1], dur: DUR[DUR.length - 1] };
+    return { i: DUR.length - 1, local: DUR[DUR.length - 1], dur: DUR[DUR.length - 1] };
+  }
+
+  // highlight 必须是 text 的子串（handler 入口已校验），这里只做渲染
+  function paintCap(s) {
+    var el = document.getElementById('cap');
+    if (!SCENES) { el.textContent = ''; return; }
+    var text = s.text || '';
+    var hi = s.highlight;
+    if (hi && text.indexOf(hi) >= 0) {
+      var at = text.indexOf(hi);
+      el.innerHTML = '';
+      el.appendChild(document.createTextNode(text.slice(0, at)));
+      var em = document.createElement('em');
+      em.textContent = hi;
+      el.appendChild(em);
+      el.appendChild(document.createTextNode(text.slice(at + hi.length)));
+    } else {
+      el.textContent = text;
+    }
+  }
+
+  function paintArt(s) {
+    var box = document.getElementById('art');
+    var img = document.getElementById('artimg');
+    if (!SCENES) { box.style.display = 'none'; return; }
+    if (s.imageUri) {
+      if (img.getAttribute('src') !== s.imageUri) img.setAttribute('src', s.imageUri);
+      box.style.display = 'flex';
+    } else {
+      box.style.display = 'none';
+    }
   }
 
   // 渲染器逐帧调用：必须是时间的纯函数（同一 t 出同一画面）。
   window.__setTime = function (t) {
     if (t < 0) t = 0;
     var s = sceneAt(t);
+    var one = SCENES ? SCENES[s.i] : null;
     document.getElementById('time').textContent = t.toFixed(2);
-    document.getElementById('scene').textContent = 'scene ' + s.idx + ' / ' + DUR.length;
+    document.getElementById('scene').textContent =
+      'scene ' + (s.i + 1) + ' / ' + DUR.length;
+    paintCap(one || {});
+    paintArt(one || {});
     var pct = TOTAL > 0 ? Math.min(100, (t / TOTAL) * 100) : 0;
     document.getElementById('bar').style.width = pct + '%';
     // 光晕随幕内进度上浮 + 轻微位移，保证每一帧画面确实不同
@@ -68,6 +121,15 @@
       'translate3d(0,' + (-60 + k * 120).toFixed(2) + 'px,0) scale(' + (0.9 + k * 0.2).toFixed(4) + ')';
     document.getElementById('glow').style.opacity = (0.55 + 0.35 * Math.sin(t * 1.7)).toFixed(3);
   };
+
+  // 各幕首句在画面上的实际出现秒（渲染器据此回填 video_scenes.born_at_sec）。
+  // 本文档**没有前摇**：字幕随幕开始即刻出现，所以就是 startSec。有入场动画
+  // 的正式模板会返回更晚的秒 —— 那正是抽帧目检需要的值（S1 遗留项）。
+  window.__getSentBorn = function (i) {
+    if (!SCENES || i < 0 || i >= SCENES.length) return null;
+    return SCENES[i].startSec;
+  };
+
   window.__setTime(0);
 </script>
 </body>

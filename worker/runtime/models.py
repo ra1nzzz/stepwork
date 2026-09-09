@@ -161,6 +161,27 @@ class TTSEngine(StrEnum):
     USER_AUDIO = "user_audio"
 
 
+class RenderScene(BaseModel):
+    """渲染用的一幕（由 handler 从 ``video_scenes`` 组装后挂到 ``RenderSpec``）。
+
+    为什么不是让渲染器自己去查库：Provider 必须是**无状态、不碰 DB** 的
+    （换一个渲染器实现不需要连数据库）。组装是 handler 的活。
+
+    ``id`` 带上 ``video_scenes`` 行 id，是为了把渲染器实测到的
+    ``born_at_sec`` 回填到对应的幕（见 :attr:`RenderResult.scene_born_sec`）。
+    """
+
+    #: ``video_scenes.id``；纯内存构造（如测试）时为 ``None``
+    id: str | None = None
+    seq: int
+    text: str = ""
+    highlight: str | None = None
+    start_sec: float = 0.0
+    duration_sec: float = 0.0
+    image_uri: str | None = None
+    emotion: str | None = None
+
+
 class RenderSpec(BaseModel):
     """渲染规格（W6 RenderJob 输入）。"""
 
@@ -186,6 +207,10 @@ class RenderSpec(BaseModel):
     #: 新增字段而非复用 ``background_uri``：后者原语义是「背景图」，
     #: 一个字段两种含义迟早出事（S1 曾临时复用，S3 起收敛到这里）。
     design_doc_uri: str | None = None
+    #: 分幕（S2）。``None`` = 整段一条（旧行为，FFmpegRenderer 与无分幕的
+    #: 版本走这条）。有值时渲染器按 ``start_sec`` / ``duration_sec`` 切幕，
+    #: 并把 ``image_uri`` 交给视觉稿 —— 这才是「画面按幕切换」。
+    scenes: list[RenderScene] | None = None
 
 
 class VideoScene(BaseModel):
@@ -225,6 +250,11 @@ class RenderResult(BaseModel):
     duration_seconds: float
     template: str
     tts_engine: str
+    #: 各幕首句在**画面**上的实际出现秒（与 :attr:`RenderSpec.scenes` 同序）。
+    #: 视觉稿若暴露 ``window.__getSentBorn(i)`` 则由渲染器实测填入；
+    #: 否则为空列表 —— 「没测到」和「测到是 0」必须可分，所以用空列表而非 0 填充。
+    #: 用途：抽帧目检撞切句瞬间会取到空字幕，据此前移取样点（S1 遗留项）。
+    scene_born_sec: list[float] = Field(default_factory=list)
 
 
 class VideoDraftMeta(BaseModel):
