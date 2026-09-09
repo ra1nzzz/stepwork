@@ -82,6 +82,24 @@ def test_style_documents_are_contract_compliant_and_cached() -> None:
         assert style_document(style_id) == doc
 
 
+def test_bundled_fonts_injected_as_face() -> None:
+    """resources/fonts 有字体时，视觉稿自动带 @font-face（file:// 绝对 uri）。"""
+    from worker.runtime.render.styles import bundled_fonts, font_face_css
+
+    fonts = bundled_fonts()
+    if not fonts:  # 仓库未打包字体时退化：不注入也不报错
+        assert font_face_css() == ""
+        return
+    css = font_face_css()
+    assert "@font-face" in css
+    for font in fonts:
+        assert str(font["family"]) in css
+        assert str(font["url"]).startswith("file:///")
+    # 视觉稿已包含注入的 @font-face（不依赖任何系统字体即可渲染）
+    html = style_document("illustration").read_text(encoding="utf-8")
+    assert "@font-face" in html
+
+
 def test_default_document_still_valid_for_legacy() -> None:
     """S1 探路文档仍是合法兜底（代码层防御，不删）。"""
     assert DEFAULT_DOCUMENT.is_file()

@@ -36,6 +36,17 @@ CAP_IMAGE = "image"
 #: 内置视觉稿缓存目录（产物是 style_id 的纯函数，可安全复用）
 _CACHE_DIR = os.path.join(tempfile.gettempdir(), "stepwork_styles")
 
+#: 仓库打包字体根目录（resources/fonts，见其 README 的打包规则）
+_FONTS_DIR = Path(__file__).resolve().parents[3] / "resources" / "fonts"
+
+#: 已知字体的家族名登记（文件名无法推断时才需要）。键 = 文件名；值 =
+#: (css family, weight)。同族不同字重以 weight 区分，@font-face 按需取用。
+_FONT_META: dict[str, tuple[str, int]] = {
+    "AlibabaPuHuiTi-2-55-Regular.ttf": ("Alibaba PuHuiTi", 400),
+    "AlibabaPuHuiTi-2-65-Medium.ttf": ("Alibaba PuHuiTi", 500),
+    "AlibabaPuHuiTi-2-85-Bold.ttf": ("Alibaba PuHuiTi", 700),
+}
+
 
 class StyleDef(NamedTuple):
     """一个版式风格的声明：能力 + 画面渲染所需的两段代码。"""
@@ -152,7 +163,10 @@ _ILLUS_CSS = """
 html, body { width: 1080px; height: 1920px; overflow: hidden; }
 body {
   margin: 0; background: #14151a;
-  font-family: "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", sans-serif;
+  /* 打包字体优先（resources/fonts/alibaba-puhuiti，@font-face 注入）；
+     未打包时回退系统栈，保证任何机器都能渲 */
+  font-family: "Alibaba PuHuiTi", "Noto Sans CJK SC", "Microsoft YaHei",
+    "PingFang SC", sans-serif;
   color: #fff; position: relative;
 }
 #bg { position: absolute; inset: 0; overflow: hidden; background: #14151a; }
@@ -250,8 +264,8 @@ STYLES: dict[str, StyleDef] = {
 #: 缺输入时的降级落点（A 版纸墨文字，零素材依赖）
 DEFAULT_FALLBACK_STYLE = "ink_text"
 
-#: 风格版本戳 —— 改 CSS/JS 后 bump，缓存文件名随之变化，避免旧文件复活
-_STYLE_VERSION = "1"
+#: 风格版本戳 —— 改 CSS/JS/字体注入后 bump，缓存文件名随之变化，避免旧文件复活
+_STYLE_VERSION = "2"
 
 
 # --------------------------------------------------------------------------
@@ -296,12 +310,56 @@ window.__setTime(0);
 """
 
 
+def bundled_fonts() -> list[dict[str, object]]:
+    """扫描 ``resources/fonts`` 打包字体（按家族/字重排序，稳定输出）。
+
+    Returns:
+        [{path, family, weight, url}]；目录不存在/无字体 → 空列表。
+    """
+    fonts: list[dict[str, object]] = []
+    if not _FONTS_DIR.is_dir():
+        return fonts
+    for path in sorted(_FONTS_DIR.rglob("*")):
+        if path.suffix.lower() not in (".ttf", ".otf", ".woff2"):
+            continue
+        name = path.name
+        family, weight = _FONT_META.get(name, (path.stem, 400))
+        fonts.append(
+            {
+                "path": path,
+                "family": family,
+                "weight": weight,
+                "url": path.resolve().as_uri(),
+            }
+        )
+    return fonts
+
+
+def font_face_css() -> str:
+    """生成打包字体的 ``@font-face`` CSS（无字体 → 空串）。
+
+    视觉稿是 ``file://`` 页面，字体路径必须用绝对 ``file://`` URI，
+    渲染器已带 ``--allow-file-access-from-files`` 才能加载。
+    """
+    rules = []
+    for font in bundled_fonts():
+        rules.append(
+            "@font-face {\n"
+            f"  font-family: '{font['family']}';\n"
+            f"  src: url('{font['url']}') format('truetype');\n"
+            f"  font-weight: {font['weight']};\n"
+            "}"
+        )
+    return "\n".join(rules)
+
+
 def build_style_document(style: StyleDef) -> str:
     """把共享骨架与风格的画面代码拼成**单文件自包含** HTML。"""
     return (
         "<!doctype html>\n<html lang=\"zh-CN\">\n<head>\n<meta charset=\"utf-8\">\n"
         f"<title>STEPWORK · {style.label}</title>\n"
         "<style>\n"
+        f"{font_face_css()}\n"
         f"{style.css}\n"
         "</style>\n</head>\n<body>\n"
         f"{style.body}\n"

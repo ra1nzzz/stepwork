@@ -126,9 +126,12 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
 - **`base.html.j2` 不引入 jinja2（YAGNI 裁决）**：现方案「python 常量拼接」已达成
   「骨架单源 + 每风格只覆写画面函数」的目标（shared scaffold + `window._paint`），
   且零新依赖。第三风格出现后若资产组织真的难维护，再抽模板引擎，不提前上框架
-- **字体打包进 `resources/fonts/` 待素材决策**：需要选定一款 OFL 中文字体并下载
-  （仓库会 +数 MB）。当前字体栈已带系统回退（不依赖单一字体）；等选定字体后
-  只需在 StyleDef.css 的 font-family 前加 `@font-face` 注入
+- **字体打包（进行中，2026-09-10）**：`resources/fonts/` 已建；`styles.py`
+  `font_face_css()` 自动扫描注入 `@font-face`（加字体不用改代码，file:// 绝对
+  URI，渲染器已带 allow-file-access）。**已打包：阿里巴巴普惠体 2.0**（55/65/85
+  三字重 + 授权 PDF）。待补：阿里妈妈方圆体 VF / 钉钉进步体 / 沐瑶软笔手写体
+  （官方渠道手动下载丢进子目录即可）；优设字由棒棒体 / 懒设计字由公益体
+  **不打包**（字由客户端专属、禁止转发，许可不允许仓库再分发）
 - `image_set_id` 承载配图产物集 id（尚未有表，随厂商选型落）
 
 **验收**
