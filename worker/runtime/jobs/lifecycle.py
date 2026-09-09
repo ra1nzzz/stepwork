@@ -39,7 +39,19 @@ from worker.runtime.jobs.cancel import clear as clear_cancel
 from worker.runtime.jobs.cancel import register_task
 from worker.runtime.jobs.engine import create_job, record_result, transition
 from worker.runtime.jobs.lease import acquire
-from worker.runtime.models import CommandEnvelope, ContentVersion, Job, JobStage, JobState
+from worker.runtime.models import (
+    CommandEnvelope,
+    ContentVersion,
+    Job,
+    JobStage,
+    JobState,
+    VideoScene,
+)
+from worker.runtime.script.segment import (
+    DEFAULT_MAX_CHARS,
+    plain_text,
+    segment_scenes,
+)
 
 logger = logging.getLogger("worker.runtime.jobs")
 
@@ -234,3 +246,39 @@ def persist_content_version(
     record_result(repos, job.id, [cv_id])
     emit_job_progress(notify, succeeded)
     return cv_id
+
+
+def persist_script_scenes(
+    repos: Any,
+    version_id: str,
+    content: Any,
+    *,
+    max_chars: int = DEFAULT_MAX_CHARS,
+) -> list[VideoScene]:
+    """从脚本内容派生分幕，**整体替换**该版本的既有分幕并落库。
+
+    ``video_scenes`` 不能是手工维护的孤岛：每条 ``script`` 版本落库的同一
+    时间就得有幕，否则下游配音/配图/渲染拿不到输入。三条写入路径
+    （``GenerateScript`` / ``SaveScript`` / ``EditParagraph``）都调它。
+
+    替换而非追加：每次写入都是**新版本**，旧版本的幕不受影响；同一版本
+    重复派生也不会叠加出重复行（``UNIQUE(version_id, seq)`` 会拒，但先删
+    后插才是干净语义）。正文为空时清空该版本的幕 —— 空正文本来就没有幕。
+
+    Args:
+        repos: 仓储集合（用到 ``video_scenes``）。
+        version_id: 脚本 ``content_versions`` 行 id。
+        content: 脚本内容，纯文本 / ``{"title","body"}`` / TipTap JSON 皆可。
+        max_chars: 单幕字数软上限。
+
+    Returns:
+        落库的 :class:`VideoScene` 列表（空正文 → 空列表）。
+    """
+    texts = segment_scenes(plain_text(content), max_chars=max_chars)
+    scenes = [
+        VideoScene(version_id=version_id, seq=seq, text=text)
+        for seq, text in enumerate(texts)
+    ]
+    # replace 语义已覆盖「清空」：内部先 DELETE 再 INSERT，空列表即只删
+    repos.video_scenes.replace_for_version(version_id, scenes)
+    return scenes

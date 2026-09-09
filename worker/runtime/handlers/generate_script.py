@@ -20,7 +20,7 @@ from worker.runtime.handlers.brand import (
     format_brand_prompt_block,
     load_project_brand,
 )
-from worker.runtime.jobs import content_job, persist_content_version
+from worker.runtime.jobs import content_job, persist_content_version, persist_script_scenes
 from worker.runtime.models import (
     CommandEnvelope,
     CommandResult,
@@ -114,6 +114,20 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             parent_version_id=parent_id,
             notify=deps.notify,
         )
+        # S2：文案产出即落幕。分幕若只能靠外部手工灌，就是孤岛——配音/
+        # 配图/渲染全都拿不到输入。正文为空时清空该版本的幕。
+        #
+        # 注意顺序：此刻 job 已被 persist_content_version 置为 SUCCEEDED，
+        # 所以这里**不能再发 progress**（SUCCEEDED→RUNNING 是非法迁移，会被
+        # progress() 静默吞成日志），失败也必须显式转成 DispatchError——
+        # 否则落进通用异常分支会去走 SUCCEEDED→FAILED，把真实错误盖掉。
+        try:
+            scenes = persist_script_scenes(repos, cv_id, content)
+        except Exception as e:  # noqa: BLE001 - 转成领域错误，避免非法状态迁移
+            raise DispatchError(
+                "SCRIPT_FAILED", f"persist scenes failed: {e}"
+            ) from None
+        scene_ids = [s.id for s in scenes]
     # PRD-SCR-005「相似度与原创性提醒」：与同账号历史脚本比对。
     # 措辞是「提醒」而非判定 —— PRD 明确要求不做法律结论。
     similarity_warnings: list[dict[str, Any]] = []
@@ -150,6 +164,9 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             "parent": parent_id,
             # 供前端直接 seed 编辑器，无需额外 content-fetch 接口
             "script": script,
+            # S2：幕已随版本落库（配音/配图的输入），前端可直接拿 id 排队
+            "sceneCount": len(scene_ids),
+            "sceneIds": scene_ids,
             "invocation": invocation,
             # PRD-SCR-005：相似历史脚本提醒（空列表表示未发现相似）
             "similarity_warnings": similarity_warnings,

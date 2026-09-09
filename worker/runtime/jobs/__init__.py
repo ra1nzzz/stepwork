@@ -18,6 +18,7 @@ from worker.runtime.jobs.lifecycle import (
     emit_job_progress,
     notify_job_progress,
     persist_content_version,
+    persist_script_scenes,
 )
 
 __all__ = [
@@ -33,4 +34,5 @@ __all__ = [
     "emit_job_progress",
     "notify_job_progress",
     "persist_content_version",
+    "persist_script_scenes",
 ]

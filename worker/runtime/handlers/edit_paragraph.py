@@ -26,6 +26,7 @@ from worker.runtime.handlers.brand import (
     format_brand_prompt_block,
     load_project_brand,
 )
+from worker.runtime.jobs import persist_script_scenes
 from worker.runtime.models import CommandEnvelope, CommandResult, ContentVersion
 from worker.runtime.providers.resolve import ai_provider_from_hint
 from worker.runtime.script.paragraph import (
@@ -156,6 +157,8 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         },
     )
     cv_id = repos.content_versions.insert(cv)
+    # S2：段落被改写后整篇重派生分幕 —— 段数可能变了，沿用旧幕会错位
+    scenes = persist_script_scenes(repos, cv_id, new_body)
 
     # 费用透明（PRD-ANA-006 同款）：detail.invocation + 审计行
     invocation = build_invocation(ai, len(prompt) + len(new_paragraph))
@@ -173,6 +176,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             "paragraph_count": len(split_paragraphs(new_body)),
             "paragraph_before": paragraphs[index],
             "paragraph_after": new_paragraph,
+            "sceneCount": len(scenes),
             "invocation": invocation,
         },
     )

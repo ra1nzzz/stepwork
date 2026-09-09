@@ -12,6 +12,7 @@ from typing import Any
 from worker.runtime.audit import EVENT_SCRIPT_SAVED, record_event
 from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
+from worker.runtime.jobs import persist_script_scenes
 from worker.runtime.models import (
     CommandEnvelope,
     CommandResult,
@@ -52,6 +53,8 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         producer={"kind": "user-script", "editor": "tiptap"},
     )
     cv_id = repos.content_versions.insert(cv)
+    # S2：编辑器保存同样派生分幕 —— 手工敲的稿子也得有幕，否则下游断链
+    scenes = persist_script_scenes(repos, cv_id, content)
     # PRD §14 埋点：脚本保存（此前 save_script 无 job 也无 audit）
     record_event(
         repos.conn, env, EVENT_SCRIPT_SAVED,
@@ -61,5 +64,9 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         ok=True,
         commandId=env.commandId,
         artifact_ids=[cv_id],
-        detail={"parent": parent_id, "version_id": cv_id},
+        detail={
+            "parent": parent_id,
+            "version_id": cv_id,
+            "sceneCount": len(scenes),
+        },
     )
