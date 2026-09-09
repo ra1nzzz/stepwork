@@ -102,19 +102,36 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
 
 ---
 
-### S3 · 风格层：风格可选 + 降级
+### S3 · 风格层：风格可选 + 降级 🔜 进行中
 
 **目标**：版式风格与美术风格正交可选；A 版作为 B 版的降级路径。
 
-**内容**
-- 模板从 `NamedTuple`（背景色/字号/字色）升级为**能力声明**结构（含 `capabilities`）
-- 纸墨文字版 A（`set()`）+ 插画版 B（`{image}`）两套模板
-- 抽公共 `base.html.j2`（幕号/进度条/`__setTime` 骨架），各风格只覆写画面区与字体
-- `fallback_style: ink_text` 配置：生图失败/停服/额度耗尽自动回落 A 版
+**已完成（2026-09-09）**
+- [x] **风格注册表 = 能力声明**：新增 `render/styles.py`（`StyleDef`：id /
+      label / capabilities / 画面代码）。`ink_text` 纸墨文字版能力集 `set()`
+      （零素材，A 版）；`illustration` 插画版能力集 `{"image"}`（B 版）。
+      `RenderSpec.style_id` 不再是死字段 —— 渲染前看能力声明就知道需要什么输入
+- [x] **内置 A/B 视觉稿**：共享骨架（`__setTime` / `__getSentBorn` /
+      幕数学）+ 每风格画面函数拼接成自包含 HTML（file:// 页不能 import 外部
+      JS），缓存于系统临时目录（纯函数）。PlaywrightRenderer 文档解析：显式
+      文档 > 风格内置稿 > 探路文档兜底；未知风格**当场报错**不静默回退
+- [x] **降级不静默**：插画版缺配图（IllustrateScenes 没跑/部分失败）→ 落到
+      纸墨文字 A 版出片成功，但 detail 与落库 `video_draft` meta 都带
+      `degradedFrom` / `degradedReason` —— 拿到成片的人能看出不是插画版。
+      降级链不允许再指向需要图的风格；无降级时 ffmpeg drawtext 路径如实记
+      `style_id=None`（不假装用了插画）
+- [x] `ListRenderTemplates` 返回 `styles` 清单（能力 + needsImage，前端下拉用）
+
+**待办**
+- ⏭ 抽 `base.html.j2` 模板化（第三个风格出现时再抽，避免为两个风格上框架）
+- ⏭ 字体打包进 `resources/fonts/`（不依赖系统楷体；需先选定 OFL 中文字体）
+- ⏭ `image_set_id` 承载配图产物集 id（尚未有表，随厂商选型落）
 
 **验收**
-- [ ] 同一份 `scenes.json` 能出 A/B 两种片
-- [ ] 强制生图失败时自动回落 A 版并出片成功
+- [x] 同一份 `scenes.json` 能出 A/B 两种片（style_id 切换 → 内置稿切换；
+      scenes 注入不变，A 无图、B 有图）
+- [ ] 强制生图失败时自动回落 A 版并出片成功（降级逻辑已就绪，等真实浏览器
+      出片用例/厂商接入后闭环验收）
 - [ ] 字体打包进 `resources/fonts/`（不依赖系统楷体）
 
 **依赖**：S2
