@@ -39,6 +39,11 @@ _ROUTES: dict[str, str] = {
     "GenerateTopic": "worker.runtime.handlers.generate_topic",
     "GenerateScript": "worker.runtime.handlers.generate_script",
     "SaveScript": "worker.runtime.handlers.save_script",
+    # S2 分幕（video_scenes，migrations/0012）——表建好必须有命令入口，
+    # 否则又是一张没人读写的空表（本仓空壳目录的老毛病）
+    "SaveVideoScenes": "worker.runtime.handlers.video_scenes",
+    "ListVideoScenes": "worker.runtime.handlers.video_scenes",
+    "UpdateVideoScene": "worker.runtime.handlers.video_scenes",
     # PRD-SCR-003：段落级生成/重写/扩写/压缩
     "EditParagraph": "worker.runtime.handlers.edit_paragraph",
     "GetConfig": "worker.runtime.handlers.config",
@@ -178,6 +183,8 @@ _AGENT_ALLOWED_COMMANDS: frozenset[str] = frozenset(
         "ListSourceAssets",
         "GetSourceAsset",
         "ListBrandProfiles",
+        # S2 分幕只读（配音/配图/渲染都要先读幕；写命令不在清单内）
+        "ListVideoScenes",
         "ListWorkspaces",
         "ListPlatformVariants",
         "ListRenderTemplates",

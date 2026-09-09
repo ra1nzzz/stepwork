@@ -22,6 +22,7 @@ from worker.runtime.models import (
     JobStage,
     JobState,
     SourceAsset,
+    VideoScene,
     Workspace,
 )
 
@@ -344,6 +345,130 @@ class ContentVersionRepo:
         return _row_to_content_version(row) if row is not None else None
 
 
+def _row_to_video_scene(row: sqlite3.Row) -> VideoScene:
+    return VideoScene(
+        id=str(row["id"]),
+        version_id=str(row["version_id"]),
+        seq=int(row["seq"]),
+        text=str(row["text"] or ""),
+        emotion=str(row["emotion"]) if row["emotion"] is not None else None,
+        highlight=str(row["highlight"]) if row["highlight"] is not None else None,
+        audio_uri=str(row["audio_uri"]) if row["audio_uri"] is not None else None,
+        image_uri=str(row["image_uri"]) if row["image_uri"] is not None else None,
+        start_sec=float(row["start_sec"] or 0.0),
+        duration_sec=float(row["duration_sec"] or 0.0),
+        born_at_sec=float(row["born_at_sec"]) if row["born_at_sec"] is not None else None,
+        created_at=str(row["created_at"]),
+    )
+
+
+class VideoSceneRepo:
+    """``video_scenes`` 表（S2 分幕事实表，migrations/0012）。"""
+
+    #: 允许 ``UpdateVideoScene`` 回填的字段（配音/配图阶段的产出）
+    _PRODUCTION_FIELDS: tuple[str, ...] = (
+        "audio_uri",
+        "image_uri",
+        "duration_sec",
+        "born_at_sec",
+    )
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def insert_many(self, scenes: list[VideoScene]) -> int:
+        """批量插入；同版本同 seq 冲突由 UNIQUE 索引拒绝（不会静默覆盖）。"""
+        if not scenes:
+            return 0
+        cols = (
+            "id,version_id,seq,text,emotion,highlight,audio_uri,image_uri,"
+            "start_sec,duration_sec,born_at_sec,created_at"
+        )
+        self.conn.executemany(
+            f"INSERT INTO video_scenes ({cols}) VALUES ({_q(12)})",
+            [
+                (
+                    s.id, s.version_id, s.seq, s.text, s.emotion, s.highlight,
+                    s.audio_uri, s.image_uri, s.start_sec, s.duration_sec,
+                    s.born_at_sec, s.created_at,
+                )
+                for s in scenes
+            ],
+        )
+        self.conn.commit()
+        return len(scenes)
+
+    def delete_by_version(self, version_id: str) -> int:
+        cur = self.conn.execute(
+            "DELETE FROM video_scenes WHERE version_id=?", (version_id,)
+        )
+        self.conn.commit()
+        return int(cur.rowcount or 0)
+
+    def replace_for_version(
+        self, version_id: str, scenes: list[VideoScene]
+    ) -> int:
+        """**单事务**替换某版本的全部分幕（先删后插）。
+
+        拆成两条语句会有中间态：删完插一半失败，该版本就只剩半截幕，
+        而渲染器会照着半截数据出片。所以这里显式包事务。
+        """
+        with self.conn:
+            self.conn.execute(
+                "DELETE FROM video_scenes WHERE version_id=?", (version_id,)
+            )
+            if scenes:
+                cols = (
+                    "id,version_id,seq,text,emotion,highlight,audio_uri,image_uri,"
+                    "start_sec,duration_sec,born_at_sec,created_at"
+                )
+                self.conn.executemany(
+                    f"INSERT INTO video_scenes ({cols}) VALUES ({_q(12)})",
+                    [
+                        (
+                            s.id, s.version_id, s.seq, s.text, s.emotion, s.highlight,
+                            s.audio_uri, s.image_uri, s.start_sec, s.duration_sec,
+                            s.born_at_sec, s.created_at,
+                        )
+                        for s in scenes
+                    ],
+                )
+        return len(scenes)
+
+    def list_by_version(self, version_id: str) -> list[VideoScene]:
+        rows = self.conn.execute(
+            "SELECT * FROM video_scenes WHERE version_id=? ORDER BY seq",
+            (version_id,),
+        ).fetchall()
+        return [_row_to_video_scene(r) for r in rows]
+
+    def get(self, scene_id: str) -> VideoScene | None:
+        row = self.conn.execute(
+            "SELECT * FROM video_scenes WHERE id=?", (scene_id,)
+        ).fetchone()
+        return _row_to_video_scene(row) if row is not None else None
+
+    def update_production(
+        self, scene_id: str, **fields: Any
+    ) -> VideoScene | None:
+        """回填配音/配图的产出（``audio_uri``/``image_uri``/``duration_sec``/
+        ``born_at_sec``）。
+
+        只认白名单字段：文案类字段（``text``/``seq``）不允许从这条路径改，
+        否则「改一句要重渲全片」的问题会从另一个口子溜回来。
+        """
+        updates = {k: v for k, v in fields.items() if k in self._PRODUCTION_FIELDS}
+        if not updates:
+            return self.get(scene_id)
+        assignments = ", ".join(f"{k}=?" for k in updates)
+        with self.conn:
+            self.conn.execute(
+                f"UPDATE video_scenes SET {assignments} WHERE id=?",  # noqa: S608
+                (*updates.values(), scene_id),
+            )
+        return self.get(scene_id)
+
+
 class Repos:
     """聚合所有 repo，统一从同一 ``conn`` 构造。"""
 
@@ -354,3 +479,4 @@ class Repos:
         self.source_assets: SourceAssetRepo = SourceAssetRepo(conn)
         self.jobs: JobRepo = JobRepo(conn)
         self.content_versions: ContentVersionRepo = ContentVersionRepo(conn)
+        self.video_scenes: VideoSceneRepo = VideoSceneRepo(conn)

@@ -188,6 +188,36 @@ class RenderSpec(BaseModel):
     design_doc_uri: str | None = None
 
 
+class VideoScene(BaseModel):
+    """S2 分幕（``video_scenes`` 行）。
+
+    整条流水线此前没有「幕」这个概念：脚本是一整块文本、配音只知道总时长、
+    渲染只能糊纯色背景。本模型把「幕」变成一等事实——文案产出后落库，配音
+    回填 ``audio_uri`` + 实测 ``duration_sec``，配图回填 ``image_uri``，
+    渲染按 ``start_sec`` / ``duration_sec`` 驱动画面。
+
+    两条**必须写成断言**的隐性规则（摘自已验证流水线，静默失效过）：
+
+    - ``highlight`` 必须是 ``text`` 的子串，否则标红静默失效
+    - ``duration_sec`` 是 TTS **实测**时长，不是估值（画面被音频驱动，
+      反过来就是「带配音的 PPT」）
+    """
+
+    id: str = Field(default_factory=lambda: _uid("vs"))
+    version_id: str
+    seq: int
+    text: str = ""
+    emotion: str | None = None
+    highlight: str | None = None
+    audio_uri: str | None = None
+    image_uri: str | None = None
+    start_sec: float = 0.0
+    duration_sec: float = 0.0
+    #: 该幕首句的实际起始秒；抽帧目检撞切句瞬间时据此前移取样（S1 遗留项）
+    born_at_sec: float | None = None
+    created_at: str = Field(default_factory=_now)
+
+
 class RenderResult(BaseModel):
     """渲染结果元数据。"""
 
