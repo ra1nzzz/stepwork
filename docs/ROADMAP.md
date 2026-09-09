@@ -75,6 +75,17 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
 - [x] `VideoScene` 模型 + `VideoSceneRepo` + 三命令（`SaveVideoScenes` /
       `ListVideoScenes` / `UpdateVideoScene`）+ CLI `scenes {save,list,update}` +
       schema enum / 前端 union / Agent 白名单同步（表不再空转）
+- [x] **配音步骤：逐幕 TTS + 实测时间轴**（2026-09-09）：新命令
+      `SynthesizeScenes`（`worker/runtime/handlers/synthesize_scenes.py`）——
+      逐幕调 TTS → **实测**音频时长 → 单事务回写 `audio_uri` / `duration_sec` /
+      累加 `start_sec`，并默认把各幕拼成一条整轨（可直接喂 `CreateRenderJob`
+      的 `user_audio` 路径）。配音属于「不新建 content_version」的步骤，
+      故新增 `jobs.lifecycle.finish_job` 显式收尾
+      （`content_job` 成功路径**不**自动置 SUCCEEDED，漏了 job 会永停 RUNNING）
+- [x] **字幕改为实测时间轴**（2026-09-09）：新增
+      `render.subtitles.build_srt_from_scenes` + `write_srt_text`；
+      `CreateRenderJob` 有分幕时间轴时用它，没有才退回按字符量**等比分配**
+      （等比分配必然与配音错位）。12 条配音测试 + 4 条字幕测试
 - [x] **文案产出即落幕**（2026-09-09）：新增 `worker/runtime/script/segment.py`
       （确定性切分：空行分段 → 超长段按句读贪心打包，单句超长不劈开）
       + `jobs.lifecycle.persist_script_scenes`。`GenerateScript` /
@@ -84,11 +95,13 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
 **待办**（含选型前置依赖，见 [`COMPLETED.md` §1.5 剩余遗留项](./COMPLETED.md#15-s1--playwright-逐帧渲染器-s1探路-2026-09-08)）
 
 **内容**
-- **⏭ 下一件事**：TTS 步骤回填 `audio_uri` + 实测 `duration_sec`，并顺推
-  `start_sec`（幕此刻只有文本、没有时间轴；画面必须被音频时长驱动，
-  反过来就是「带配音的 PPT」）。`born_at_sec` 同批回填，抽帧目检改读该列
-- 新增 `worker/runtime/providers/image/{base,stepfun}.py`（照 `ai/base.py` 范式）+ `resolve_image`
-  —— ⚠️ **接口先于厂商实现**：StepFun 生图 2026-10-10 下线，选型未定，别把接口绑死某家
+- **⏭ 下一件事**：配图步骤 —— `image provider` 接口先落地（照 `ai/base.py`
+  范式 + `resolve_image`），回填 `video_scenes.image_uri`。
+  ⚠️ **接口先于厂商实现**：StepFun 生图 2026-10-10 下线，选型未定，别把接口绑死某家
+  （通义万相 / CogView-4 / 硅基流动 / 本地 SDXL 待实测）
+- `RenderSpec.style_id` / `art_style` / `image_set_id` 接入渲染（模板按能力声明选型）
+- 渲染侧消费分幕：把 `start_sec` / `duration_sec` / `image_uri` 真正喂给
+  PlaywrightRenderer（当前渲染仍吃整段文本）
 - TTS 加 stepfun 复刻音色 provider（含 `atempo` 语速归一化 + MD5 缓存判重）
 
 **验收**

@@ -206,8 +206,16 @@ plugins/{official,registry}
    （确定性切分纯函数）+ `jobs.lifecycle.persist_script_scenes`，
    `GenerateScript` / `SaveScript` / `EditParagraph` 三条写入路径落版即派生分幕，
    不再需要手工灌 `SaveVideoScenes`（该命令退化为「人工改幕」的覆盖入口）
-10. ⚠️ **幕的 `start_sec` 仍是 0**：分幕此刻只有文本，时间轴要等 TTS 实测
-    `duration_sec` 后累加得出 —— 与第 7 条一起做（配音步骤回填 `audio_uri`
-    + `duration_sec`，再顺推 `start_sec`）
-11. ⚠️ **前端无分幕 UI**：`types.ts` 的 union 已同步（防漂移测试会拦），但没有任何页面
-    调用这三个命令。按 P4，GUI 侧至少要有一个入口（S2 尾段或 S6 补齐）
+10. ✅ **幕的时间轴已由配音步骤回填**（2026-09-09）：新命令 `SynthesizeScenes`，
+    逐幕 TTS → **实测**时长 → 单事务回写 `audio_uri` / `duration_sec` /
+    累加 `start_sec`，并默认拼整轨（可直接喂 `CreateRenderJob` 的 `user_audio`
+    路径）。字幕随之从「按字符量等比分配」改为「按实测时间轴」
+    （`build_srt_from_scenes`），等比分配降级为无分幕时的退路
+11. ⚠️ **`born_at_sec` 仍为 NULL**：它描述的是「该幕首句在**画面**上出现的秒」，
+    含动画前摇，TTS 阶段无从得知 —— 应由渲染步骤（`design.html` 的
+    `__getSentBorn`）回填，抽帧目检改读该列
+12. ⚠️ **渲染侧仍未消费分幕**：`CreateRenderJob` 目前拿整段 `src.content` 渲染，
+    只是**字幕**用上了分幕时间轴。`start_sec` / `duration_sec` / `image_uri`
+    要真正喂给 `PlaywrightRenderer`，才能做到「画面按幕切换」
+13. ⚠️ **前端无分幕 UI**：`types.ts` 的 union 已同步（防漂移测试会拦），但没有任何页面
+    调用这四个命令。按 P4，GUI 侧至少要有一个入口（S2 尾段或 S6 补齐）
