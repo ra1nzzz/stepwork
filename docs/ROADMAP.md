@@ -122,10 +122,14 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
       `style_id=None`（不假装用了插画）
 - [x] `ListRenderTemplates` 返回 `styles` 清单（能力 + needsImage，前端下拉用）
 
-**待办**
-- ⏭ 抽 `base.html.j2` 模板化（第三个风格出现时再抽，避免为两个风格上框架）
-- ⏭ 字体打包进 `resources/fonts/`（不依赖系统楷体；需先选定 OFL 中文字体）
-- ⏭ `image_set_id` 承载配图产物集 id（尚未有表，随厂商选型落）
+**待办（2026-09-09 裁决）**
+- **`base.html.j2` 不引入 jinja2（YAGNI 裁决）**：现方案「python 常量拼接」已达成
+  「骨架单源 + 每风格只覆写画面函数」的目标（shared scaffold + `window._paint`），
+  且零新依赖。第三风格出现后若资产组织真的难维护，再抽模板引擎，不提前上框架
+- **字体打包进 `resources/fonts/` 待素材决策**：需要选定一款 OFL 中文字体并下载
+  （仓库会 +数 MB）。当前字体栈已带系统回退（不依赖单一字体）；等选定字体后
+  只需在 StyleDef.css 的 font-family 前加 `@font-face` 注入
+- `image_set_id` 承载配图产物集 id（尚未有表，随厂商选型落）
 
 **验收**
 - [x] 同一份 `scenes.json` 能出 A/B 两种片（style_id 切换 → 内置稿切换；
@@ -138,19 +142,31 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
 
 ---
 
-### S4 · 创作者风格：六维 profile
+### S4 · 创作者风格：六维 profile 🔜 进行中
 
 **目标**：创作者风格可选，同一选题产出风格可辨识的成片。
 
-**内容**
-- `brand_profiles` 扩 `style_dna`（结构化六维 JSON）；保留现有字段向后兼容
-- `brand_reference_scripts` 承接逐字稿蒸馏原料（如 douyin-ego-creator 的 168 篇）
-- `ScriptSpec` / `TopicProposalSpec` 的 `use_brand_profile` 已有，接通六维注入
-- 前端加「创作者风格」下拉
+**已完成（2026-09-09，后端第一段）**
+- [x] `brand_profiles` 扩 `style_dna` 列（`migrations/0013`，真往返测试通过）：
+      六维 Creator DNA JSON（`contentStrategy` / `hookDna` / `narrativeDna` /
+      `explosionDna` / `languageDna` / `conversionDna`，与 douyin-ego-creator
+      蒸馏口径一致；允许扩展键，值须为字符串）
+- [x] `CreateBrandProfile` / `UpdateBrandProfile` 支持 `styleDna`
+      （畸形拒绝、旧行读出空 dict 兼容）
+- [x] `format_brand_prompt_block` 逐维硬约束注入（中文标签，有值才注入）
+- [x] **禁用词零出现**（验收断言）：`collect_banned_hits` + `GenerateScript`
+      产出命中 → 自动重试一次 → 仍命中则任务 `FAILED` 并**指名命中词**；
+      绝不静默放行违规文本、不悄悄改写（改文字 = 改文案语义）。10 条新测试
+      （`test_style_dna.py`）
+
+**待办**
+- ⏭ 真实「风格可辨识」验收：造两个差异化 profile，同一选题各生成一版，
+      人工盲评 ≥ 4/5（自动断言测不了文风，需要人看）
+- ⏭ 前端「创作者风格」下拉（S6）；stepfun 复刻音色 TTS provider（在 §S2 待办）
 
 **验收**
 - [ ] 切换 profile 后，同一选题的文案风格可被区分（人工盲评 ≥ 4/5 正确）
-- [ ] 禁用词（`banned_expressions`）在生成结果中零出现（断言测试）
+- [x] 禁用词（`bannedExpressions`）在生成结果中零出现（断言测试）
 
 **依赖**：S2（可与 S3 并行）
 

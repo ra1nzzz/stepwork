@@ -29,6 +29,7 @@ NNNN_description.sql
 | 0010 | `0010_scheduled_publishes.sql` | 定时发布表 | ✅ W9 |
 | 0011 | `0011_command_metrics.sql` | command_metrics（命令级本地指标：耗时/错误码/correlation_id） | ✅ W9 |
 | 0012 | `0012_video_scenes.sql` | video_scenes（分幕事实表：配音/配图/起止秒/时长；S2 地基） | ✅ S2 |
+| 0013 | `0013_brand_style_dna.sql` | brand_profiles 补 style_dna（六维 Creator DNA JSON：contentStrategy/hookDna/narrativeDna/explosionDna/languageDna/conversionDna） | ✅ S4 |
 
 ## 执行规则
 
