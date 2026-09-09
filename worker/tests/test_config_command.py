@@ -19,10 +19,14 @@ from worker.runtime.bootstrap import MIGRATIONS_DIR
 from worker.runtime.db.connection import in_memory
 from worker.runtime.db.migrations import run_migrations
 from worker.runtime.handlers import commands
+from worker.runtime.providers.image.openai_compatible import (
+    OpenAICompatibleImageProvider,
+)
 from worker.runtime.providers.resolve import (
     CONFIG_OVERRIDES,
     resolve_ai,
     resolve_asr,
+    resolve_image,
     resolve_tts,
 )
 from worker.runtime.state import WorkerState
@@ -163,8 +167,45 @@ async def test_resolve_ai_uses_override_without_env() -> None:
     assert os.environ.get("STEPWORK_AI_API_KEY") is None
 
 
+async def test_resolve_image_uses_override_without_env() -> None:
+    """``image`` section 的密钥必须能进覆盖层 —— 漏了就会被**静默丢弃**。
+
+    注意：厂商 kind 与 llm/tts 一样仍来自 env（``STEPWORK_IMAGE_PROVIDER``），
+    设置页只负责密钥与 model/baseUrl/size 的覆盖。
+    """
+    s = _state()
+    for k in (
+        "STEPWORK_IMAGE_PROVIDER",
+        "STEPWORK_IMAGE_API_KEY",
+        "STEPWORK_IMAGE_BASE_URL",
+        "STEPWORK_IMAGE_MODEL",
+        "STEPWORK_IMAGE_SIZE",
+    ):
+        os.environ.pop(k, None)
+    os.environ["STEPWORK_IMAGE_PROVIDER"] = "cogview"
+
+    settings = _full_settings(
+        image={
+            "provider": "cogview",
+            "apiKey": "sk-img",
+            "baseUrl": "",
+            "model": "cogview-4",
+            "size": "1088x1920",
+        }
+    )
+    await commands.handle_command(
+        {"envelope": _env("ws5", "UpdateConfig", settings)}, s
+    )
+    assert CONFIG_OVERRIDES["ws5"]["image"]["apiKey"] == "sk-img"
+
+    image = resolve_image("ws5")
+    assert isinstance(image, OpenAICompatibleImageProvider)
+    assert image.model == "cogview-4"
+    assert image.size == "1088x1920"
+
+
 def _full_settings(**over: Any) -> dict[str, Any]:
-    """构造完整 8-section 设置 payload（带默认值，便于局部覆盖）。"""
+    """构造完整 9-section 设置 payload（带默认值，便于局部覆盖）。"""
     base: dict[str, Any] = {
         "llm": {
             "provider": "cloud", "model": "m", "apiKey": "",

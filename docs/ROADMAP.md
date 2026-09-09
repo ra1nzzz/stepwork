@@ -83,16 +83,22 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
       等比分配降级为退路
 - [x] **配图步骤：接口先于厂商实现**（2026-09-09）：`ImageProvider` 协议
       + `IllustrateScenes`；`local` 占位图非默认值；失败可见且成功幕不回滚
+- [x] **配图厂商适配器**（2026-09-09）：`providers/image/openai_compatible.py`
+      —— 一份实现覆盖整份 OpenAI 兼容契约（智谱 CogView-4 / 硅基流动 /
+      OpenAI 及任意兼容网关），厂商预置表 + env 覆盖，切厂商 = 改一个 env。
+      **通义万相不在契约内**（官方明确不支持 compatible-mode），选它需单开适配器
 - [x] **渲染侧消费分幕**（2026-09-09）：`RenderSpec.scenes` + `RenderScene`，
       `CreateRenderJob` 把「有实测时长」的幕喂给 PlaywrightRenderer ——
       文本 / 配图 / 起止秒注入视觉稿，画面按幕切换；`born_at_sec` 由
       `window.__getSentBorn` 实测回填。8 条数据流测试 + 1 条 Chromium 测试
 
-**S2 已闭合**：选题→文案→分幕→配音→配图（接口就绪）→按幕渲染，
+**S2 已闭合**：选题→文案→分幕→配音→配图（接口 + 厂商适配器就绪）→按幕渲染，
 字幕按实测时间轴。每一段都有「生产端」调用方，无死挂点。
+**仍缺一次真实厂商出片**：适配器已就绪并按厂商文档/复核写死形状，但本机无
+生图密钥，尚未跑过真实生图 → 渲染成片（待选厂商 + 配密钥后补验收）。
 
 **S3 / 收尾待办**（见 [`COMPLETED.md` §5](./COMPLETED.md#5-文档治理)）：
-- 前端分幕 UI（P4 缺口，S6 补）；配图厂商适配器（选型定了再补）；
+- 前端分幕 UI（P4 缺口，S6 补）；
   `RenderSpec.style_id`/`art_style`/`image_set_id` 真正接入渲染（S3 风格层）
 
 **验收（S2）**

@@ -214,10 +214,21 @@ plugins/{official,registry}
     路径）。字幕随之从「按字符量等比分配」改为「按实测时间轴」
     （`build_srt_from_scenes`），等比分配降级为无分幕时的退路
 11. ✅ **配图步骤已通**（2026-09-09）：`ImageProvider` 协议 + `resolve_image`
-    + `IllustrateScenes`（含 CLI `scenes illustrate`）。
-    **厂商适配器仍未接**：StepFun 生图 2026-10-10 下线、选型未定
-    （通义万相 / CogView-4 / 硅基流动 / 本地 SDXL 待实测）—— 这是刻意的选择，
-    接口先落地，厂商后补；`local` 只是**显式启用**的占位图，不是默认值
+    + `IllustrateScenes`（含 CLI `scenes illustrate`）。接口先落地，厂商后补；
+    `local` 只是**显式启用**的占位图，不是默认值
+11b. ✅ **配图厂商适配器已接**（2026-09-09）：
+    `providers/image/openai_compatible.py` —— 按**契约**而不是按公司切文件：
+    智谱 CogView-4 / 硅基流动 / OpenAI 及任意兼容网关共用一份实现
+    （`POST {base}/images/generations`），厂商差异装进 `ImagePreset` 预置表
+    （base_url / model / size / **size_key**），切厂商 = 改一个 env。
+    **2026-09-09 复核（比公告更早）**：StepFun `GET /v1/models` 已无任何
+    文生图模型（只剩图生图 `step-image-edit-2`），实测 `step-1x-medium`
+    返回 `model not supported` → 不再等 10-10，直接换道。
+    **不覆盖**通义万相 / `qwen-image`：官方明确不支持 OpenAI 兼容模式
+    （DashScope 原生端点，尺寸 `W*H` 星号、响应 `output.choices[0]...`）。
+    解析层容忍 `data`/`images` 数组与 `b64_json`/`url`/`image_url`，
+    但**取不到图必报错**；返回直链时**立刻下载落盘**（直链 10 分钟~30 天
+    过期，存 url 渲片就是裂图）；错误带厂商 body 片段
 12. ✅ **渲染侧已消费分幕**（2026-09-09）：`RenderSpec.scenes`（新增
     `RenderScene` 模型），`CreateRenderJob` 组装时把「有实测时长」的幕喂给
     PlaywrightRenderer —— 文本 / 配图 / 起止秒注入视觉稿，**画面按幕切换**，
@@ -231,5 +242,6 @@ plugins/{official,registry}
     分幕不再是孤岛，每一段都有「生产端」调用方（无死挂点）
 
 **S2 收尾 / S3 待办**（见 `ROADMAP.md`）：前端仍无分幕 UI（P4 缺口，S6 补）；
-配图厂商适配器（选型定了再补）；`RenderSpec.style_id`/`art_style`/`image_set_id`
-真正接入渲染（S3 风格层）；`drawtext` 版 FFmpegRenderer 仍吃整段文本（保持原样）
+`RenderSpec.style_id`/`art_style`/`image_set_id` 真正接入渲染（S3 风格层）；
+`drawtext` 版 FFmpegRenderer 仍吃整段文本（保持原样）；
+**插画版真实出片验收**（适配器就绪但本机无生图密钥，待选厂商 + 配密钥）

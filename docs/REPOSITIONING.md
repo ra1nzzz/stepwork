@@ -262,7 +262,15 @@ C:/Users/my/WorkBuddy/2026-09-07-05-23-14/
 
 ⚠️ **StepFun 生图 `POST /v1/images/generations` 将于 2026-10-10 下线，官方无替代模型**（2026-09-08 查官方文档核实）。
 
-→ 图像层必须可插拔。备选：通义万相 / CogView-4 / 硅基流动 / 本地 SDXL。
+> **2026-09-09 复核（已失效，比公告更早）**：`GET /v1/models` 里已**没有任何
+> 文生图模型**（只剩图生图 `step-image-edit-2`），实测 `step-1x-medium` 返回
+> `model not supported`。StepFun 这条线实际已断，不等 10-10。
+
+→ 图像层必须可插拔。**已落地**：`providers/image/openai_compatible.py` 一份
+适配器覆盖 OpenAI 兼容契约的全部厂商（智谱 CogView-4 / 硅基流动 / OpenAI
+及任何兼容网关），切厂商 = 改一个 env。
+→ ⚠️ 通义万相 / `qwen-image` **不在**这份契约内：官方明确不支持 OpenAI 兼容
+模式（DashScope 原生端点，尺寸 `W*H` 星号、响应结构不同），选它需单开适配器。
 → 设计决策：**配图内不生成中文文字**（生图模型字形不可靠），文字全部在 HTML 层用楷体叠加。
 
 ---

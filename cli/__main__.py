@@ -440,6 +440,10 @@ def build_parser() -> argparse.ArgumentParser:
     sci.add_argument("--out-dir", dest="out_dir", help="图片输出目录")
     sci.add_argument("--prompt-extra", dest="prompt_extra", help="追加到提示词的补充要求")
     sci.add_argument(
+        "--size",
+        help="出图尺寸 WxH（如 1088x1920；不给则用厂商预置/STEPWORK_IMAGE_SIZE）",
+    )
+    sci.add_argument(
         "--force",
         action="store_true",
         help="已有图的幕也重新生成（默认跳过，生图要钱）",
@@ -741,6 +745,15 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
             ):
                 if value is not None:
                     illus_payload[camel] = value
+            raw_size = getattr(args, "size", None)
+            if raw_size:
+                try:
+                    w_str, h_str = str(raw_size).lower().split("x")
+                    illus_payload["size"] = {"width": int(w_str), "height": int(h_str)}
+                except ValueError:
+                    raise ValueError(
+                        f"--size 需形如 1088x1920，收到 {raw_size!r}"
+                    ) from None
             return illus_payload
         raise ValueError(f"unknown scenes action: {action!r}")
 

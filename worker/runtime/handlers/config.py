@@ -40,6 +40,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "sampling": {"temperature": 0.7, "topP": 0.9, "maxTokens": 2048},
     },
     "asr": {"provider": "cloud", "apiKey": "", "baseUrl": ""},
+    # 配图（S2 厂商适配器）：provider 空串 = 未配置 → IllustrateScenes
+    # 一律 UNAVAILABLE（宁可挡住，也不让占位图被当正式美术渲进成片）。
+    "image": {"provider": "", "apiKey": "", "baseUrl": "", "model": "", "size": ""},
     # costPer1k：每千字符旁白合成单价（PRD-REN-002 费用透明）；
     # 本地引擎为 0，云端按厂商定价填写。
     "tts": {
@@ -124,14 +127,17 @@ def _mask_secrets(value: Any) -> Any:
 
 
 def _extract_provider_sections(cfg: dict[str, Any]) -> dict[str, Any]:
-    """从完整配置提取 provider 三段（llm / asr / tts）的**完整**配置。
+    """从完整配置提取 provider 四段（llm / asr / tts / image）的**完整**配置。
 
     覆盖层只存内存，故可携带密钥；``resolve.*`` 据此完整重建
     provider，无需回退 env 或读库。DB 落盘仍由 ``_strip_secrets``
     剥离密钥。
+
+    ``image`` 必须在此列：设置页一旦有配图段而这里漏了，密钥会被
+    **静默丢弃**（用户以为存了，实际解析时永远拿不到）。
     """
     out: dict[str, Any] = {}
-    for section in ("llm", "asr", "tts"):
+    for section in ("llm", "asr", "tts", "image"):
         section_cfg = cfg.get(section)
         if isinstance(section_cfg, dict) and section_cfg:
             out[section] = dict(section_cfg)
@@ -143,6 +149,7 @@ def _derive_resolved(cfg: dict[str, Any]) -> dict[str, Any]:
     llm = cfg.get("llm", {}) or {}
     asr = cfg.get("asr", {}) or {}
     tts = cfg.get("tts", {}) or {}
+    image = cfg.get("image", {}) or {}
     return {
         "ai": {
             "provider": llm.get("provider"),
@@ -157,6 +164,11 @@ def _derive_resolved(cfg: dict[str, Any]) -> dict[str, Any]:
             "provider": tts.get("provider"),
             "model": tts.get("model"),
             "hasKey": bool(tts.get("apiKey")),
+        },
+        "image": {
+            "provider": image.get("provider"),
+            "model": image.get("model"),
+            "hasKey": bool(image.get("apiKey")),
         },
     }
 

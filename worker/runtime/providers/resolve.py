@@ -18,7 +18,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import threading
-from typing import Any
+from typing import Any, NamedTuple
 from urllib.parse import urlparse
 
 from worker.runtime.analysis.scene import FFmpegSceneDetector, SceneDetector
@@ -32,6 +32,9 @@ from worker.runtime.providers.asr.cloud import CloudASRProvider
 from worker.runtime.providers.asr.local import LocalASRProvider
 from worker.runtime.providers.image.base import ImageProvider
 from worker.runtime.providers.image.local import LocalImageProvider
+from worker.runtime.providers.image.openai_compatible import (
+    OpenAICompatibleImageProvider,
+)
 from worker.runtime.providers.renderer.base import RendererProvider
 from worker.runtime.providers.renderer.ffmpeg import FFmpegRenderer
 from worker.runtime.providers.tts.base import TTSProvider
@@ -369,33 +372,118 @@ def resolve_scene_detector() -> SceneDetector | None:
     return FFmpegSceneDetector(threshold=threshold)
 
 
+class ImagePreset(NamedTuple):
+    """厂商预置：只装**契约之外的差异**，其余走 OpenAI 通用契约。
+
+    换厂商 = 改一个 env，而不是改代码 —— 选型未定期间这件事会反复发生。
+    """
+
+    base_url: str
+    model: str
+    size: str
+    #: 尺寸字段名（OpenAI 标准是 ``size``，硅基流动文档写 ``image_size``）
+    size_key: str = "size"
+
+
+#: 2026-09-09 现状：StepFun 生图已无模型可用（``/v1/models`` 里只剩图生图
+#: ``step-image-edit-2``），故不设 stepfun 预置。
+IMAGE_PRESETS: dict[str, ImagePreset] = {
+    # 智谱 CogView-4：同步返回 data[0].url；尺寸须 16 整除、≤2^21 px，
+    # 1088x1920 是能取到的最接近 9:16 的合法值（1080 不能被 16 整除）。
+    "cogview": ImagePreset(
+        "https://open.bigmodel.cn/api/paas/v4", "cogview-4", "1088x1920"
+    ),
+    # 硅基流动：Kolors 是长期免费档；竖屏用 STEPWORK_IMAGE_SIZE=720x1440。
+    "siliconflow": ImagePreset(
+        "https://api.siliconflow.cn/v1",
+        "Kwai-Kolors/Kolors",
+        "1024x1024",
+        size_key="image_size",
+    ),
+}
+
+#: 没有预置、但走同一份 OpenAI 契约的网关（one-api / 自建转发 / OpenAI 本身）
+_GENERIC_IMAGE_KINDS = ("openai", "openai-compatible", "openai_compatible")
+
+
+def _build_image(kind: str | None, workspace_id: str | None) -> ImageProvider | None:
+    """按厂商 kind 构建 OpenAI 兼容配图 Provider；配置不全一律 ``None``。
+
+    env 缺失时回退到 ``workspace_id`` 的密钥覆盖层（设置页保存，仅内存）。
+    """
+    ov = _override_for(workspace_id, "image")
+    key = _env("STEPWORK_IMAGE_API_KEY") or str(ov.get("apiKey") or "")
+    if not key:
+        return None
+
+    preset = IMAGE_PRESETS.get(kind or "")
+    if preset is None:
+        # 无预置 → base_url 必须自己给，否则无从发请求
+        url = _env("STEPWORK_IMAGE_BASE_URL") or str(ov.get("baseUrl") or "")
+        model = _env("STEPWORK_IMAGE_MODEL") or ov.get("model")
+        size = _env("STEPWORK_IMAGE_SIZE") or "1024x1024"
+        size_key = _env("STEPWORK_IMAGE_SIZE_KEY") or "size"
+    else:
+        url = (
+            _env("STEPWORK_IMAGE_BASE_URL")
+            or str(ov.get("baseUrl") or "")
+            or preset.base_url
+        )
+        model = _env("STEPWORK_IMAGE_MODEL") or ov.get("model") or preset.model
+        size = _env("STEPWORK_IMAGE_SIZE") or preset.size
+        size_key = _env("STEPWORK_IMAGE_SIZE_KEY") or preset.size_key
+
+    if not _valid_base_url(url):
+        return None
+    return OpenAICompatibleImageProvider(
+        api_key=key,
+        base_url=url,
+        model=model,
+        size=size,
+        size_key=size_key,
+    )
+
+
 def resolve_image(workspace_id: str | None = None) -> ImageProvider | None:
     """按 ``STEPWORK_IMAGE_PROVIDER`` 解析配图 Provider（S2）。
 
-    - **未设置（默认）→ ``None``**：厂商选型未定（StepFun 生图 2026-10-10
-      下线、官方无替代），此时配图一律 ``UNAVAILABLE`` —— 宁可挡住，也不让
-      占位图被当成正式美术静默渲进成片。
+    - **未设置（默认）→ ``None``**：配图一律 ``UNAVAILABLE``。宁可挡住，
+      也不让占位图被当成正式美术静默渲进成片。
     - ``local``：确定性 SVG **占位图**（显式启用才生效，用于端到端联调）。
       不是插画，只是让「图挂在哪一幕」肉眼可见。
+    - ``cogview`` / ``siliconflow``：走 :class:`ImagePreset` 预置，只需
+      ``STEPWORK_IMAGE_API_KEY``。
+    - ``openai`` / ``openai-compatible``：任意 OpenAI 兼容网关，需额外给
+      ``STEPWORK_IMAGE_BASE_URL``。
 
-    厂商适配器等选型定了再各加一个分支（``wanxiang`` / ``cogview`` /
-    ``siliconflow`` / ``sdxl`` …），接口 :class:`ImageProvider` 不变。
+    任一厂商都可用 ``STEPWORK_IMAGE_MODEL`` / ``STEPWORK_IMAGE_SIZE`` /
+    ``STEPWORK_IMAGE_SIZE_KEY`` 覆盖预置值；配置不全返回 ``None``
+    （handler → ``UNAVAILABLE``），绝不把空密钥打到线上。
+
+    **不覆盖**通义万相 / ``qwen-image``：官方明确不支持 OpenAI 兼容模式
+    （DashScope 原生端点，尺寸 ``W*H`` 星号、响应结构也不同），真选它再
+    单开适配器 —— 不为了「凑齐三家」写一份没验证过的实现。
     """
-    del workspace_id  # 当前无厂商需要密钥；保留形参以便后续按工作区取覆盖层
     kind = (_env("STEPWORK_IMAGE_PROVIDER") or "").strip().lower()
     if kind == "local":
         return LocalImageProvider()
+    if kind in IMAGE_PRESETS or kind in _GENERIC_IMAGE_KINDS:
+        return _build_image(kind, workspace_id)
     return None
 
 
 def image_provider_from_hint(
     hint: dict[str, Any] | str | None,
+    workspace_id: str | None = None,
 ) -> ImageProvider | None:
-    """从 per-request 提示（``payload.image_provider``）构建配图 Provider。
+    """从 per-request 提示（``payload.imageProvider``）构建配图 Provider。
 
     与 :func:`renderer_from_hint` 同构：env 只能全局切换，而同一进程里不同
     项目可能要用不同厂商/风格。缺失 / 空 / 未知 → ``None``（调用方回落到
     ``deps.image``）。
+
+    厂商密钥**只**从 env / 覆盖层取，不接受 hint 内联 —— 密钥不该跟着
+    每条命令的 payload 走（会进命令日志与审计表）。
     """
     if not hint:
         return None
@@ -405,4 +493,6 @@ def image_provider_from_hint(
         return None
     if kind == "local":
         return LocalImageProvider()
+    if kind in IMAGE_PRESETS or kind in _GENERIC_IMAGE_KINDS:
+        return _build_image(kind, workspace_id)
     return None

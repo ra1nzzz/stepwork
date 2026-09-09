@@ -136,7 +136,10 @@
 | 来源 | 类型 | 复用方式 | 对应模块 | 备注 |
 |---|---|---|---|---|
 | StepFun TTS `POST /step_plan/v1/audio/speech`（stepaudio-2.5-tts）+ 音色复刻 `/voices` | 厂商文档 + 实测 | 直接 | S2 TTS | **实测坑**：`instruction` 情绪指令会盖过 `speed` 参数 → 必须生成后用 `atempo` 归一化 |
-| StepFun 生图 `POST /v1/images/generations`（step-2x-large / step-image-edit-2） | 厂商文档 | 直接（**临时**） | S2 image provider | 🚨 **2026-10-10 下线，官方无替代模型**（2026-09-08 核实） |
+| ~~StepFun 生图 `POST /v1/images/generations`~~ | 厂商文档 | ❌ **已废弃** | — | 🚨 **2026-10-10 公告下线；2026-09-09 实测 `GET /v1/models` 已无任何文生图模型**（只剩图生图 `step-image-edit-2`），实际提前失效 |
+| 智谱 CogView-4 `POST https://open.bigmodel.cn/api/paas/v4/images/generations` | 厂商文档 + 第三方复核 | 直接 | S2 `providers/image/openai_compatible.py` | 同步返回 `data[0].url`（30 天有效）；尺寸须 512–2048、16 整除、≤2^21 px → 9:16 取 `1088x1920`；**不支持 `response_format`** |
+| 硅基流动 `POST https://api.siliconflow.cn/v1/images/generations` | 厂商文档 | 直接（同上适配器） | S2 `providers/image/openai_compatible.py` | 尺寸字段文档写作 **`image_size`**（非 OpenAI 标准 `size`），预置已按此设 `size_key`；Kolors 为长期免费档 |
+| 阿里云通义万相 / `qwen-image` | 官方文档 | ❌ **不接** | — | 官方明确「图像生成模型走 DashScope 原生 API，**不支持 OpenAI 兼容（compatible-mode）**」：端点 `/api/v1/services/aigc/...`、尺寸 `W*H` 星号分隔、响应 `output.choices[0].message.content[0].image`。真要选它需单开适配器 |
 | StepFun 官方 ASR `/v1/audio/asr/file/submit+query` | 厂商文档 | 参考 | ASR 校验 | 用于验证 TTS 输出正确性 |
 | Playwright（Python · Apache-2.0，自带 Chromium） | 开源 | 直接 | **S1 `providers/renderer/playwright.py`** | 已实装「Chromium 逐帧截图 + ffmpeg `image2pipe` 管道直连」。本机装不上 Remotion 才用 Playwright；进度由帧数驱动（管道 ffmpeg 读不出总时长） |
 | `fakes/fake_ffmpeg_pipe.py`（仓库内） | 自研 | 直接 | 测试 | fake ffmpeg 读 stdin 数 JPEG SOI 写 JSON 报告；`STEPWORK_FAKE_FFMPEG_SLEEP=1` 睡 30s 给取消测试证明 terminate 真生效 |

@@ -69,8 +69,9 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     if image is None:
         raise DispatchError(
             "UNAVAILABLE",
-            "image provider not configured (set STEPWORK_IMAGE_PROVIDER; "
-            "vendor selection is still open — StepFun image gen EOL 2026-10-10)",
+            "image provider not configured (set STEPWORK_IMAGE_PROVIDER="
+            "<cogview|siliconflow|openai-compatible|local> + "
+            "STEPWORK_IMAGE_API_KEY; StepFun 生图已无模型可用)",
         )
 
     style = str(payload.get("style") or _DEFAULT_STYLE)

@@ -11,10 +11,26 @@
 - 先写死某家，接口就会被那家的参数形状带偏（尺寸枚举、风格参数、
   异步任务轮询），换厂商时等于重写。
 - 因此本模块**只定义契约**；厂商适配器等选型定了再各加一个文件。
+
+2026-09-09 复核：``GET /v1/models`` 里已没有任何文生图模型（只剩
+``step-image-edit-2`` 图生图），StepFun 这条线实际已断。第一个厂商实现
+见 :mod:`worker.runtime.providers.image.openai_compatible`。
 """
 from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
+
+
+class ImageProviderError(RuntimeError):
+    """配图厂商调用失败（HTTP 状态码 / 响应里没有图）。
+
+    刻意继承 ``RuntimeError``：handler 用 ``except Exception`` 统一转译，
+    异常**类型名会进错误信息**（``f"{type(e).__name__}: {e}"``），所以类名
+    本身必须对使用者可读。
+
+    消息里必须带上厂商返回的 body 片段 —— 各家把真实原因（模型不存在、
+    余额不足、限流）都放在 body 里，只报状态码等于让人猜。
+    """
 
 
 @runtime_checkable

@@ -238,8 +238,9 @@ async def test_missing_provider_and_bad_input() -> None:
     res = await dispatch(_scene_env("IllustrateScenes", {"versionId": vid}), deps)
     assert res["ok"] is False
     assert "UNAVAILABLE" in res["error"]
-    # 选型未定这件事必须写进错误，别让人以为是自己配错了
-    assert "EOL 2026-10-10" in res["error"]
+    # 错误里必须给出「该配什么」，别让人以为是自己配错了
+    assert "STEPWORK_IMAGE_PROVIDER" in res["error"]
+    assert "cogview" in res["error"] and "siliconflow" in res["error"]
 
     empty = await _version_with_scenes(deps, [])
     res = await dispatch(_scene_env("IllustrateScenes", {"versionId": empty}), deps)

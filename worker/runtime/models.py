@@ -361,6 +361,9 @@ class ConfigSpec(BaseModel):
     llm: dict[str, Any] = Field(default_factory=dict)
     asr: dict[str, Any] = Field(default_factory=dict)
     tts: dict[str, Any] = Field(default_factory=dict)
+    #: 配图（S2 vendor adapter）：provider 取 ``cogview`` / ``siliconflow`` /
+    #: ``openai-compatible`` / ``local``，空串 = 未配置（配图 UNAVAILABLE）。
+    image: dict[str, Any] = Field(default_factory=dict)
     workspace: dict[str, Any] = Field(default_factory=dict)
     brand: dict[str, Any] = Field(default_factory=dict)
     data: dict[str, Any] = Field(default_factory=dict)
@@ -371,7 +374,17 @@ class ConfigSpec(BaseModel):
     def _check_sections(self) -> ConfigSpec:
         # 防御：每个非空 section 必须是对象，否则 payload 畸形，
         # 在 handler 内被转译为干净的 INVALID_ARGUMENT 错误。
-        for name in ("llm", "asr", "tts", "workspace", "brand", "data", "export", "ui"):
+        for name in (
+            "llm",
+            "asr",
+            "tts",
+            "image",
+            "workspace",
+            "brand",
+            "data",
+            "export",
+            "ui",
+        ):
             val = getattr(self, name)
             if val is not None and not isinstance(val, dict):
                 raise ValueError(f"config section {name!r} must be an object")

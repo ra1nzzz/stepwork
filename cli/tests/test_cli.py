@@ -1083,6 +1083,27 @@ def test_scenes_illustrate_force_and_options(
     }
 
 
+def test_scenes_illustrate_size_parsed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``--size 1088x1920`` → ``{"width":1088,"height":1920}``（竖屏出图）。"""
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    rc = main(
+        ["scenes", "illustrate", "--version-id", "cv-1", "--size", "1088x1920"]
+    )
+    assert rc == 0
+    assert captured["env"]["payload"]["size"] == {"width": 1088, "height": 1920}
+
+
+def test_scenes_illustrate_bad_size_rejected(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """尺寸写错要当场报错，别让厂商返回一张比例不对的图。"""
+    _capture_run_command(monkeypatch, {"ok": True})
+    rc = main(["scenes", "illustrate", "--version-id", "cv-1", "--size", "1088*1920"])
+    assert rc != 0
+    # CLI 的错误统一以 JSON 走 stdout（不是 stderr）
+    assert "1088x1920" in capsys.readouterr().out
+
+
 def test_scenes_synth_builds_synthesizescenes_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
