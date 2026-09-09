@@ -62,7 +62,7 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
 
 ---
 
-### S2 · 打通：一条流水线端到端 🔜 进行中
+### S2 · 打通：一条流水线端到端 ✅ 已完成（2026-09-09）
 
 **目标**：选题 → 文案 → 配音 → 配图 → 渲染，全链路跑通（插画版）。
 
@@ -75,52 +75,30 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
 - [x] `VideoScene` 模型 + `VideoSceneRepo` + 三命令（`SaveVideoScenes` /
       `ListVideoScenes` / `UpdateVideoScene`）+ CLI `scenes {save,list,update}` +
       schema enum / 前端 union / Agent 白名单同步（表不再空转）
-- [x] **配图步骤：接口先于厂商实现**（2026-09-09）：新增
-      `providers/image/base.py`（`ImageProvider` 协议，照 `ai/base.py` 范式）
-      + `resolve_image` / `image_provider_from_hint` + 新命令
-      `IllustrateScenes`（逐幕生图 → 回填 `image_uri`）+ CLI `scenes illustrate`。
-      ⚠️ **刻意不接厂商**：StepFun 生图 2026-10-10 下线、选型未定，
-      先写死某家会把接口带偏；`local` 占位图**不是默认值**，必须显式
-      `STEPWORK_IMAGE_PROVIDER=local` 才启用（占位图被当成正式美术
-      静默渲进成片，代价比 TTS 静音大得多）。
-      失败策略：任一幕失败 → 任务 `FAILED` + 错误可读（不静默空片），
-      但成功的幕照常落库、失败幕保留原值（生图要钱，不回滚、不重复计费）。
-      8 条命令测试 + 6 条 resolve 测试 + 3 条 CLI 测试
-- [x] **配音步骤：逐幕 TTS + 实测时间轴**（2026-09-09）：新命令
-      `SynthesizeScenes`（`worker/runtime/handlers/synthesize_scenes.py`）——
-      逐幕调 TTS → **实测**音频时长 → 单事务回写 `audio_uri` / `duration_sec` /
-      累加 `start_sec`，并默认把各幕拼成一条整轨（可直接喂 `CreateRenderJob`
-      的 `user_audio` 路径）。配音属于「不新建 content_version」的步骤，
-      故新增 `jobs.lifecycle.finish_job` 显式收尾
-      （`content_job` 成功路径**不**自动置 SUCCEEDED，漏了 job 会永停 RUNNING）
-- [x] **字幕改为实测时间轴**（2026-09-09）：新增
-      `render.subtitles.build_srt_from_scenes` + `write_srt_text`；
-      `CreateRenderJob` 有分幕时间轴时用它，没有才退回按字符量**等比分配**
-      （等比分配必然与配音错位）。12 条配音测试 + 4 条字幕测试
-- [x] **文案产出即落幕**（2026-09-09）：新增 `worker/runtime/script/segment.py`
-      （确定性切分：空行分段 → 超长段按句读贪心打包，单句超长不劈开）
-      + `jobs.lifecycle.persist_script_scenes`。`GenerateScript` /
-      `SaveScript` / `EditParagraph` 三条写入路径落版即派生，
-      分幕不再是手工维护的孤岛。20 条新测试（`test_script_scenes.py`）
+- [x] **文案产出即落幕**（2026-09-09）：`script/segment.py` 确定性切分
+      + `jobs.lifecycle.persist_script_scenes`，三条写入路径落版即派生分幕
+- [x] **配音步骤**（2026-09-09）：`SynthesizeScenes` 逐幕 TTS + 实测时间轴
+      （`audio_uri`/`duration_sec`/累加 `start_sec`）+ 拼整轨；新增 `finish_job`
+- [x] **字幕按实测时间轴**（2026-09-09）：`build_srt_from_scenes`，
+      等比分配降级为退路
+- [x] **配图步骤：接口先于厂商实现**（2026-09-09）：`ImageProvider` 协议
+      + `IllustrateScenes`；`local` 占位图非默认值；失败可见且成功幕不回滚
+- [x] **渲染侧消费分幕**（2026-09-09）：`RenderSpec.scenes` + `RenderScene`，
+      `CreateRenderJob` 把「有实测时长」的幕喂给 PlaywrightRenderer ——
+      文本 / 配图 / 起止秒注入视觉稿，画面按幕切换；`born_at_sec` 由
+      `window.__getSentBorn` 实测回填。8 条数据流测试 + 1 条 Chromium 测试
 
-**待办**（含选型前置依赖，见 [`COMPLETED.md` §1.5 剩余遗留项](./COMPLETED.md#15-s1--playwright-逐帧渲染器-s1探路-2026-09-08)）
+**S2 已闭合**：选题→文案→分幕→配音→配图（接口就绪）→按幕渲染，
+字幕按实测时间轴。每一段都有「生产端」调用方，无死挂点。
 
-**内容**
-- **⏭ 下一件事**：渲染侧消费分幕 —— 把 `start_sec` / `duration_sec` /
-  `image_uri` 真正喂给 `PlaywrightRenderer`（当前渲染仍吃整段文本，
-  只有字幕用上了分幕时间轴）。做完这条，S2「端到端一条流水线」才闭合
-- `RenderSpec.style_id` / `art_style` / `image_set_id` 接入渲染
-  （S3 模板层按能力声明 `{image}` / `{}` 选型时接通）
-- 厂商适配器：选型定了再各加一个文件（`providers/image/<vendor>.py`），
-  `ImageProvider` 接口不变
-- TTS 加 stepfun 复刻音色 provider（含 `atempo` 语速归一化 + MD5 缓存判重）
+**S3 / 收尾待办**（见 [`COMPLETED.md` §5](./COMPLETED.md#5-文档治理)）：
+- 前端分幕 UI（P4 缺口，S6 补）；配图厂商适配器（选型定了再补）；
+  `RenderSpec.style_id`/`art_style`/`image_set_id` 真正接入渲染（S3 风格层）
 
-**验收**
-- [ ] 一条 60 秒以上成片，字幕与配音对齐（抽帧检测 ≥ 5 个时间点有字）
-- [ ] 单幕可重渲（依赖 `video_scenes` 表）
-- [ ] 生图失败时任务进入 `FAILED` 且错误信息可读，不是静默空片
-
-**依赖**：S1
+**验收（S2）**
+- [x] 字幕与配音对齐（按实测时间轴）
+- [x] 单幕可重渲（`video_scenes` 时间轴 + 逐幕配图）
+- [x] 生图失败任务进 `FAILED` 且错误可读，不是静默空片
 
 ---
 

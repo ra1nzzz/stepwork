@@ -197,9 +197,11 @@ plugins/{official,registry}
 1. ~~**per-request renderer hint**~~ → ✅ 已落地（见上表）
 2. ~~**`background_uri` 多义**~~ → ✅ 已拆 `design_doc_uri`（见上表）
 3. ~~**Playwright 依赖未声明**~~ → ✅ 已加 `[project.optional-dependencies].render`
-4. **抽帧目检撞切句瞬间取空字幕** → `video_scenes.born_at_sec` 列已建；幕已自动派生（第 8 条），待 TTS 步骤回填该列，目检脚本改读列（不再依赖 `__getSentBorn`）
+4. **抽帧目检撞切句瞬间取空字幕** → `video_scenes.born_at_sec` 已由**渲染步骤**
+   回填（第 14 条，S2 打通渲染即回填）—— 抽帧目检据此前移取样点，
+   不再依赖 `__getSentBorn`
 5. **`RenderSpec.style_id` / `art_style` / `image_set_id` 仍未被 Renderer 消费** —— S3 模板层按能力声明（`{image}` / `{}`）选型时接通
-6. **生图 Provider 选型未定**：StepFun 生图 2026-10-10 下线，`REFERENCE.md §6` 标「未定」（通义万相 / CogView-4 / 硅基流动 / 本地 SDXL 待实测）。**S2 的 image provider 接口应先于厂商实现落地**，别把接口绑死在某家
+6. **生图 Provider 选型未定**：StepFun 生图 2026-10-10 下线，`REFERENCE.md §6` 标「未定」（通义万相 / CogView-4 / 硅基流动 / 本地 SDXL 待实测）。**image provider 接口已先落地**（`ImageProvider` 协议），厂商适配器后补
 7. **TTS Provider（stepfun 复刻音色）未做**：`atempo` 语速归一化 + MD5&字节数双判据缓存均已验证，照搬即可
 8. ✅ **`video_scenes` 读写层已补**（repo + 3 命令 + CLI + Agent 白名单）—— 表不再空转
 9. ✅ **分幕已有「生产端」调用方**（2026-09-09）：新增 `script/segment.py`
@@ -211,17 +213,23 @@ plugins/{official,registry}
     累加 `start_sec`，并默认拼整轨（可直接喂 `CreateRenderJob` 的 `user_audio`
     路径）。字幕随之从「按字符量等比分配」改为「按实测时间轴」
     （`build_srt_from_scenes`），等比分配降级为无分幕时的退路
-11. ⚠️ **`born_at_sec` 仍为 NULL**：它描述的是「该幕首句在**画面**上出现的秒」，
-    含动画前摇，TTS 阶段无从得知 —— 应由渲染步骤（`design.html` 的
-    `__getSentBorn`）回填，抽帧目检改读该列
-12. ✅ **配图步骤已通**（2026-09-09）：`ImageProvider` 协议 + `resolve_image`
+11. ✅ **配图步骤已通**（2026-09-09）：`ImageProvider` 协议 + `resolve_image`
     + `IllustrateScenes`（含 CLI `scenes illustrate`）。
     **厂商适配器仍未接**：StepFun 生图 2026-10-10 下线、选型未定
     （通义万相 / CogView-4 / 硅基流动 / 本地 SDXL 待实测）—— 这是刻意的选择，
     接口先落地，厂商后补；`local` 只是**显式启用**的占位图，不是默认值
-13. ⚠️ **渲染侧仍未消费分幕**：`CreateRenderJob` 目前拿整段 `src.content` 渲染，
-    只是**字幕**用上了分幕时间轴。`start_sec` / `duration_sec` / `image_uri`
-    要真正喂给 `PlaywrightRenderer`，才能做到「画面按幕切换」——这是
-    S2「端到端一条流水线」的最后一段
-13. ⚠️ **前端无分幕 UI**：`types.ts` 的 union 已同步（防漂移测试会拦），但没有任何页面
-    调用这四个命令。按 P4，GUI 侧至少要有一个入口（S2 尾段或 S6 补齐）
+12. ✅ **渲染侧已消费分幕**（2026-09-09）：`RenderSpec.scenes`（新增
+    `RenderScene` 模型），`CreateRenderJob` 组装时把「有实测时长」的幕喂给
+    PlaywrightRenderer —— 文本 / 配图 / 起止秒注入视觉稿，**画面按幕切换**，
+    字幕也用它。时长为 0 的幕（没配音）**不喂**（画面会与音频错位）
+13. ✅ **`born_at_sec` 由渲染回填**（2026-09-09）：视觉稿暴露
+    `window.__getSentBorn(i)`，渲染器实测各幕首句出现秒 → 落回
+    `video_scenes.born_at_sec`。长度严格对齐才写（半截列表会让某一幕默默
+    前移错位的秒数，比不写危险）。抽帧目检撞切句瞬间据此前移取样点
+14. ✅ **S2「端到端一条流水线」已闭合**：选题→文案→（确定性）分幕→逐幕
+    配音（实测时间轴）→逐幕配图（接口就绪）→按幕渲染，字幕按实测时间轴。
+    分幕不再是孤岛，每一段都有「生产端」调用方（无死挂点）
+
+**S2 收尾 / S3 待办**（见 `ROADMAP.md`）：前端仍无分幕 UI（P4 缺口，S6 补）；
+配图厂商适配器（选型定了再补）；`RenderSpec.style_id`/`art_style`/`image_set_id`
+真正接入渲染（S3 风格层）；`drawtext` 版 FFmpegRenderer 仍吃整段文本（保持原样）
