@@ -72,11 +72,15 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
 - [x] `RenderSpec.design_doc_uri`（`background_uri` 降为遗留别名）
 - [x] per-request renderer hint（`payload.renderer`，补 P4 缺口）
 - [x] `pyproject.toml` 加 `[project.optional-dependencies].render`
+- [x] `VideoScene` 模型 + `VideoSceneRepo` + 三命令（`SaveVideoScenes` /
+      `ListVideoScenes` / `UpdateVideoScene`）+ CLI `scenes {save,list,update}` +
+      schema enum / 前端 union / Agent 白名单同步（表不再空转）
 
 **待办**（含选型前置依赖，见 [`COMPLETED.md` §1.5 剩余遗留项](./COMPLETED.md#15-s1--playwright-逐帧渲染器-s1探路-2026-09-08)）
 
 **内容**
-- **⏭ 第一件事**：`repos.video_scenes` + 至少一个命令总线入口（表已建但无代码读写=空表）
+- **⏭ 第一件事**：让 `GenerateScript` 的产出直接落 `video_scenes`
+  （读写层已就绪，但还没有「生产端」调用方 —— 幕目前是手工维护的孤岛）
 - 新增 `worker/runtime/providers/image/{base,stepfun}.py`（照 `ai/base.py` 范式）+ `resolve_image`
   —— ⚠️ **接口先于厂商实现**：StepFun 生图 2026-10-10 下线，选型未定，别把接口绑死某家
 - TTS 加 stepfun 复刻音色 provider（含 `atempo` 语速归一化 + MD5 缓存判重）

@@ -124,6 +124,7 @@
 | `render` 可选依赖 | `pyproject.toml` | `[project.optional-dependencies].render = ["playwright>=1.40"]`；装完仍需 `playwright install chromium`（pip 装不了浏览器二进制） |
 | `JobStage.ILLUSTRATING` | `models.py::JobStage` | 配图阶段；只增不改名，既有 11 个取值不变（`jobs.stage` 列是 TEXT，无 CHECK 约束） |
 | `video_scenes` 表 | `migrations/0012_video_scenes.sql` + `.down.sql` | S2 地基：`(id, version_id, seq, text, emotion, highlight, audio_uri, image_uri, start_sec, duration_sec, born_at_sec, created_at)`；`UNIQUE(version_id, seq)` 防并发写幕互相覆盖 |
+| **`video_scenes` 读写层（2026-09-09 追加）** | `models.py::VideoScene` + `db/repos.py::VideoSceneRepo` + `handlers/video_scenes.py` + `cli/__main__.py` | **表建了必须有代码读写**，否则又是一张空表。三命令 `SaveVideoScenes` / `ListVideoScenes` / `UpdateVideoScene`；CLI `stepwork-cli scenes {save,list,update}`；`ListVideoScenes` 进 Agent 白名单（只读），写命令降级为待审批任务 |
 | 迁移清单漂移修复 | `migrations/README.md` | 清单原停在 0005，补登记 0006–0012（README 自己规定「新增迁移必须追加一行」，此前 6 个版本漏登） |
 
 ---
@@ -200,4 +201,10 @@ plugins/{official,registry}
 5. **`RenderSpec.style_id` / `art_style` / `image_set_id` 仍未被 Renderer 消费** —— S3 模板层按能力声明（`{image}` / `{}`）选型时接通
 6. **生图 Provider 选型未定**：StepFun 生图 2026-10-10 下线，`REFERENCE.md §6` 标「未定」（通义万相 / CogView-4 / 硅基流动 / 本地 SDXL 待实测）。**S2 的 image provider 接口应先于厂商实现落地**，别把接口绑死在某家
 7. **TTS Provider（stepfun 复刻音色）未做**：`atempo` 语速归一化 + MD5&字节数双判据缓存均已验证，照搬即可
-8. ⚠️ **`video_scenes` 表尚无 repo 层与命令总线入口**：表已建但没有任何代码读写它。**S2 下一步必须先补 `repos.video_scenes` + 至少一个命令**，否则就是一张空表（正是本仓「空壳目录」的老毛病，别重犯）
+1. **`RenderSpec.style_id` / `art_style` / `image_set_id` 仍未被 Renderer 消费** —— S3 模板层按能力声明（`{image}` / `{}`）选型时接通
+8. ✅ **`video_scenes` 读写层已补**（repo + 3 命令 + CLI + Agent 白名单）—— 表不再空转
+9. ⚠️ **分幕尚无「生产端」调用方**：`SaveVideoScenes` 目前只能由外部/脚本手动调用，
+   脚本生成（`GenerateScript`）还不自动落幕。**S2 下一步 = 让 GenerateScript 产出直接落
+   `video_scenes`**，否则「幕」仍是手工维护的孤岛
+10. ⚠️ **前端无分幕 UI**：`types.ts` 的 union 已同步（防漂移测试会拦），但没有任何页面
+    调用这三个命令。按 P4，GUI 侧至少要有一个入口（S2 尾段或 S6 补齐）
