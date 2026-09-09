@@ -279,6 +279,16 @@ def resolve_tts(workspace_id: str | None = None) -> TTSProvider | None:
     return None
 
 
+def ffmpeg_runner() -> FFmpegRunner:
+    """按 ``STEPWORK_FFMPEG_BIN`` / PATH 构造 :class:`FFmpegRunner`。
+
+    统一入口，避免各处手写 ``FFmpegRunner()`` —— 那会退化成只查 PATH，
+    而 WinGet 装的 ffmpeg 常常不在 PATH 里（本机即如此），于是「明明装了
+    ffmpeg 却报 UNAVAILABLE」。
+    """
+    return FFmpegRunner(bin_path=_env("STEPWORK_FFMPEG_BIN"))
+
+
 def _build_renderer(kind: str, runner: FFmpegRunner) -> RendererProvider | None:
     """按 kind 构造渲染器；未知 kind 返回 ``None``（交回默认 provider）。"""
     if kind in ("playwright", "pw"):
@@ -306,7 +316,7 @@ def resolve_renderer() -> RendererProvider | None:
     ffmpeg 可执行名可用 ``STEPWORK_FFMPEG_BIN`` 显式指定（WinGet 安装的
     ffmpeg 常不在 PATH 里）；未指定则走 ``shutil.which("ffmpeg")``。
     """
-    runner = FFmpegRunner(bin_path=_env("STEPWORK_FFMPEG_BIN"))
+    runner = ffmpeg_runner()
     kind = (_env("STEPWORK_RENDER_PROVIDER") or "ffmpeg").lower()
     return _build_renderer(kind, runner)
 
@@ -341,7 +351,7 @@ def renderer_from_hint(
     if not kind:
         return None
     return _build_renderer(
-        kind, runner or FFmpegRunner(bin_path=_env("STEPWORK_FFMPEG_BIN"))
+        kind, runner or ffmpeg_runner()
     )
 
 

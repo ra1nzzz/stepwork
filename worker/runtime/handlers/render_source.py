@@ -58,8 +58,10 @@ from worker.runtime.render.ffmpeg_runner import (
     FFmpegUnavailable,
 )
 from worker.runtime.render.subtitles import (
+    build_srt_from_scenes,
     probe_audio_duration,
     write_srt_sidecar,
+    write_srt_text,
 )
 from worker.runtime.render.templates import resolve_resolution, resolve_template
 
@@ -229,14 +231,26 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             # 时长按 TTS 音频总时长等比分配）；失败降级为无字幕，不阻塞渲染
             video_path = result.video_uri.removeprefix("file://")
             audio_path = (audio_uri or "").removeprefix("file://")
+            # S2：字幕优先用「分幕实测时间轴」——有它才谈得上字幕与配音
+            # 对齐；没有（分幕未配音）才退回按字符量等比分配，那必然错。
             subtitles_path: str | None = None
             try:
                 audio_duration = probe_audio_duration(audio_path)
                 if audio_duration <= 0 and result.duration_seconds > 0:
                     audio_duration = result.duration_seconds
-                subtitles_path = write_srt_sidecar(
-                    video_path, src.content or "", audio_duration
-                )
+                timed = [
+                    s
+                    for s in repos.video_scenes.list_by_version(spec.source_version_id)
+                    if s.duration_sec > 0 and (s.text or "").strip()
+                ]
+                if timed:
+                    subtitles_path = write_srt_text(
+                        video_path, build_srt_from_scenes(timed)
+                    )
+                else:
+                    subtitles_path = write_srt_sidecar(
+                        video_path, src.content or "", audio_duration
+                    )
             except OSError:
                 subtitles_path = None
 

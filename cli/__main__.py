@@ -422,6 +422,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--born-at-sec", dest="born_at_sec", type=float, help="该幕首句起始秒（抽帧目检用）"
     )
 
+    scy = sc_sub.add_parser("synth", help="逐幕配音并回填时间轴（SynthesizeScenes）")
+    scy.set_defaults(command_type="SynthesizeScenes")
+    scy.add_argument("--version-id", dest="version_id", required=True, help="脚本版本 id")
+    scy.add_argument("--out-dir", dest="out_dir", help="音频输出目录")
+    scy.add_argument(
+        "--no-concat",
+        dest="concat",
+        action="store_false",
+        help="不拼整轨（只回填每幕的 audio_uri / duration_sec / start_sec）",
+    )
+
     # ----- versions（Tranche 2：内容版本查询） -----
     ver = sub.add_parser("versions", help="内容版本查询命令")
     ver_sub = ver.add_subparsers(dest="versions_action", required=True)
@@ -697,6 +708,14 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
                 if value is not None:
                     scene_payload[camel] = value
             return scene_payload
+        if action == "synth":
+            synth_payload: dict[str, Any] = {
+                "versionId": args.version_id,
+                "concat": bool(getattr(args, "concat", True)),
+            }
+            if getattr(args, "out_dir", None):
+                synth_payload["outDir"] = args.out_dir
+            return synth_payload
         raise ValueError(f"unknown scenes action: {action!r}")
 
     if command == "import":

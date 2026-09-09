@@ -448,6 +448,34 @@ class VideoSceneRepo:
         ).fetchone()
         return _row_to_video_scene(row) if row is not None else None
 
+    def apply_timeline(self, version_id: str, scenes: list[VideoScene]) -> int:
+        """**单事务**回填整条时间轴（``audio_uri`` / ``duration_sec`` /
+        ``start_sec``）。
+
+        为什么不逐幕 ``update_production``：时间轴是一致性事实 —— 前幕时长
+        变了，后面所有幕的 ``start_sec`` 都得跟着变。逐条写会在中途留下
+        「半新半旧」的时间轴，渲染器照着它出片就是字幕与配音错位。
+
+        ``WHERE id=? AND version_id=?``：幕 id 与版本必须同时匹配，防止把
+        A 版本的配音挂到 B 版本的幕上。
+
+        Returns:
+            更新行数。
+        """
+        if not scenes:
+            return 0
+        cur = self.conn.cursor()
+        with self.conn:
+            cur.executemany(
+                "UPDATE video_scenes SET audio_uri=?, duration_sec=?, start_sec=? "
+                "WHERE id=? AND version_id=?",
+                [
+                    (s.audio_uri, s.duration_sec, s.start_sec, s.id, version_id)
+                    for s in scenes
+                ],
+            )
+        return len(scenes)
+
     def update_production(
         self, scene_id: str, **fields: Any
     ) -> VideoScene | None:

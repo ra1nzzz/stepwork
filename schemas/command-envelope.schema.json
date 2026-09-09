@@ -35,6 +35,7 @@
         "SaveVideoScenes",
         "ListVideoScenes",
         "UpdateVideoScene",
+        "SynthesizeScenes",
         "GetConfig",
         "UpdateConfig",
         "ListProjects",

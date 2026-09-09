@@ -16,6 +16,7 @@ from worker.runtime.jobs.lease import acquire, is_expired, sweep_expired
 from worker.runtime.jobs.lifecycle import (
     content_job,
     emit_job_progress,
+    finish_job,
     notify_job_progress,
     persist_content_version,
     persist_script_scenes,
@@ -35,4 +36,5 @@ __all__ = [
     "notify_job_progress",
     "persist_content_version",
     "persist_script_scenes",
+    "finish_job",
 ]

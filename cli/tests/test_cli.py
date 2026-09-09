@@ -1031,6 +1031,50 @@ def test_scenes_update_omits_unset_optional_fields(
     assert env["payload"] == {"sceneId": "vs-1", "durationSec": 6.946}
 
 
+def test_scenes_synth_builds_synthesizescenes_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """P4：配音命令 CLI 必须可达（默认拼整轨）。"""
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    rc = main(["scenes", "synth", "--version-id", "cv-1"])
+    assert rc == 0
+    env = captured["env"]
+    assert env["commandType"] == "SynthesizeScenes"
+    assert env["payload"] == {"versionId": "cv-1", "concat": True}
+
+
+def test_scenes_synth_no_concat_and_out_dir(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    rc = main(
+        [
+            "scenes",
+            "synth",
+            "--version-id",
+            "cv-1",
+            "--no-concat",
+            "--out-dir",
+            "/tmp/vo",
+        ]
+    )
+    assert rc == 0
+    assert captured["env"]["payload"] == {
+        "versionId": "cv-1",
+        "concat": False,
+        "outDir": "/tmp/vo",
+    }
+
+
+def test_scenes_synth_omits_out_dir_when_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """契约：outDir 未给就不下发（handler 用自己的默认值）。"""
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    assert main(["scenes", "synth", "--version-id", "cv-1"]) == 0
+    assert "outDir" not in captured["env"]["payload"]
+
+
 def test_scenes_save_rejects_malformed_json(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

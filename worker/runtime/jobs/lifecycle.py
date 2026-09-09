@@ -248,6 +248,35 @@ def persist_content_version(
     return cv_id
 
 
+def finish_job(
+    repos: Any,
+    job: Job,
+    *,
+    stage: JobStage,
+    artifact_ids: list[str] | None = None,
+    notify: Any = None,
+) -> Job:
+    """标记 job ``SUCCEEDED`` —— **不**落 ``content_versions``。
+
+    配音 / 配图这类步骤的产出落在既有行上（``video_scenes`` 的
+    ``audio_uri`` / ``image_uri``），不新建内容版本，因此用不了
+    :func:`persist_content_version`。
+
+    ⚠️ **必须显式调用**：``content_job`` 的成功路径**不会**自动置
+    SUCCEEDED（只有异常路径才转 FAILED/CANCELLED）。少了这一句，job 会
+    永远停在 RUNNING —— 前端进度条卡死，还会被过期扫描当成可重试任务。
+
+    Returns:
+        置为 SUCCEEDED 后的 job。
+    """
+    succeeded = transition(
+        repos, job.id, JobState.SUCCEEDED, progress=1.0, error=None, stage=stage
+    )
+    record_result(repos, job.id, list(artifact_ids or []))
+    emit_job_progress(notify, succeeded)
+    return succeeded
+
+
 def persist_script_scenes(
     repos: Any,
     version_id: str,

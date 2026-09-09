@@ -26,12 +26,17 @@ from worker.runtime.models import (
     CommandEnvelope,
     ContentProject,
     ContentVersion,
+    VideoScene,
     Workspace,
 )
 from worker.runtime.providers.renderer.ffmpeg import FFmpegRenderer
 from worker.runtime.providers.tts.local import LocalTTSProvider
 from worker.runtime.render.ffmpeg_runner import FFmpegRunner
-from worker.runtime.render.subtitles import build_srt, split_sentences
+from worker.runtime.render.subtitles import (
+    build_srt,
+    build_srt_from_scenes,
+    split_sentences,
+)
 
 PY = sys.executable
 FAKE = os.path.join(os.path.dirname(__file__), "fakes", "fake_ffmpeg.py")
@@ -166,3 +171,93 @@ async def test_render_artifacts_srt_and_audio_kept() -> None:
     invocation = out["detail"]["invocation"]
     assert invocation["provider"] == "ffmpeg-renderer"
     assert invocation["estimated_cost"] is None
+
+
+# ----- S2：字幕按分幕实测时间轴（字幕与配音对齐）-----
+
+
+class _Scene:
+    """满足 :class:`TimedScene` 协议的最小替身。"""
+
+    def __init__(self, start_sec: float, duration_sec: float, text: str) -> None:
+        self.start_sec = start_sec
+        self.duration_sec = duration_sec
+        self.text = text
+
+
+def test_build_srt_from_scenes_uses_measured_timeline() -> None:
+    """实测时间轴为准：短幕短、长幕长，而不是按字数等分。"""
+    srt = build_srt_from_scenes(
+        [
+            _Scene(0.0, 1.25, "第一幕的话。"),
+            _Scene(1.25, 4.5, "第二幕长一些。"),
+        ]
+    )
+    entries = _parse_srt(srt)
+    assert [e[0] for e in entries] == [1, 2]
+    assert entries[0][1] == "00:00:00,000 --> 00:00:01,250"
+    assert entries[1][1] == "00:00:01,250 --> 00:00:05,750"
+    # 时间戳首尾相接（无空隙、无重叠）
+    assert entries[0][1].split(" --> ")[1] == entries[1][1].split(" --> ")[0]
+
+
+def test_build_srt_from_scenes_skips_blank_and_empty() -> None:
+    srt = build_srt_from_scenes(
+        [_Scene(0.0, 1.0, "有字。"), _Scene(1.0, 1.0, "  ")]
+    )
+    assert _parse_srt(srt)[0][2] == "有字。"
+    assert len(_parse_srt(srt)) == 1
+    assert build_srt_from_scenes([]) == ""
+
+
+def test_build_srt_from_scenes_clamps_negative() -> None:
+    srt = build_srt_from_scenes([_Scene(-5.0, 2.0, "负起点。")])
+    assert _parse_srt(srt)[0][1].startswith("00:00:00,000")
+
+
+async def test_render_srt_prefers_measured_scene_timeline() -> None:
+    """有分幕时间轴时，渲染出的 SRT 必须用实测值，不是等比分配。"""
+    conn = in_memory()
+    run_migrations(conn, MIGRATIONS_DIR)
+    repos = Repos(conn)
+    ws = repos.workspaces.insert(Workspace(name="ws", root_path="/tmp/ws"))
+    prj_id = repos.projects.insert(ContentProject(workspace_id=ws, title="p"))
+    cv_id = repos.content_versions.insert(
+        ContentVersion(
+            project_id=prj_id,
+            content_type="script",
+            content="第一句话。第二句话。",
+            content_hash="abc",
+            producer={},
+        )
+    )
+    # 人为落两幕「实测」时间轴：故意让字数与时间不成比例，
+    # 等比分配必然算不出下面这两个时间点
+    repos.video_scenes.replace_for_version(
+        cv_id,
+        [
+            VideoScene(version_id=cv_id, seq=0, text="第一句话。",
+                       start_sec=0.0, duration_sec=1.25),
+            VideoScene(version_id=cv_id, seq=1, text="第二句话。",
+                       start_sec=1.25, duration_sec=4.5),
+        ],
+    )
+    deps = Deps(
+        repos=repos,
+        tts=LocalTTSProvider(),
+        renderer=FFmpegRenderer(FFmpegRunner(bin_path=PY), ffmpeg_bin=FAKE),
+    )
+    out = await dispatch(
+        _env(
+            "CreateRenderJob",
+            {"source_version_id": cv_id, "tts_engine": "synthesize"},
+            prj_id,
+        ).model_dump(),
+        deps,
+    )
+    assert out["ok"] is True, out
+    srt_text = _read_text(out["detail"]["artifacts"]["subtitles"])
+    entries = _parse_srt(srt_text)
+    # 用的是实测时间轴，不是 audio_duration 等比分配
+    assert entries[0][1] == "00:00:00,000 --> 00:00:01,250"
+    assert entries[1][1] == "00:00:01,250 --> 00:00:05,750"
