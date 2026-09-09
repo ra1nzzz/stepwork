@@ -197,14 +197,17 @@ plugins/{official,registry}
 1. ~~**per-request renderer hint**~~ → ✅ 已落地（见上表）
 2. ~~**`background_uri` 多义**~~ → ✅ 已拆 `design_doc_uri`（见上表）
 3. ~~**Playwright 依赖未声明**~~ → ✅ 已加 `[project.optional-dependencies].render`
-4. **抽帧目检撞切句瞬间取空字幕** → `video_scenes.born_at_sec` 列已建；待 S2 有代码写幕时回填，目检脚本改读该列（不再依赖 `__getSentBorn`）
+4. **抽帧目检撞切句瞬间取空字幕** → `video_scenes.born_at_sec` 列已建；幕已自动派生（第 8 条），待 TTS 步骤回填该列，目检脚本改读列（不再依赖 `__getSentBorn`）
 5. **`RenderSpec.style_id` / `art_style` / `image_set_id` 仍未被 Renderer 消费** —— S3 模板层按能力声明（`{image}` / `{}`）选型时接通
 6. **生图 Provider 选型未定**：StepFun 生图 2026-10-10 下线，`REFERENCE.md §6` 标「未定」（通义万相 / CogView-4 / 硅基流动 / 本地 SDXL 待实测）。**S2 的 image provider 接口应先于厂商实现落地**，别把接口绑死在某家
 7. **TTS Provider（stepfun 复刻音色）未做**：`atempo` 语速归一化 + MD5&字节数双判据缓存均已验证，照搬即可
-1. **`RenderSpec.style_id` / `art_style` / `image_set_id` 仍未被 Renderer 消费** —— S3 模板层按能力声明（`{image}` / `{}`）选型时接通
 8. ✅ **`video_scenes` 读写层已补**（repo + 3 命令 + CLI + Agent 白名单）—— 表不再空转
-9. ⚠️ **分幕尚无「生产端」调用方**：`SaveVideoScenes` 目前只能由外部/脚本手动调用，
-   脚本生成（`GenerateScript`）还不自动落幕。**S2 下一步 = 让 GenerateScript 产出直接落
-   `video_scenes`**，否则「幕」仍是手工维护的孤岛
-10. ⚠️ **前端无分幕 UI**：`types.ts` 的 union 已同步（防漂移测试会拦），但没有任何页面
+9. ✅ **分幕已有「生产端」调用方**（2026-09-09）：新增 `script/segment.py`
+   （确定性切分纯函数）+ `jobs.lifecycle.persist_script_scenes`，
+   `GenerateScript` / `SaveScript` / `EditParagraph` 三条写入路径落版即派生分幕，
+   不再需要手工灌 `SaveVideoScenes`（该命令退化为「人工改幕」的覆盖入口）
+10. ⚠️ **幕的 `start_sec` 仍是 0**：分幕此刻只有文本，时间轴要等 TTS 实测
+    `duration_sec` 后累加得出 —— 与第 7 条一起做（配音步骤回填 `audio_uri`
+    + `duration_sec`，再顺推 `start_sec`）
+11. ⚠️ **前端无分幕 UI**：`types.ts` 的 union 已同步（防漂移测试会拦），但没有任何页面
     调用这三个命令。按 P4，GUI 侧至少要有一个入口（S2 尾段或 S6 补齐）

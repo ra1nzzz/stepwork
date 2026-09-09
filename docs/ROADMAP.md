@@ -75,12 +75,18 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
 - [x] `VideoScene` 模型 + `VideoSceneRepo` + 三命令（`SaveVideoScenes` /
       `ListVideoScenes` / `UpdateVideoScene`）+ CLI `scenes {save,list,update}` +
       schema enum / 前端 union / Agent 白名单同步（表不再空转）
+- [x] **文案产出即落幕**（2026-09-09）：新增 `worker/runtime/script/segment.py`
+      （确定性切分：空行分段 → 超长段按句读贪心打包，单句超长不劈开）
+      + `jobs.lifecycle.persist_script_scenes`。`GenerateScript` /
+      `SaveScript` / `EditParagraph` 三条写入路径落版即派生，
+      分幕不再是手工维护的孤岛。20 条新测试（`test_script_scenes.py`）
 
 **待办**（含选型前置依赖，见 [`COMPLETED.md` §1.5 剩余遗留项](./COMPLETED.md#15-s1--playwright-逐帧渲染器-s1探路-2026-09-08)）
 
 **内容**
-- **⏭ 第一件事**：让 `GenerateScript` 的产出直接落 `video_scenes`
-  （读写层已就绪，但还没有「生产端」调用方 —— 幕目前是手工维护的孤岛）
+- **⏭ 下一件事**：TTS 步骤回填 `audio_uri` + 实测 `duration_sec`，并顺推
+  `start_sec`（幕此刻只有文本、没有时间轴；画面必须被音频时长驱动，
+  反过来就是「带配音的 PPT」）。`born_at_sec` 同批回填，抽帧目检改读该列
 - 新增 `worker/runtime/providers/image/{base,stepfun}.py`（照 `ai/base.py` 范式）+ `resolve_image`
   —— ⚠️ **接口先于厂商实现**：StepFun 生图 2026-10-10 下线，选型未定，别把接口绑死某家
 - TTS 加 stepfun 复刻音色 provider（含 `atempo` 语速归一化 + MD5 缓存判重）
