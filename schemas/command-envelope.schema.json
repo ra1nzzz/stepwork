@@ -36,6 +36,7 @@
         "ListVideoScenes",
         "UpdateVideoScene",
         "SynthesizeScenes",
+        "IllustrateScenes",
         "GetConfig",
         "UpdateConfig",
         "ListProjects",

@@ -18,6 +18,8 @@ from worker.runtime.providers.ai.openai_compatible import (
 )
 from worker.runtime.providers.asr.local import LocalASRProvider
 from worker.runtime.providers.asr.whisper import FasterWhisperASRProvider
+from worker.runtime.providers.image.base import ImageProvider
+from worker.runtime.providers.image.local import LocalImageProvider
 from worker.runtime.providers.tts.edge import EdgeTTSProvider
 from worker.runtime.providers.tts.local import LocalTTSProvider
 
@@ -188,3 +190,40 @@ def test_resolve_tts_edge_present_builds_provider(
     tts = resolve_mod.resolve_tts()
     assert isinstance(tts, EdgeTTSProvider)
     assert tts.voice == "zh-CN-YunxiNeural"
+
+
+# ----- 配图（S2：接口先于厂商实现）-----
+
+
+def test_resolve_image_default_is_none() -> None:
+    """厂商选型未定 → 默认不可用，绝不能静默落到占位图上。"""
+    _clear_provider_env()
+    assert resolve_mod.resolve_image() is None
+
+
+def test_resolve_image_local_requires_explicit_opt_in() -> None:
+    _clear_provider_env()
+    os.environ["STEPWORK_IMAGE_PROVIDER"] = "local"
+    image = resolve_mod.resolve_image()
+    assert isinstance(image, LocalImageProvider)
+
+
+def test_resolve_image_unknown_vendor_is_none() -> None:
+    """未接的厂商名（含已下线的 stepfun）一律 None，不静默回落占位图。"""
+    _clear_provider_env()
+    for kind in ("stepfun", "wanxiang", "", "  "):
+        os.environ["STEPWORK_IMAGE_PROVIDER"] = kind
+        assert resolve_mod.resolve_image() is None, kind
+
+
+def test_image_provider_from_hint() -> None:
+    assert resolve_mod.image_provider_from_hint("local") is not None
+    assert resolve_mod.image_provider_from_hint({"kind": "local"}) is not None
+    assert resolve_mod.image_provider_from_hint(None) is None
+    assert resolve_mod.image_provider_from_hint("") is None
+    assert resolve_mod.image_provider_from_hint("nope") is None
+
+
+def test_local_image_satisfies_protocol() -> None:
+    """接口先于厂商的硬证据：实现只需满足协议，不必继承任何基类。"""
+    assert isinstance(LocalImageProvider(), ImageProvider)

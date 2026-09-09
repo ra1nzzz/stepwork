@@ -30,6 +30,8 @@ from worker.runtime.providers.ai.openai_compatible import (
 from worker.runtime.providers.asr.base import ASRProvider
 from worker.runtime.providers.asr.cloud import CloudASRProvider
 from worker.runtime.providers.asr.local import LocalASRProvider
+from worker.runtime.providers.image.base import ImageProvider
+from worker.runtime.providers.image.local import LocalImageProvider
 from worker.runtime.providers.renderer.base import RendererProvider
 from worker.runtime.providers.renderer.ffmpeg import FFmpegRenderer
 from worker.runtime.providers.tts.base import TTSProvider
@@ -365,3 +367,42 @@ def resolve_scene_detector() -> SceneDetector | None:
     thr = _env("STEPWORK_SCENE_THRESHOLD")
     threshold = float(thr) if thr else 0.4
     return FFmpegSceneDetector(threshold=threshold)
+
+
+def resolve_image(workspace_id: str | None = None) -> ImageProvider | None:
+    """按 ``STEPWORK_IMAGE_PROVIDER`` 解析配图 Provider（S2）。
+
+    - **未设置（默认）→ ``None``**：厂商选型未定（StepFun 生图 2026-10-10
+      下线、官方无替代），此时配图一律 ``UNAVAILABLE`` —— 宁可挡住，也不让
+      占位图被当成正式美术静默渲进成片。
+    - ``local``：确定性 SVG **占位图**（显式启用才生效，用于端到端联调）。
+      不是插画，只是让「图挂在哪一幕」肉眼可见。
+
+    厂商适配器等选型定了再各加一个分支（``wanxiang`` / ``cogview`` /
+    ``siliconflow`` / ``sdxl`` …），接口 :class:`ImageProvider` 不变。
+    """
+    del workspace_id  # 当前无厂商需要密钥；保留形参以便后续按工作区取覆盖层
+    kind = (_env("STEPWORK_IMAGE_PROVIDER") or "").strip().lower()
+    if kind == "local":
+        return LocalImageProvider()
+    return None
+
+
+def image_provider_from_hint(
+    hint: dict[str, Any] | str | None,
+) -> ImageProvider | None:
+    """从 per-request 提示（``payload.image_provider``）构建配图 Provider。
+
+    与 :func:`renderer_from_hint` 同构：env 只能全局切换，而同一进程里不同
+    项目可能要用不同厂商/风格。缺失 / 空 / 未知 → ``None``（调用方回落到
+    ``deps.image``）。
+    """
+    if not hint:
+        return None
+    kind = hint if isinstance(hint, str) else str(hint.get("kind", "") or "")
+    kind = kind.strip().lower()
+    if not kind:
+        return None
+    if kind == "local":
+        return LocalImageProvider()
+    return None

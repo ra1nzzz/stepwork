@@ -17,6 +17,7 @@ from worker.runtime.deps import Deps
 from worker.runtime.providers.resolve import (
     resolve_ai,
     resolve_asr,
+    resolve_image,
     resolve_renderer,
     resolve_scene_detector,
     resolve_tts,
@@ -52,6 +53,7 @@ async def handle_command(
         asr=resolve_asr(ws_id),
         ai=resolve_ai(ws_id),
         tts=resolve_tts(ws_id),
+        image=resolve_image(ws_id),
         renderer=resolve_renderer(),
         scene_detector=resolve_scene_detector(),
         notify=state.notify,

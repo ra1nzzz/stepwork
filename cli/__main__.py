@@ -433,6 +433,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="不拼整轨（只回填每幕的 audio_uri / duration_sec / start_sec）",
     )
 
+    sci = sc_sub.add_parser("illustrate", help="逐幕配图并回填（IllustrateScenes）")
+    sci.set_defaults(command_type="IllustrateScenes")
+    sci.add_argument("--version-id", dest="version_id", required=True, help="脚本版本 id")
+    sci.add_argument("--style", help="美术风格（默认 xiaohei）")
+    sci.add_argument("--out-dir", dest="out_dir", help="图片输出目录")
+    sci.add_argument("--prompt-extra", dest="prompt_extra", help="追加到提示词的补充要求")
+    sci.add_argument(
+        "--force",
+        action="store_true",
+        help="已有图的幕也重新生成（默认跳过，生图要钱）",
+    )
+
     # ----- versions（Tranche 2：内容版本查询） -----
     ver = sub.add_parser("versions", help="内容版本查询命令")
     ver_sub = ver.add_subparsers(dest="versions_action", required=True)
@@ -716,6 +728,20 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
             if getattr(args, "out_dir", None):
                 synth_payload["outDir"] = args.out_dir
             return synth_payload
+        if action == "illustrate":
+            illus_payload: dict[str, Any] = {
+                "versionId": args.version_id,
+                "force": bool(getattr(args, "force", False)),
+            }
+            # 契约：未给的一律不下发（handler 用自己的默认值）
+            for camel, value in (
+                ("style", getattr(args, "style", None)),
+                ("outDir", getattr(args, "out_dir", None)),
+                ("promptExtra", getattr(args, "prompt_extra", None)),
+            ):
+                if value is not None:
+                    illus_payload[camel] = value
+            return illus_payload
         raise ValueError(f"unknown scenes action: {action!r}")
 
     if command == "import":

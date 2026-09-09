@@ -46,6 +46,8 @@ _ROUTES: dict[str, str] = {
     "UpdateVideoScene": "worker.runtime.handlers.video_scenes",
     # S2 配音阶段：逐幕 TTS + 实测时长 → 时间轴（start_sec / duration_sec）
     "SynthesizeScenes": "worker.runtime.handlers.synthesize_scenes",
+    # S2 配图阶段：逐幕生图 → image_uri（接口先于厂商实现）
+    "IllustrateScenes": "worker.runtime.handlers.illustrate_scenes",
     # PRD-SCR-003：段落级生成/重写/扩写/压缩
     "EditParagraph": "worker.runtime.handlers.edit_paragraph",
     "GetConfig": "worker.runtime.handlers.config",

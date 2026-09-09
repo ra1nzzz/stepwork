@@ -31,6 +31,7 @@ class Deps:
     asr: Any = None
     ai: Any = None
     tts: Any = None
+    image: Any = None
     renderer: Any = None
     scene_detector: Any = None
     notify: Any = None

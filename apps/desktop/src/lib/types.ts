@@ -106,6 +106,7 @@ export interface CommandEnvelope {
     | "ListVideoScenes"
     | "UpdateVideoScene"
     | "SynthesizeScenes"
+    | "IllustrateScenes"
     | "CreateRenderJob"
     | "CancelJob"
     | "GetConfig"

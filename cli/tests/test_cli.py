@@ -1031,6 +1031,58 @@ def test_scenes_update_omits_unset_optional_fields(
     assert env["payload"] == {"sceneId": "vs-1", "durationSec": 6.946}
 
 
+def test_scenes_illustrate_builds_illustratescenes_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """P4：配图命令 CLI 必须可达（默认不 force）。"""
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    rc = main(["scenes", "illustrate", "--version-id", "cv-1"])
+    assert rc == 0
+    env = captured["env"]
+    assert env["commandType"] == "IllustrateScenes"
+    assert env["payload"] == {"versionId": "cv-1", "force": False}
+
+
+def test_scenes_illustrate_omits_unset_optionals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """契约：未给的一律不下发（handler 用自己的默认值）。"""
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    assert main(["scenes", "illustrate", "--version-id", "cv-1"]) == 0
+    payload = captured["env"]["payload"]
+    assert "style" not in payload and "outDir" not in payload
+    assert "promptExtra" not in payload
+
+
+def test_scenes_illustrate_force_and_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    rc = main(
+        [
+            "scenes",
+            "illustrate",
+            "--version-id",
+            "cv-1",
+            "--force",
+            "--style",
+            "ink",
+            "--out-dir",
+            "/tmp/img",
+            "--prompt-extra",
+            "留白多一些",
+        ]
+    )
+    assert rc == 0
+    assert captured["env"]["payload"] == {
+        "versionId": "cv-1",
+        "force": True,
+        "style": "ink",
+        "outDir": "/tmp/img",
+        "promptExtra": "留白多一些",
+    }
+
+
 def test_scenes_synth_builds_synthesizescenes_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

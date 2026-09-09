@@ -448,6 +448,16 @@ class VideoSceneRepo:
         ).fetchone()
         return _row_to_video_scene(row) if row is not None else None
 
+    def _apply(
+        self, version_id: str, sql: str, rows: list[tuple[Any, ...]]
+    ) -> int:
+        """单事务批写；``rows`` 每项末尾追加 ``version_id`` 作为守卫条件。"""
+        if not rows:
+            return 0
+        with self.conn:
+            self.conn.executemany(sql, [(*r, version_id) for r in rows])
+        return len(rows)
+
     def apply_timeline(self, version_id: str, scenes: list[VideoScene]) -> int:
         """**单事务**回填整条时间轴（``audio_uri`` / ``duration_sec`` /
         ``start_sec``）。
@@ -464,17 +474,27 @@ class VideoSceneRepo:
         """
         if not scenes:
             return 0
-        cur = self.conn.cursor()
-        with self.conn:
-            cur.executemany(
-                "UPDATE video_scenes SET audio_uri=?, duration_sec=?, start_sec=? "
-                "WHERE id=? AND version_id=?",
-                [
-                    (s.audio_uri, s.duration_sec, s.start_sec, s.id, version_id)
-                    for s in scenes
-                ],
-            )
-        return len(scenes)
+        return self._apply(
+            version_id,
+            "UPDATE video_scenes SET audio_uri=?, duration_sec=?, start_sec=? "
+            "WHERE id=? AND version_id=?",
+            [(s.audio_uri, s.duration_sec, s.start_sec, s.id) for s in scenes],
+        )
+
+    def apply_images(self, version_id: str, scenes: list[VideoScene]) -> int:
+        """**单事务**回填各幕配图（``image_uri``）。
+
+        只更新**本次真的生成成功**的幕：失败幕保持原有值（可能是旧图，
+        也可能是 NULL），绝不被清成 NULL —— 那是把已有的产出弄丢。
+
+        Returns:
+            更新行数。
+        """
+        return self._apply(
+            version_id,
+            "UPDATE video_scenes SET image_uri=? WHERE id=? AND version_id=?",
+            [(s.image_uri, s.id) for s in scenes],
+        )
 
     def update_production(
         self, scene_id: str, **fields: Any

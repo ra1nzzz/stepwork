@@ -23,6 +23,7 @@ from worker.runtime.deps import Deps
 from worker.runtime.providers.resolve import (
     resolve_ai,
     resolve_asr,
+    resolve_image,
     resolve_renderer,
     resolve_scene_detector,
     resolve_tts,
@@ -58,6 +59,7 @@ async def run_command(
             asr=resolve_asr(ws),
             ai=resolve_ai(ws),
             tts=resolve_tts(ws),
+            image=resolve_image(ws),
             renderer=resolve_renderer(),
             scene_detector=resolve_scene_detector(),
         )
