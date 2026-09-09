@@ -50,6 +50,8 @@ class JobStage(StrEnum):
     PROPOSING = "proposing"
     SCRIPTING = "scripting"
     SYNTHESIZING = "synthesizing"
+    #: S2 配图阶段（生图 provider）
+    ILLUSTRATING = "illustrating"
     RENDERING = "rendering"
     PUBLISHING = "publishing"
     VERIFYING = "verifying"
@@ -180,6 +182,10 @@ class RenderSpec(BaseModel):
     art_style: str = "xiaohei"
     #: 配图集 id；``None`` 表示该风格不需要配图（A 版零素材依赖）
     image_set_id: str | None = None
+    #: 渲染文档（HTML 视觉稿）uri —— 逐帧渲染器的画面来源。
+    #: 新增字段而非复用 ``background_uri``：后者原语义是「背景图」，
+    #: 一个字段两种含义迟早出事（S1 曾临时复用，S3 起收敛到这里）。
+    design_doc_uri: str | None = None
 
 
 class RenderResult(BaseModel):

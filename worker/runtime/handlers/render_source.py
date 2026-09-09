@@ -51,6 +51,7 @@ from worker.runtime.models import (
     RenderSpec,
     VideoDraftMeta,
 )
+from worker.runtime.providers.resolve import renderer_from_hint
 from worker.runtime.render.ffmpeg_runner import (
     FFmpegCancelled,
     FFmpegFailed,
@@ -144,7 +145,14 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             "NOT_FOUND", f"source version {spec.source_version_id} not found"
         )
 
-    renderer = deps.renderer
+    # per-request 渲染器选择（P4：GUI 与 CLI 同为一等公民）。
+    # 只靠 env 的话，同一进程里无法为不同项目/工作区选不同渲染器 —— GUI 上
+    # 一个工作区要插画版、另一个要字幕版就做不到。payload.renderer 补上这个
+    # 缺口；缺失/未知一律回落到 deps.renderer（默认路径完全不变）。
+    # 复用 deps.renderer 已有的 FFmpegRunner（同一份 ffmpeg 路径），避免
+    # hint 选择时悄悄换掉二进制配置。
+    base_runner = getattr(deps.renderer, "runner", None)
+    renderer = renderer_from_hint(payload.get("renderer"), base_runner) or deps.renderer
     if renderer is None:
         raise DispatchError("UNAVAILABLE", "renderer not configured")
 
@@ -171,8 +179,11 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     ) as ctx:
         register(ctx.job.id, cancel_event)
         try:
+            # audio_uri 此处必为 str：user_audio 路径已在 job 创建前校验过
+            # user_audio_uri 非空，否则直接 INVALID_ARGUMENT。
+            audio_uri: str
             if spec.tts_engine.value == "user_audio":
-                audio_uri = spec.user_audio_uri
+                audio_uri = str(spec.user_audio_uri)
             else:
                 # Tranche 2：TTS 音频作为 artifact 保留（不再删除）
                 audio_uri = await deps.tts.synthesize(

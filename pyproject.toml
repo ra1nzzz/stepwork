@@ -34,6 +34,12 @@ asr = [
 tts = [
   "edge-tts>=6.1",  # STEPWORK_TTS_PROVIDER=edge 微软在线神经语音
 ]
+# S1 · Playwright 逐帧渲染器（STEPWORK_RENDER_PROVIDER=playwright）。
+# 装完还需 `playwright install chromium` 拉浏览器二进制——pip 装不了浏览器，
+# 这一步必须在 README/安装脚本里显式提示，否则用户会撞上「包装了却渲不出」。
+render = [
+  "playwright>=1.40",  # Chromium 逐帧截图 → ffmpeg 管道直连
+]
 
 [project.scripts]
 stepwork-worker = "worker.runtime.__main__:main"

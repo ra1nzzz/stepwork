@@ -17,8 +17,8 @@
 
 契约（S1 定死，S3 风格层沿用）：
 
-- 渲染文档：``spec.background_uri``（优先）或构造参数 ``document_uri``
-  （兜底为内置零依赖探路文档 :data:`DEFAULT_DOCUMENT`）。
+- 渲染文档：``spec.design_doc_uri`` → ``spec.background_uri``（S1 遗留别名）
+  → 构造参数 ``document_uri`` → 内置零依赖探路文档 :data:`DEFAULT_DOCUMENT`。
 - 幕时长：由 ``scene_durations`` 注入为 ``window.SCENE_DURATIONS``。
 - 进度：**由已写帧数驱动**（``i / nframes``）。ffmpeg 从管道读输入时无法预知
   总时长，stderr 解析不出 ``Duration:``，所以进度只能来自帧计数。
@@ -138,7 +138,14 @@ class PlaywrightRenderer:
         if not os.path.isfile(audio_path):
             raise PlaywrightRenderError(f"audio not found: {audio_path}")
 
-        document = spec.background_uri or self.document_uri or str(DEFAULT_DOCUMENT)
+        # design_doc_uri 是正名；background_uri 是 S1 的遗留别名（当时未加新
+        # 字段，复用了它）。二者同时给时以 design_doc_uri 为准。
+        document = (
+            spec.design_doc_uri
+            or spec.background_uri
+            or self.document_uri
+            or str(DEFAULT_DOCUMENT)
+        )
         doc_path = document.replace("file://", "")
         if not os.path.isfile(doc_path):
             raise PlaywrightRenderError(f"render document not found: {doc_path}")

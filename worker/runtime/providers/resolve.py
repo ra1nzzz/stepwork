@@ -279,6 +279,19 @@ def resolve_tts(workspace_id: str | None = None) -> TTSProvider | None:
     return None
 
 
+def _build_renderer(kind: str, runner: FFmpegRunner) -> RendererProvider | None:
+    """按 kind 构造渲染器；未知 kind 返回 ``None``（交回默认 provider）。"""
+    if kind in ("playwright", "pw"):
+        if not _has_module("playwright"):
+            return None
+        from worker.runtime.providers.renderer.playwright import PlaywrightRenderer
+
+        return PlaywrightRenderer(runner)
+    if kind in ("ffmpeg", ""):
+        return FFmpegRenderer(runner)
+    return None
+
+
 def resolve_renderer() -> RendererProvider | None:
     """按 ``STEPWORK_RENDER_PROVIDER`` 解析渲染器（默认仍是 ffmpeg）。
 
@@ -287,18 +300,49 @@ def resolve_renderer() -> RendererProvider | None:
       ffmpeg）。``playwright`` 包缺失即回退 ``None`` → handler 转
       ``UNAVAILABLE``——**绝不静默回退成 ffmpeg 渲出另一条片子**。
 
+    未知 kind 同样返回 ``None``（→ UNAVAILABLE）：拼错变量名不该静默渲出
+    一条「看起来成功、其实用错渲染器」的片子。
+
     ffmpeg 可执行名可用 ``STEPWORK_FFMPEG_BIN`` 显式指定（WinGet 安装的
     ffmpeg 常不在 PATH 里）；未指定则走 ``shutil.which("ffmpeg")``。
     """
     runner = FFmpegRunner(bin_path=_env("STEPWORK_FFMPEG_BIN"))
     kind = (_env("STEPWORK_RENDER_PROVIDER") or "ffmpeg").lower()
-    if kind in ("playwright", "pw"):
-        if not _has_module("playwright"):
-            return None
-        from worker.runtime.providers.renderer.playwright import PlaywrightRenderer
+    return _build_renderer(kind, runner)
 
-        return PlaywrightRenderer(runner)
-    return FFmpegRenderer(runner)
+
+def renderer_from_hint(
+    hint: dict[str, Any] | str | None, runner: FFmpegRunner | None = None
+) -> RendererProvider | None:
+    """从 per-request 提示（``payload.renderer``）构建渲染器。
+
+    S1 只支持 env 变量切换渲染器，意味着**同一个进程里无法为不同项目选不同
+    渲染器**——GUI 上一个工作区想用插画版、另一个想用字幕版就做不到，P4
+    （GUI 与 CLI 同为一等公民）会落空。本函数是补上这个缺口。
+
+    ``hint`` 两种形态（与 :func:`ai_provider_from_hint` 同构）：
+
+    - 字符串：``"playwright"`` / ``"ffmpeg"``
+    - 字典：``{"kind": "playwright"}``
+
+    缺失 / 空 / 未知 kind 均返回 ``None`` → 调用方回落到 ``deps.renderer``。
+    注意：**不**接受 ``base_url`` / 密钥等字段——渲染是本机能力，不该被
+    per-request 提示注入外部地址。
+
+    Args:
+        hint: 提示（字符串或 ``{"kind": ...}`` 字典）。
+        runner: 复用调用方已有的 :class:`FFmpegRunner`（同一份 ffmpeg 路径与
+            测试注入的 fake）。不传则按 ``STEPWORK_FFMPEG_BIN`` / PATH 新建。
+    """
+    if not hint:
+        return None
+    kind = hint if isinstance(hint, str) else str(hint.get("kind", "") or "")
+    kind = kind.strip().lower()
+    if not kind:
+        return None
+    return _build_renderer(
+        kind, runner or FFmpegRunner(bin_path=_env("STEPWORK_FFMPEG_BIN"))
+    )
 
 
 def resolve_scene_detector() -> SceneDetector | None:
