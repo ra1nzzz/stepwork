@@ -214,8 +214,14 @@ plugins/{official,registry}
 11. ⚠️ **`born_at_sec` 仍为 NULL**：它描述的是「该幕首句在**画面**上出现的秒」，
     含动画前摇，TTS 阶段无从得知 —— 应由渲染步骤（`design.html` 的
     `__getSentBorn`）回填，抽帧目检改读该列
-12. ⚠️ **渲染侧仍未消费分幕**：`CreateRenderJob` 目前拿整段 `src.content` 渲染，
+12. ✅ **配图步骤已通**（2026-09-09）：`ImageProvider` 协议 + `resolve_image`
+    + `IllustrateScenes`（含 CLI `scenes illustrate`）。
+    **厂商适配器仍未接**：StepFun 生图 2026-10-10 下线、选型未定
+    （通义万相 / CogView-4 / 硅基流动 / 本地 SDXL 待实测）—— 这是刻意的选择，
+    接口先落地，厂商后补；`local` 只是**显式启用**的占位图，不是默认值
+13. ⚠️ **渲染侧仍未消费分幕**：`CreateRenderJob` 目前拿整段 `src.content` 渲染，
     只是**字幕**用上了分幕时间轴。`start_sec` / `duration_sec` / `image_uri`
-    要真正喂给 `PlaywrightRenderer`，才能做到「画面按幕切换」
+    要真正喂给 `PlaywrightRenderer`，才能做到「画面按幕切换」——这是
+    S2「端到端一条流水线」的最后一段
 13. ⚠️ **前端无分幕 UI**：`types.ts` 的 union 已同步（防漂移测试会拦），但没有任何页面
     调用这四个命令。按 P4，GUI 侧至少要有一个入口（S2 尾段或 S6 补齐）

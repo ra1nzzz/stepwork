@@ -75,6 +75,17 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
 - [x] `VideoScene` 模型 + `VideoSceneRepo` + 三命令（`SaveVideoScenes` /
       `ListVideoScenes` / `UpdateVideoScene`）+ CLI `scenes {save,list,update}` +
       schema enum / 前端 union / Agent 白名单同步（表不再空转）
+- [x] **配图步骤：接口先于厂商实现**（2026-09-09）：新增
+      `providers/image/base.py`（`ImageProvider` 协议，照 `ai/base.py` 范式）
+      + `resolve_image` / `image_provider_from_hint` + 新命令
+      `IllustrateScenes`（逐幕生图 → 回填 `image_uri`）+ CLI `scenes illustrate`。
+      ⚠️ **刻意不接厂商**：StepFun 生图 2026-10-10 下线、选型未定，
+      先写死某家会把接口带偏；`local` 占位图**不是默认值**，必须显式
+      `STEPWORK_IMAGE_PROVIDER=local` 才启用（占位图被当成正式美术
+      静默渲进成片，代价比 TTS 静音大得多）。
+      失败策略：任一幕失败 → 任务 `FAILED` + 错误可读（不静默空片），
+      但成功的幕照常落库、失败幕保留原值（生图要钱，不回滚、不重复计费）。
+      8 条命令测试 + 6 条 resolve 测试 + 3 条 CLI 测试
 - [x] **配音步骤：逐幕 TTS + 实测时间轴**（2026-09-09）：新命令
       `SynthesizeScenes`（`worker/runtime/handlers/synthesize_scenes.py`）——
       逐幕调 TTS → **实测**音频时长 → 单事务回写 `audio_uri` / `duration_sec` /
@@ -95,13 +106,13 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
 **待办**（含选型前置依赖，见 [`COMPLETED.md` §1.5 剩余遗留项](./COMPLETED.md#15-s1--playwright-逐帧渲染器-s1探路-2026-09-08)）
 
 **内容**
-- **⏭ 下一件事**：配图步骤 —— `image provider` 接口先落地（照 `ai/base.py`
-  范式 + `resolve_image`），回填 `video_scenes.image_uri`。
-  ⚠️ **接口先于厂商实现**：StepFun 生图 2026-10-10 下线，选型未定，别把接口绑死某家
-  （通义万相 / CogView-4 / 硅基流动 / 本地 SDXL 待实测）
-- `RenderSpec.style_id` / `art_style` / `image_set_id` 接入渲染（模板按能力声明选型）
-- 渲染侧消费分幕：把 `start_sec` / `duration_sec` / `image_uri` 真正喂给
-  PlaywrightRenderer（当前渲染仍吃整段文本）
+- **⏭ 下一件事**：渲染侧消费分幕 —— 把 `start_sec` / `duration_sec` /
+  `image_uri` 真正喂给 `PlaywrightRenderer`（当前渲染仍吃整段文本，
+  只有字幕用上了分幕时间轴）。做完这条，S2「端到端一条流水线」才闭合
+- `RenderSpec.style_id` / `art_style` / `image_set_id` 接入渲染
+  （S3 模板层按能力声明 `{image}` / `{}` 选型时接通）
+- 厂商适配器：选型定了再各加一个文件（`providers/image/<vendor>.py`），
+  `ImageProvider` 接口不变
 - TTS 加 stepfun 复刻音色 provider（含 `atempo` 语速归一化 + MD5 缓存判重）
 
 **验收**
