@@ -26,10 +26,19 @@
 | Workflow 双实体 | DECISION-LOG D-001 | Definition（版本化）与 Execution 强制分离 |
 | Session/Task 解耦 | DECISION-LOG D-002 | Task 是工作对象，Session 是事件日志，禁止混用 |
 | 迁移原则 | `README.md` 核心原则 | 真实产品价值 > 语义统一 > 契约统一 > 接口统一 > 实现统一；迁移走 兼容→映射→迁移→删除 |
-| 迁移排期 | `phase0/15-RECOMMENDED-MIGRATION-ORDER.md` | PHASE 1-12；当前排期未含 STEPWORK（列为「相邻产品」） |
+| 迁移排期 | `phase0/15-RECOMMENDED-MIGRATION-ORDER.md` | PHASE 1-12；STEPWORK 不单列 PHASE（D-008），仅在 PHASE 8 下挂一条硬前置 |
 | 提示词范式 | `prompts/ORCHDESK-UNIFICATION-PROMPT.md` | 统一提示词结构（你是谁/遵循什么/不得重定义/必须兼容/只允许改/禁止改/验收） |
 
-**⚠️ 缺口**：Ontology 仓库**尚无** `mappings/stepwork.yaml`、`products/stepwork/STEPWORK-ONTOLOGY-MIGRATION.md`、`prompts/STEPWORK-UNIFICATION-PROMPT.md`（已有 orchdesk/ordexa/inpeaknext/proagi/orchclaw 五份）。需在 S0 遗留项中补齐。
+**STEPWORK 侧映射资产（2026-09-09 已补齐，入 `YT-Agent-Ontology@b1089e9`）**
+
+| 落点 | 内容 |
+|---|---|
+| `mappings/stepwork.yaml` | 13 个实体 local→canonical；`Job → WorkflowExecution`（遵 D-002，**不**映射 Session）；`identity` 为导出层加式 canonical id |
+| `products/stepwork/STEPWORK-ONTOLOGY-MIGRATION.md` | 13 节迁移路线图；代码迁移排在 PHASE 9 之后，但 **ContentOps 基线须在 PHASE 9 前冻结**（D-008） |
+| `prompts/STEPWORK-UNIFICATION-PROMPT.md` | P1（映射，已完成）/ P2（兼容）边界；禁止改项清单；`to_canonical_event(event) -> dict` 接口 |
+| `DECISION-LOG.md` **D-008** | **不为 STEPWORK 新增生态级 PHASE。** 生态 `PHASE 1–12` 与产品 `Phase 0–6` 两套编号并存；映射三件套计为 PHASE 3（兼容层）资产。被否的备选：PHASE 8.5/13（稀释 PHASE 语义）、现在排 P4（违反「真实产品价值 > 语义统一」）|
+
+> 顺带修了母规范 `inpeaknext` / `orchclaw` / `proagi` 三份映射的 YAML 语法：此前声称「机器可读」但 `yaml.safe_load` 直接报错（未加引号的 `": "` 标量、以 `@` 开头的列表项）。六份映射现已全部 `yaml.safe_load` 通过。
 
 ---
 

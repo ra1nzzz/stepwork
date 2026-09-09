@@ -41,14 +41,17 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
 
 原则：**每阶段独立可验收，回滚 = revert 单个 PR**。不做跨阶段大爆炸。
 
-### S0 · 文档治理与 Ontology 对齐 ✅ 已完成
+### S0 · 文档治理与 Ontology 对齐 ✅ 已完成（2026-09-09 全部闭合）
 
 - [x] 旧规划文档归档到 `docs/archive/legacy/` 并建索引链接
 - [x] 新纲领 `REPOSITIONING.md`（短视频创作工厂 · 选题驱动 · Agent 原生）
 - [x] 建立 `ROADMAP` / `COMPLETED` / `REFERENCE` 三份职责文档
 - [x] 核实 YT-Agent-Ontology 契约（STEPWORK = ContentOps 域 Owner）
 - [x] 盘点可复用资产（自研/MIT）
-- [ ] ⬅️ **遗留**：向 Ontology 母规范仓库补 `mappings/stepwork.yaml`、`products/stepwork/STEPWORK-ONTOLOGY-MIGRATION.md`、`prompts/STEPWORK-UNIFICATION-PROMPT.md`，并确认 PHASE 编号
+- [x] **遗留闭合（2026-09-09）**：向 Ontology 母规范仓库补齐映射三件套，PHASE 编号裁决落到 **D-008**
+      - 三件套已入 `YT-Agent-Ontology@b1089e9`：`mappings/stepwork.yaml`（13 实体 local→canonical，`Job → WorkflowExecution` 遵 D-002 不映射 Session）、`products/stepwork/STEPWORK-ONTOLOGY-MIGRATION.md`（13 节路线图）、`prompts/STEPWORK-UNIFICATION-PROMPT.md`（P1/P2 边界 + `to_canonical_event` 接口）
+      - **D-008 结论：不为 STEPWORK 新增生态级 PHASE。** 生态 `PHASE 1–12` 与产品 `Phase 0–6` 是两套编号，并存不冲突；映射三件套计为 **PHASE 3（兼容层）** 资产；硬前置是 **ContentOps 域映射基线须在 PHASE 9 前冻结**（已写入母规范 PHASE 8 行）
+      - 顺带修了母规范三份既有映射（`inpeaknext` / `orchclaw` / `proagi`）的 YAML 语法：此前声称「机器可读」但 `yaml.safe_load` 直接报错（未加引号的 `": "` 标量、以 `@` 开头的列表项）。六份映射现已全部可解析
 
 ---
 

@@ -191,6 +191,7 @@ plugins/{official,registry}
 | 2026-09-08 | 核实 YT-Agent-Ontology 契约：STEPWORK = `ContentOps` 域 Owner |
 | 2026-09-08 | 核实 StepFun 生图 2026-10-10 下线（官方无替代模型） |
 | 2026-09-08 | **S1 完成**：Playwright 逐帧渲染器探路通过；ROADMAP 打勾、COMPLETED §1.5 入账、REFERENCE 登记新依赖；详见上方 §1.5 |
+| 2026-09-09 | **S0 遗留闭合**：向 YT-Agent-Ontology 补 `mappings/stepwork.yaml`（13 实体）+ `products/stepwork/STEPWORK-ONTOLOGY-MIGRATION.md`（13 节）+ `prompts/STEPWORK-UNIFICATION-PROMPT.md`，入 `YT-Agent-Ontology@b1089e9`；PHASE 编号裁决写入 **D-008**（不新增生态 PHASE；三件套计 PHASE 3 兼容层资产；ContentOps 基线须在 PHASE 9 前冻结）。顺带修母规范 `inpeaknext` / `orchclaw` / `proagi` 三份映射的 YAML 语法（此前声称机器可读但 `yaml.safe_load` 报错），六份映射现已全部可解析 |
 
 **S2 剩余遗留项（2026-09-09 更新）**
 
