@@ -17,14 +17,21 @@ from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
 from worker.runtime.handlers.brand import (
     brand_producer_fields,
+    collect_banned_hits,
     format_brand_prompt_block,
     load_project_brand,
 )
-from worker.runtime.jobs import content_job, persist_content_version, persist_script_scenes
+from worker.runtime.jobs import (
+    content_job,
+    persist_content_version,
+    persist_script_scenes,
+    transition,
+)
 from worker.runtime.models import (
     CommandEnvelope,
     CommandResult,
     JobStage,
+    JobState,
     ScriptSpec,
 )
 from worker.runtime.providers.resolve import ai_provider_from_hint
@@ -93,9 +100,46 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         notify=deps.notify,
     ) as ctx:
         ctx.progress(0.2, JobStage.SCRIPTING)
-        raw = await ai.complete(prompt, SCRIPT_SCHEMA)
+        # S4「禁用词零出现」：prompt 里已经要求不得使用，但模型可能不遵守。
+        # 产出命中 → 自动重试一次（同 prompt 换一次采样）；仍命中 → 任务
+        # FAILED 并**指名命中了哪些词**——绝不静默放行违规文本（那等于把
+        # 风格禁令当成装饰），也不悄悄改写（改文字 = 改文案语义）。
+        banned = (brand or {}).get("bannedExpressions") or []
+        script: dict[str, Any] = {}
+        raw: dict[str, Any] = {}
+        banned_retried = False
+        banned_hits: list[str] = []
+        for attempt in range(2):
+            raw = await ai.complete(prompt, SCRIPT_SCHEMA)
+            script = parse_script(raw)
+            banned_hits = collect_banned_hits(
+                f"{script.get('title', '')}\n{script.get('body', '')}", banned
+            )
+            if not banned_hits:
+                break
+            if attempt == 0:
+                banned_retried = True
+                ctx.progress(0.5, JobStage.SCRIPTING)  # 一次重试的可见进度
+        if banned_hits:
+            message = (
+                "SCRIPT_FAILED: generated script still uses banned "
+                f"expressions after retry: {'、'.join(banned_hits[:5])}"
+            )
+            transition(
+                repos,
+                ctx.job.id,
+                JobState.FAILED,
+                error=message[:200],
+                stage=JobStage.SCRIPTING,
+            )
+            # 刻意不抛 DispatchError：dispatch 转译会丢 job_id（见项目记忆）。
+            return CommandResult(
+                ok=False,
+                commandId=env.commandId,
+                job_id=ctx.job.id,
+                error=message,
+            )
         ctx.progress(0.8, JobStage.SCRIPTING)
-        script = parse_script(raw)
         content = json.dumps(script, ensure_ascii=False)
         cv_id = persist_content_version(
             repos,
@@ -164,6 +208,8 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             "parent": parent_id,
             # 供前端直接 seed 编辑器，无需额外 content-fetch 接口
             "script": script,
+            # S4：命中过禁用词并自动重试过（成功那次是干净的）；False = 首过
+            "bannedRetried": banned_retried,
             # S2：幕已随版本落库（配音/配图的输入），前端可直接拿 id 排队
             "sceneCount": len(scene_ids),
             "sceneIds": scene_ids,

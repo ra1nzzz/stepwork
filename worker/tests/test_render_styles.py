@@ -331,7 +331,7 @@ def test_renderer_uses_style_doc_when_no_explicit_doc(
     from worker.runtime.models import RenderSpec
 
     runner = FFmpegRunner(bin_path=sys.executable)
-    runner.probe = lambda _p: 0.1  # type: ignore[method-assign]
+    runner.probe = lambda _p: 0.1  # type: ignore[assignment]
     r = PlaywrightRenderer(runner, ffmpeg_bin=sys.executable, duration_seconds=0.1)
     # 跳过 ffmpeg 真实调用：spawn 换成一个立即可回收的空句柄也会触碰真实
     # 二进制；改用文档解析后必然抛出的异常来收尾——只要 captured 被填上即可。

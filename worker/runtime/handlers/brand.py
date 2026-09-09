@@ -36,6 +36,44 @@ _LIST_FIELDS: dict[str, str] = {
     "contentPillars": "content_pillars",
     "bannedExpressions": "banned_expressions",
 }
+# S4：可选 JSON 对象字段（六维 Creator DNA → style_dna 列）
+_JSON_FIELDS: dict[str, str] = {"styleDna": "style_dna"}
+
+#: 六维 Creator DNA 的展示名（与 douyin-ego-creator 蒸馏口径一致）。
+#: 未知键原样显示（style_dna 允许扩展，不锁死枚举）。
+_DIM_LABELS: dict[str, str] = {
+    "contentStrategy": "内容策略（选题/受众/价值密度）",
+    "hookDna": "开头钩子（Hook）",
+    "narrativeDna": "叙事结构（Narrative）",
+    "explosionDna": "爆点设计（Explosion）",
+    "languageDna": "语言风格（Language）",
+    "conversionDna": "转化引导（Conversion）",
+}
+
+
+def _load_object(raw: Any) -> dict[str, str]:
+    """把 JSON 列 TEXT 解析为字符串 dict（畸形时降级为空 dict）。"""
+    try:
+        parsed = json.loads(raw) if raw else {}
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    return {str(k): str(v) for k, v in parsed.items() if isinstance(v, str)}
+
+
+def _validate_object(payload: dict[str, Any], key: str) -> dict[str, str] | None:
+    """校验 payload 中的可选对象字段（值须为字符串）；未提供返回 None。"""
+    if key not in payload or payload[key] is None:
+        return None
+    value = payload[key]
+    if not isinstance(value, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) for k, v in value.items()
+    ):
+        raise DispatchError(
+            "INVALID_ARGUMENT", f"{key} must be an object of string values"
+        )
+    return {str(k): str(v) for k, v in value.items()}
 
 
 def _now() -> str:
@@ -74,6 +112,8 @@ def _row_to_profile(row: Any) -> dict[str, Any]:
         "tone": str(row["tone"] or ""),
         "contentPillars": _load_list(row["content_pillars"]),
         "bannedExpressions": _load_list(row["banned_expressions"]),
+        # S4：六维 Creator DNA（无则空 dict，兼容旧行）
+        "styleDna": _load_object(row["style_dna"]),
         "createdAt": str(row["created_at"] or ""),
         "updatedAt": str(row["updated_at"] or ""),
     }
@@ -143,6 +183,13 @@ def format_brand_prompt_block(profile: dict[str, Any]) -> str:
     banned = profile.get("bannedExpressions") or []
     if banned:
         lines.append(f"- 不得使用以下表达：{'、'.join(banned)}")
+    # S4：六维 Creator DNA 逐维约束（有值才注入，空 dict 不产生噪音）。
+    dna = profile.get("styleDna") or {}
+    if dna:
+        lines.append("- 创作者风格 DNA（逐维硬约束，与范文同等权重）：")
+        for key, value in dna.items():
+            label = _DIM_LABELS.get(key, key)
+            lines.append(f"  · {label}：{value}")
     # PRD-BRD-003「用于风格参考」：范文比标量描述更能传达文风。此前只注入
     # 5 个标量字段、不含任何范文，「风格参考」无从谈起。
     samples = profile.get("referenceScripts") or []
@@ -165,6 +212,27 @@ def brand_producer_fields(profile: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def collect_banned_hits(text: str, banned: list[str]) -> list[str]:
+    """找出 ``text`` 里命中的禁用词（按出现序去重，大小写不敏感）。
+
+    ``banned`` 为空 → 恒 ``[]``。S4 验收「禁用词在生成结果零出现」的落点：
+    GenerateScript 产出后据此校验，命中即重试/失败（见 generate_script.py）。
+    """
+    if not banned or not text:
+        return []
+    lowered = text.lower()
+    hits: list[str] = []
+    seen: set[str] = set()
+    for expr in banned:
+        e = str(expr).strip()
+        if not e:
+            continue
+        if e.lower() in lowered and e.lower() not in seen:
+            seen.add(e.lower())
+            hits.append(e)
+    return hits
+
+
 async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     """路由 BrandProfile 四命令。"""
     repos = deps.repos
@@ -180,11 +248,12 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         now = _now()
         pillars = _validate_list(p, "contentPillars") or []
         banned = _validate_list(p, "bannedExpressions") or []
+        dna = _validate_object(p, "styleDna") or {}
         repos.conn.execute(
             "INSERT INTO brand_profiles "
             "(id, workspace_id, name, positioning, audience, tone, "
-            "content_pillars, banned_expressions, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "content_pillars, banned_expressions, style_dna, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 new_profile_id, env.workspaceId, name,
                 str(p.get("positioning") or ""),
@@ -192,6 +261,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
                 str(p.get("tone") or ""),
                 json.dumps(pillars, ensure_ascii=False),
                 json.dumps(banned, ensure_ascii=False),
+                json.dumps(dna, ensure_ascii=False) if dna else None,
                 now, now,
             ),
         )
@@ -226,6 +296,11 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             if value is not None:
                 sets.append(f"{column}=?")
                 args.append(json.dumps(value, ensure_ascii=False))
+        for payload_key, column in _JSON_FIELDS.items():
+            dna_value = _validate_object(p, payload_key)
+            if dna_value is not None:
+                sets.append(f"{column}=?")
+                args.append(json.dumps(dna_value, ensure_ascii=False) if dna_value else None)
         sets.append("updated_at=?")
         args.append(_now())
         args.append(profile_id)
