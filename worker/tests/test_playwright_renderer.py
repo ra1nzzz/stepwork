@@ -258,6 +258,87 @@ def test_resolve_renderer_honours_ffmpeg_bin_env(monkeypatch: Any) -> None:
     assert got.runner.bin_path == "/opt/ffmpeg/bin/ffmpeg"
 
 
+def test_resolve_renderer_unknown_kind_is_not_silent(monkeypatch: Any) -> None:
+    """拼错 provider 名不该静默渲出「用错渲染器」的片子。"""
+    from worker.runtime.providers import resolve as resolve_mod
+
+    monkeypatch.setenv("STEPWORK_RENDER_PROVIDER", "playwrite")  # 拼写错误
+    assert resolve_mod.resolve_renderer() is None
+
+
+# ---------------------------------------------------------------------------
+# per-request renderer hint（P4：GUI 与 CLI 同为一等公民）
+# ---------------------------------------------------------------------------
+def test_renderer_from_hint_accepts_str_and_dict(monkeypatch: Any) -> None:
+    from worker.runtime.providers import resolve as resolve_mod
+
+    monkeypatch.delenv("STEPWORK_RENDER_PROVIDER", raising=False)
+    assert isinstance(resolve_mod.renderer_from_hint("playwright"), PlaywrightRenderer)
+    assert isinstance(
+        resolve_mod.renderer_from_hint({"kind": "playwright"}), PlaywrightRenderer
+    )
+    assert isinstance(resolve_mod.renderer_from_hint("ffmpeg"), FFmpegRenderer)
+
+
+def test_renderer_from_hint_returns_none_on_empty_or_unknown() -> None:
+    from worker.runtime.providers import resolve as resolve_mod
+
+    for hint in (None, "", "   ", {}, {"kind": ""}, "not-a-renderer"):
+        assert resolve_mod.renderer_from_hint(hint) is None, hint
+    # 未装 playwright 时同样回退 None（交回 deps.renderer）
+    assert resolve_mod.renderer_from_hint("nope") is None
+
+
+def test_renderer_from_hint_reuses_caller_runner() -> None:
+    """hint 选择时必须复用调用方的 FFmpegRunner，不能悄悄换掉二进制配置。"""
+    from worker.runtime.providers import resolve as resolve_mod
+
+    runner = FFmpegRunner(bin_path="/opt/ffmpeg/bin/ffmpeg")
+    got = resolve_mod.renderer_from_hint("ffmpeg", runner)
+    assert isinstance(got, FFmpegRenderer)
+    assert got.runner is runner
+
+
+def test_renderer_from_hint_returns_none_when_playwright_missing(
+    monkeypatch: Any,
+) -> None:
+    from worker.runtime.providers import resolve as resolve_mod
+
+    monkeypatch.setattr(resolve_mod, "_has_module", lambda _n: False)
+    assert resolve_mod.renderer_from_hint("playwright") is None
+
+
+def test_design_doc_uri_takes_precedence_over_background_uri(tmp_path: Any) -> None:
+    """新增字段优先；background_uri 降为 S1 遗留别名（不得反过来）。"""
+    audio = _audio(tmp_path)
+    r = PlaywrightRenderer(_runner(), ffmpeg_bin=FAKE)
+    spec = RenderSpec(
+        source_version_id="cv-1",
+        # 两个都不存在 → 报错信息里带的就是实际选中的那个
+        design_doc_uri=str(tmp_path / "design-doc.html"),
+        background_uri=str(tmp_path / "bg.png"),
+    )
+    with pytest.raises(PlaywrightRenderError, match="design-doc.html"):
+        r.render(spec, audio, lambda _p: None, None)
+
+
+def test_background_uri_still_works_as_legacy_alias(tmp_path: Any) -> None:
+    """只给 background_uri 时仍要走通（向后兼容，不 breaking）。"""
+    r = PlaywrightRenderer(_runner(), ffmpeg_bin=FAKE)
+    spec = RenderSpec(source_version_id="cv-1", background_uri=str(tmp_path / "bg.html"))
+    with pytest.raises(PlaywrightRenderError, match="bg.html"):
+        r.render(spec, _audio(tmp_path), lambda _p: None, None)
+
+
+def test_job_stage_gains_illustrating() -> None:
+    """S2 配图阶段：只增不改名，既有 11 个阶段取值不变。"""
+    from worker.runtime.models import JobStage
+
+    assert JobStage.ILLUSTRATING.value == "illustrating"
+    assert JobStage.RENDERING.value == "rendering"
+    assert JobStage.SYNTHESIZING.value == "synthesizing"
+
+
 # ---------------------------------------------------------------------------
 # 真机 e2e（perf：默认不跑，需真实 ffmpeg + 现成素材）
 #   pytest -m perf -k real_assets
