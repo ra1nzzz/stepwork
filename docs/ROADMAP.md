@@ -210,9 +210,11 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
 - ✅ **通道已通**：STEPWORK 的 `McpStdioClient` 直连该服务，
   `initialize` / `tools/list` / `tools/call` 全通，真实出 12 条热点、0 errors
   （未改 STEPWORK 一行代码）
-- ✅ **能稳定拿到的源**（全部免密钥）：**抖音热榜**（官方接口、50 条中文热榜词
-  + 热度值、免登录 —— 最贴选题的一条）、InfoQ + 少数派 RSS（中文科技/AI）、
-  arXiv（官方 Atom API）、HuggingFace Daily Papers、GitHub Trending
+- ✅ **能稳定拿到的源**（全部免密钥，实测 11 源 60 条 **0 errors**）：
+  **抖音热榜**（官方，50 条中文热榜词 + 热度值）、**今日头条热榜**（官方，
+  50 条热点 + HotValue）、**NewsNow 五榜**（微博/知乎/头条/百度/B站 ——
+  微博百度官方接口都要 cookie/风控，走开源聚合是唯一低成本绕法）、
+  InfoQ + 少数派 RSS（中文科技/AI）、arXiv、HuggingFace、GitHub Trending
 - ⚠️ **第一版结论曾误判「中文热搜拿不到」**，已翻案（2026-09-10）：那是
   **探测方法问题** —— 用第三方镜像当「微博热搜」的代表、没跟 http→https
   重定向（把 arXiv 判死）、用默认客户端 UA 触发 WAF（InfoQ 451）。
