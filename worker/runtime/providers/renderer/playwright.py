@@ -240,10 +240,12 @@ class PlaywrightRenderer:
                 proc, progress_cb, cancel_event, timeout_sec=self.timeout_sec
             )
         except BaseException:
-            # 任何异常路径（取消 / 文档不合规 / 管道断裂）都必须收掉子进程，
-            # 否则 ffmpeg 会挂着 stdin 变成孤儿进程。
+            # 任何异常路径（取消 / 文档不合规 / 管道断裂）都必须做两件事：
+            # 收掉子进程（否则 ffmpeg 会挂着 stdin 变成孤儿进程），
+            # 以及**删掉半成品**（否则留下一个名字像成品、内容损坏的 mp4）。
             _close_stdin(proc)
             _reap(proc)
+            _discard_partial(video_path)
             raise
         # 帧循环已经把进度推到 1.0；此处不再补发，避免重复终值。
 
@@ -381,6 +383,23 @@ def _close_stdin(proc: subprocess.Popen[Any]) -> None:
         if not stdin.closed:
             stdin.close()
     except (BrokenPipeError, OSError):
+        pass
+
+
+def _discard_partial(path: str) -> None:
+    """删掉中断渲染留下的半成品 mp4。
+
+    为什么必须删：输出文件名是 ``draft_<version>.mp4``，与**成品同名同形**。
+    取消或失败时 ffmpeg 已经建了文件（``-y`` 先截断再写），留下的就是一个
+    「文件名正常、内容损坏」的 mp4 —— 不删，后面的流程会把它当成品用，
+    用户也会以为渲染成功了。
+
+    兜底连 FileNotFoundError 一起吞：失败可能发生在 ffmpeg 打开输出之前
+    （文档不合规、管道立刻断裂），那时文件根本不存在。
+    """
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
         pass
 
 
