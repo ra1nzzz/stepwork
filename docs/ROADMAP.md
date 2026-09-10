@@ -202,7 +202,9 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
 - [x] `stepwork-cli` 能列出热点（`hotspots sources` / `discover` / `recommend`）
 - [x] 重复选题被相似度过滤拦截（推荐打分里的 `novelty` 维，复用 `script/similarity.py`）
 - [x] 该 MCP Server 可独立安装运行（不依赖 STEPWORK）
-- [ ] 热点 → `TopicProposal` 一键转换（推荐结果已带 `id`，接 `GenerateTopic` 的 source_version 语义未定，见下）
+- [x] 热点 → `TopicProposal` 一键转换（**方案 A**：先落一份带出处与信任等级的
+      「选题简报」，人/Agent 确认后交给**既有** `GenerateTopic` 消费；
+      见下「热点转选题」一节）
 
 **依赖**：S2。**风险**：需求未验证——建议先做最小版验证真伪，再扩展连接器。
 
@@ -228,8 +230,11 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
   playwright 列 `[browser]` **可选**依赖，不破坏上游「零运行时依赖」的立身之本
 - ✅ **热点筛选与推荐机制已落地（2026-09-10）**：弈韬要求「产品本身是 Agent，
   需要有热点筛选和推荐机制」—— 见下「推荐机制」一节
+- ✅ **热点 → 选题已打通（2026-09-10，方案 A）**：`ConvertHotspotToTopic` 落一份
+  带出处与信任等级的「选题简报」，确认后由**既有** `GenerateTopic` 消费 ——
+  见下「热点转选题」一节
 - 未做：CLI `mcp` 子命令（CLI 现在**没有** mcp 入口，属 S6 的 GUI/CLI 对等
-  缺口）、热点 → `GenerateTopic` 的一键转换、前端热点面板（S6）
+  缺口）、前端热点面板 + 推荐理由展示（S6）
 
 **抖音热点：三条路径的调研结论（2026-09-10）**
 
@@ -289,6 +294,55 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
 
 反馈闭环：`RecordHotspotFeedback`（adopted/ignored/rejected）→ 下一轮 `feedback`
 维生效。**同（热点, 工作区）覆盖而非追加**：一条热点只能有一个结论。
+
+---
+
+### 热点转选题：方案 A（2026-09-10，弈韬裁决）
+
+热点是**外部未核实**内容（PRD-AGT-003），不能冒充已验证素材直接产出选题。
+所以中间隔一步 `ConvertHotspotToTopic`，把「外部素材」和「下判断」分开：
+
+| 步骤 | 命令 | 做什么 | 调 AI |
+|---|---|---|---|
+| 1 | `RecommendHotspots` | 打分排序 + 写理由 | 仅写理由时 |
+| 2 | `ConvertHotspotToTopic` | 把一条热点装订成「选题简报」落 `content_versions` | 否（事实拼装） |
+| 3 | `GenerateTopic` | **既有命令，零改动**：读简报正文 → 出 angles | 是 |
+
+关键设计（每条都在测试里钉住）：
+
+- **简报不是选题**：它是素材包（标题 / 来源 / 链接 / 热度 / 摘要，外加可选的
+  推荐理由与打分分解），**不含 `angles`**。真正下判断留给 `GenerateTopic`。
+- **免责头写在正文里**，不是只写进 `producer`：下游读的就是 `content` 文本，
+  把限制写在这里，AI 提示词、人工阅读、导出都躲不开。
+- **来源与信任等级落 `producer`**：`trustLevel=external-unverified` +
+  `reviewState=pending_review`，复用 `agents/channel.py` 的同一套常量 ——
+  与出站 Agent 产物共用词表，UI 才能用一套逻辑筛出全部待复核产物。
+- **理由 / 打分分解由调用方回传，转换命令不重算也不猜**。它们是
+  `RecommendHotspots` 那一刻的判断结果，不是热点事实（发现取事实、推荐下判断）。
+  没带就如实写 `reason_source="none"`，**绝不编一句听起来合理的理由**。
+- **同输入重转按内容哈希复用**：Agent 会重试，不该刷出版本洪水；但理由变了
+  就是新版本（复用不能过头）。
+- 简报的 `content_type='hotspot_brief'` 不在 `load_topic_history` 的取数范围，
+  不会被「重复选题提醒」当成历史选题比对。
+
+⚠️ **`next_step.payload` 用的是 snake_case**（`source_version_id`）：
+`GenerateTopic` 的 `TopicProposalSpec` 直接吃 payload、没有 camelCase 别名，
+写成 `sourceVersionId` 会当场 `INVALID_ARGUMENT`。本域其余命令
+（`hotspotId` / `reasonTopN`）是 camelCase —— **两套约定并存是既成事实**，
+照 `next_step` 抄才对。
+
+⚠️ **没配品牌档时推荐会退化**：`brandFit` 取中性 0.5，闸门等于不设防，排序基本
+退化成「热 + 新」（CLI 实测：无品牌档时榜首是「青岛货轮火灾25人遇难」）。这本身
+**是正确行为**（没有画像就无从判断契合），但**热点面板应当提示「未绑定品牌档、
+推荐质量受限」**，否则用户会以为这就是推荐机制的水平。前端部分留 S6。
+
+**真机验收（2026-09-10）**：在真实抓取的 40 条热点上跑 推荐 → 转换 → `GenerateTopic`，
+**PASS**：简报正文确实进了提示词、`parent_version_id` 挂在简报上、重转返回
+`reused=true` 且版本数不变。报告在 `.workbuddy/hotspot-acceptance/convert-report.md`。
+CLI 侧同样验过（`hotspots convert --hotspot-id … --reason … --breakdown-json …`）。
+
+**已知局限**：本机未配任何 AI Provider key，验收里的 `GenerateTopic` 用的是
+**记录提示词的替身 AI** —— 它证接线，不证模型产出质量。
 
 ---
 

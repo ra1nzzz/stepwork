@@ -111,6 +111,7 @@ export interface CommandEnvelope {
     | "DiscoverHotspots"
     | "RecommendHotspots"
     | "RecordHotspotFeedback"
+    | "ConvertHotspotToTopic"
     | "CreateRenderJob"
     | "CancelJob"
     | "GetConfig"

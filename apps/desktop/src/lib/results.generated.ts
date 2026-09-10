@@ -57,6 +57,21 @@ export interface CancelScheduledPublishDetail {
   cancelled: string;
 }
 
+export interface ConvertHotspotToTopicDetail {
+  content_version_id: string;
+  hotspot_id: string;
+  source: string;
+  title: string;
+  url: string;
+  trust_level: string;
+  review_state: string;
+  reason_source: string;
+  breakdown_attached: boolean;
+  reused: boolean;
+  brief: string;
+  next_step: Record<string, unknown>;
+}
+
 export interface CreatePlatformVariantDetail {
   variant: Record<string, unknown>;
 }
@@ -236,6 +251,7 @@ export interface CommandResultDetails {
   CallA2aSkill: CallA2aSkillDetail;
   CallMcpTool: CallMcpToolDetail;
   CancelScheduledPublish: CancelScheduledPublishDetail;
+  ConvertHotspotToTopic: ConvertHotspotToTopicDetail;
   CreatePlatformVariant: CreatePlatformVariantDetail;
   DeleteAgentConnection: DeleteAgentConnectionDetail;
   DiscoverHotspots: DiscoverHotspotsDetail;
@@ -276,6 +292,7 @@ export const CONTRACTED_COMMANDS = [
   "CallA2aSkill",
   "CallMcpTool",
   "CancelScheduledPublish",
+  "ConvertHotspotToTopic",
   "CreatePlatformVariant",
   "DeleteAgentConnection",
   "DiscoverHotspots",

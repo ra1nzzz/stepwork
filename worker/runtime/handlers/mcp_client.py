@@ -34,37 +34,19 @@ from worker.runtime.agents.channel import (
 from worker.runtime.agents.mcp_client import (
     McpClientError,
     McpStdioClient,
+    describe_error,
     flatten_content,
     parse_command,
 )
 from worker.runtime.commands.bus import DispatchError
 from worker.runtime.db.rows import now_iso
 from worker.runtime.deps import Deps
-from worker.runtime.logging_config import mask_secrets
 from worker.runtime.models import CommandEnvelope, CommandResult
 
 #: 出站连接的 protocol 值。与入站的 ``mcp`` 分开，否则 Agent Connections
 #: 页无法区分「别人调我们」和「我们调别人」，启停语义也会混淆。
 PROTOCOL = "mcp-client"
 
-
-
-#: stderr 回显长度上限（够定位问题，又不至于把整篇栈塞进错误消息）
-_STDERR_TAIL_CHARS = 500
-
-
-def _with_diagnostic(e: McpClientError) -> str:
-    """错误消息 + 外部 Server 的 stderr 片段。
-
-    stderr 是排查外部 Server 的唯一线索，必须回显；但它常含
-    ``api_key=...`` 之类，先过 §11.3 掩码再拼进消息。
-    """
-    stderr = ""
-    if isinstance(e.detail, dict):
-        stderr = str(e.detail.get("stderr") or "")
-    if not stderr:
-        return e.message
-    return f"{e.message}（Server 输出：{mask_secrets(stderr)[:_STDERR_TAIL_CHARS]}）"
 
 
 async def _probe(command: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -75,7 +57,7 @@ async def _probe(command: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
             info = await client.initialize()
             tools = await client.list_tools()
     except McpClientError as e:
-        raise DispatchError(e.code, _with_diagnostic(e)) from e
+        raise DispatchError(e.code, describe_error(e)) from e
     return info, tools
 
 
@@ -157,7 +139,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             record_call(
                 deps, env, conn_id=conn_id, task_type=f"mcp:{tool_name}", text="", ok=False
             )
-            raise DispatchError(e.code, _with_diagnostic(e)) from e
+            raise DispatchError(e.code, describe_error(e)) from e
 
         text = flatten_content(result)[:MAX_RESULT_CHARS]
         task_id = record_call(

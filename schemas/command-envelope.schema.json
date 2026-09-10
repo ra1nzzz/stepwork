@@ -41,6 +41,7 @@
         "DiscoverHotspots",
         "RecommendHotspots",
         "RecordHotspotFeedback",
+        "ConvertHotspotToTopic",
         "GetConfig",
         "UpdateConfig",
         "ListProjects",

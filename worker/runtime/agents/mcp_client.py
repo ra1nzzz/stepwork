@@ -27,6 +27,8 @@ import os
 import shlex
 from typing import Any
 
+from worker.runtime.logging_config import mask_secrets
+
 logger = logging.getLogger("worker.runtime")
 
 #: MCP 协议版本（与 ``mcp/server.py`` 保持一致）
@@ -42,6 +44,28 @@ DEFAULT_TIMEOUT = 20.0
 #: 单次响应最大字节数。外部 Server 可能吐出超大结果（甚至恶意撑爆内存），
 #: 超限即断开并报错，而不是无限读。
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+
+#: stderr 回显长度上限（够定位问题，又不至于把整篇栈塞进错误消息）
+_STDERR_TAIL_CHARS = 500
+
+
+def describe_error(e: McpClientError) -> str:
+    """错误消息 + 外部 Server 的 stderr 片段。
+
+    stderr 是排查外部 Server 的唯一线索，必须回显；但它常含
+    ``api_key=...`` 之类，先过 §11.3 掩码再拼进消息。
+
+    放在这里（而非各个调用方）是因为漏掉的代价已经出现过：热点包装层曾只写
+    ``str(e)``，于是「Server 起不来」时用户看到的是「在响应前退出」——
+    真正的原因（``ModuleNotFoundError``：包没装）就在 ``detail.stderr`` 里，
+    却被拍平丢掉了。
+    """
+    stderr = ""
+    if isinstance(e.detail, dict):
+        stderr = str(e.detail.get("stderr") or "")
+    if not stderr:
+        return e.message
+    return f"{e.message}（Server 输出：{mask_secrets(stderr)[:_STDERR_TAIL_CHARS]}）"
 
 
 def _child_env() -> dict[str, str]:

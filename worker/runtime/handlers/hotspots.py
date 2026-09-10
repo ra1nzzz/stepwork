@@ -1,6 +1,6 @@
-"""热点命令：发现 → 推荐 → 反馈（S5，migrations/0014）。
+"""热点命令：发现 → 推荐 → 反馈 → 转选题（S5，migrations/0014）。
 
-四个命令：
+五个命令：
 
 - ``ListHotspotSources``：列出上游可用源（含是否需登录）—— 让 UI 能把
   「热点宝要登录」这件事说在前面，而不是抓完才报错。
@@ -8,23 +8,34 @@
 - ``RecommendHotspots``：**推荐**，不是列清单。打分（规则）+ 理由（AI，
   不可用时降级规则）＋ 风险标记。
 - ``RecordHotspotFeedback``：采纳/忽略/拒绝，喂给下一轮推荐。
+- ``ConvertHotspotToTopic``：把一条热点装订成「选题简报」内容版本，交给
+  既有的 ``GenerateTopic`` 消费。
 
 为什么发现和推荐分开：发现是取事实（换源不影响下游），推荐是下判断（吃
 品牌画像 + 历史选题 + 用户反馈）。合成一个命令，就没法「换个角度重新推荐」
 而不重新抓一遍全网。
+
+为什么转换是**独立一步**而不是塞进 ``GenerateTopic``：热点是外部未核实内容
+（PRD-AGT-003），不该直接当选题产出。中间隔一份带出处与信任等级的简报，
+人/Agent 过一次目，也留下「这批选题是从哪条热点来的」的审计链。转换本身
+**不调 AI**（简报由事实拼装），因此不建 job —— 与 ``ImportSource`` 的本地
+文件路径同理。
 """
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from typing import Any
 
+from worker.runtime.agents.channel import REVIEW_STATE, TRUST_LEVEL
 from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
 from worker.runtime.handlers.brand import (
     format_brand_prompt_block,
     load_project_brand,
 )
+from worker.runtime.hotspot import brief as hotspot_brief
 from worker.runtime.hotspot import mcp as hotspot_mcp
 from worker.runtime.hotspot.mcp import SERVER_MARKER
 from worker.runtime.hotspot.models import VERDICTS, HotspotItem
@@ -32,7 +43,7 @@ from worker.runtime.hotspot.rank import (
     build_recommendation,
     rank_items,
 )
-from worker.runtime.models import CommandEnvelope, CommandResult
+from worker.runtime.models import CommandEnvelope, CommandResult, ContentVersion
 from worker.runtime.providers.resolve import ai_provider_from_hint
 from worker.runtime.script.history import load_topic_history
 
@@ -347,6 +358,124 @@ async def _feedback(env: CommandEnvelope, deps: Deps) -> CommandResult:
 
 
 # ---------------------------------------------------------------------------
+# ConvertHotspotToTopic
+
+
+def _optional_str(payload: dict[str, Any], key: str) -> str | None:
+    raw = payload.get(key)
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        raise DispatchError("INVALID_ARGUMENT", f"{key} must be a string")
+    return raw or None
+
+
+async def _convert(env: CommandEnvelope, deps: Deps) -> CommandResult:
+    """把一条热点转成「选题简报」内容版本（方案 A）。
+
+    产出**不是**选题本身，而是一份带出处 + 信任等级 + （可选）推荐理由与打分
+    分解的素材包。下一步由调用方拿它的 id 去跑既有的 ``GenerateTopic``：
+
+    ``GenerateTopic(sourceVersionId=<本命令返回的 content_version_id>)``
+
+    这样「热点 → 选题」的语义边界落在两处既有一致的地方：外部内容必须先声明
+    未核实（本命令的 producer），判断必须由 AI 生成角度（GenerateTopic）。
+    """
+    payload = env.payload or {}
+    repos = deps.repos
+    repos.workspaces.ensure(env.workspaceId)
+
+    hotspot_id = payload.get("hotspotId")
+    if not isinstance(hotspot_id, str) or not hotspot_id.strip():
+        raise DispatchError("INVALID_ARGUMENT", "hotspotId required")
+    hotspot_id = hotspot_id.strip()
+
+    reason = _optional_str(payload, "reason")
+    reason_source = _optional_str(payload, "reasonSource")
+    breakdown = payload.get("breakdown")
+    if breakdown is not None and not isinstance(breakdown, dict):
+        raise DispatchError(
+            "INVALID_ARGUMENT", "breakdown must be an object (RecommendHotspots 的 breakdown)"
+        )
+
+    # 限定本工作区：推荐页给的 id 全局唯一，但「别人工作区抓到的热点」不该
+    # 能借 id 转到本项目来
+    item = repos.hotspots.get(hotspot_id, env.workspaceId)
+    if item is None:
+        raise DispatchError(
+            "NOT_FOUND",
+            f"热点 {hotspot_id} 不在本工作区：请先运行 DiscoverHotspots 落库",
+        )
+
+    project_id = env.projectId or payload.get("projectId")
+    if not project_id:
+        project_id = repos.projects.get_or_create_default(env.workspaceId).id
+    project_id = str(project_id)
+
+    text = hotspot_brief.build_brief(
+        item,
+        reason=reason,
+        reason_source=reason_source,
+        breakdown=breakdown if isinstance(breakdown, dict) else None,
+    )
+    content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    # 同一（热点, 理由, 分解）→ 同一份简报：Agent 重试不该刷出版本洪水
+    existing = repos.content_versions.find_by_hash(
+        project_id, hotspot_brief.HOTSPOT_BRIEF_CONTENT_TYPE, content_hash
+    )
+    reused = existing is not None
+    cv_id = existing
+    if cv_id is None:
+        cv = ContentVersion(
+            project_id=project_id,
+            # 没有父版本：它的来源不是本系统里的某个版本，而是外部热点
+            parent_version_id=None,
+            content_type=hotspot_brief.HOTSPOT_BRIEF_CONTENT_TYPE,
+            content=text,
+            content_hash=content_hash,
+            producer=hotspot_brief.brief_producer(
+                item,
+                reason_source=reason_source,
+                breakdown=breakdown if isinstance(breakdown, dict) else None,
+            ),
+        )
+        cv_id = repos.content_versions.insert(cv)
+
+    return CommandResult(
+        ok=True,
+        commandId=env.commandId,
+        artifact_ids=[cv_id],
+        detail={
+            "content_version_id": cv_id,
+            "hotspot_id": item.id,
+            "source": item.source,
+            "title": item.title,
+            "url": item.url,
+            # PRD-AGT-003：外部内容必须自报家门的两个字段
+            "trust_level": TRUST_LEVEL,
+            "review_state": REVIEW_STATE,
+            # 理由与分解是「有没有传」的如实记录，不是转换命令猜出来的
+            "reason_source": reason_source or "none",
+            "breakdown_attached": isinstance(breakdown, dict) and bool(breakdown),
+            "reused": reused,
+            # 供前端/Agent 直接渲染，无需再查一次 content-fetch
+            "brief": text,
+            # 下一步：把简报当源跑既有命令，热点不必再走一条新链路。
+            # ⚠️ 这里用 snake_case 不是为了好看 —— ``GenerateTopic`` 的
+            # ``TopicProposalSpec`` 直接吃 payload，没有 camelCase 别名，
+            # 写成 sourceVersionId 会当场 INVALID_ARGUMENT。本域其余命令用的是
+            # camelCase（hotspotId / reasonTopN），两套约定并存是既成事实，
+            # 照抄这一行才是对的。
+            "next_step": {
+                "command": "GenerateTopic",
+                "payload": {"source_version_id": cv_id},
+            },
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
 
 
 def _now_iso() -> str:
@@ -356,7 +485,7 @@ def _now_iso() -> str:
 
 
 async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
-    """按 ``commandType`` 分派本模块的四个命令。"""
+    """按 ``commandType`` 分派本模块的五个命令。"""
     if env.commandType == "ListHotspotSources":
         return await _list_sources(env, deps)
     if env.commandType == "DiscoverHotspots":
@@ -365,4 +494,6 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         return await _recommend(env, deps)
     if env.commandType == "RecordHotspotFeedback":
         return await _feedback(env, deps)
+    if env.commandType == "ConvertHotspotToTopic":
+        return await _convert(env, deps)
     raise DispatchError("INVALID_ARGUMENT", f"unsupported command: {env.commandType}")

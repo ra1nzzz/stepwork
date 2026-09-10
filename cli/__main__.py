@@ -421,6 +421,28 @@ def build_parser() -> argparse.ArgumentParser:
     hsf.add_argument("--reason", help="可选：理由")
     hsf.add_argument("--project", help="可选：关联项目 id")
 
+    hsc = hs_sub.add_parser(
+        "convert", help="把热点转成选题简报（ConvertHotspotToTopic）"
+    )
+    hsc.set_defaults(command_type="ConvertHotspotToTopic")
+    hsc.add_argument("--hotspot-id", dest="hotspot_id", required=True, help="热点 id")
+    hsc.add_argument(
+        "--reason",
+        help="可选：推荐页展示的那句理由，原样带入简报（不传则不编）",
+    )
+    hsc.add_argument(
+        "--reason-source",
+        dest="reason_source",
+        choices=("ai", "rule", "human"),
+        help="可选：理由的来源，缺省不记（brief 与 producer 会写成 none）",
+    )
+    hsc.add_argument(
+        "--breakdown-json",
+        dest="breakdown_json",
+        help="可选：RecommendHotspots 出参里的 breakdown（原始 JSON），原样带入",
+    )
+    hsc.add_argument("--project", help="可选：落到哪个项目（默认默认项目）")
+
     # ----- workspace（Tranche 2：PRD-WS-001） -----
     ws = sub.add_parser("workspace", help="工作区（Workspace）命令")
     ws_sub = ws.add_subparsers(dest="workspace_action", required=True)
@@ -968,6 +990,27 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
                 if value is not None:
                     feedback_payload[camel] = value
             return feedback_payload
+        if action == "convert":
+            convert_payload: dict[str, Any] = {"hotspotId": args.hotspot_id}
+            for camel, value in (
+                ("reason", getattr(args, "reason", None)),
+                ("reasonSource", getattr(args, "reason_source", None)),
+                ("projectId", getattr(args, "project", None)),
+            ):
+                if value is not None:
+                    convert_payload[camel] = value
+            raw_breakdown = getattr(args, "breakdown_json", None)
+            if raw_breakdown is not None:
+                # JSON 解析失败在 CLI 就拦下：别让它变成一次「命令已下发但
+                # 信封被拒」的往返，用户看不出是自己参数写坏了
+                try:
+                    parsed = json.loads(raw_breakdown)
+                except ValueError as e:
+                    raise ValueError(f"--breakdown-json 不是合法 JSON: {e}") from None
+                if not isinstance(parsed, dict):
+                    raise ValueError("--breakdown-json 必须是 JSON 对象")
+                convert_payload["breakdown"] = parsed
+            return convert_payload
         raise ValueError(f"unknown hotspots action: {action!r}")
 
     if command == "workspace":

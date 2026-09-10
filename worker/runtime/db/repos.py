@@ -370,6 +370,24 @@ class ContentVersionRepo:
         ).fetchone()
         return _row_to_content_version(row) if row is not None else None
 
+    def find_by_hash(
+        self, project_id: str, content_type: str, content_hash: str
+    ) -> str | None:
+        """按内容哈希找同项目内的既有版本；找不到返回 ``None``。
+
+        ``content_versions`` 是 append-only 的（每次生成都是一版历史），所以
+        INSERT 本身不该去重。但**外部 Agent 会重试**：同一条热点、同一份理由
+        重转一次不该产出一份新版本 —— 调用方拿哈希问一句「已经有同一份了吗」，
+        比在表上强加唯一约束温和（唯一约束会连带挡住「同输入不同批次」的合法留档）。
+        """
+        row = self.conn.execute(
+            "SELECT id FROM content_versions "
+            "WHERE project_id=? AND content_type=? AND content_hash=? "
+            "ORDER BY created_at LIMIT 1",
+            (project_id, content_type, content_hash),
+        ).fetchone()
+        return str(row["id"]) if row else None
+
 
 def _row_to_video_scene(row: sqlite3.Row) -> VideoScene:
     return VideoScene(
@@ -450,6 +468,24 @@ class HotspotRepo:
             (workspace_id,),
         ).fetchone()
         return str(row["batch_id"]) if row else None
+
+    def get(self, hotspot_id: str, workspace_id: str | None = None) -> HotspotItem | None:
+        """按 id 取单条。``workspace_id`` 给定时限定在本工作区内。
+
+        为什么单独给 ``workspace_id`` 而不用「必须传」：推荐结果里带的 id 就是
+        全局 id，UI 点「转选题」时手上没有工作区上下文也该能查到；传了的调用方
+        则能顺带把「别人工作区的热点」挡在外面。
+        """
+        if workspace_id is None:
+            row = self.conn.execute(
+                "SELECT * FROM hotspot_items WHERE id=?", (hotspot_id,)
+            ).fetchone()
+        else:
+            row = self.conn.execute(
+                "SELECT * FROM hotspot_items WHERE id=? AND workspace_id=?",
+                (hotspot_id, workspace_id),
+            ).fetchone()
+        return _row_to_hotspot(row) if row is not None else None
 
     # -------------------------------------------------------------- 反馈
 

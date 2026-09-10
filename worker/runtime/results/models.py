@@ -281,3 +281,24 @@ class RecommendHotspotsDetail(ResultModel):
 class RecordHotspotFeedbackDetail(ResultModel):
     hotspot_id: str
     verdict: str
+
+
+class ConvertHotspotToTopicDetail(ResultModel):
+    #: 新落（或复用）的 ``content_versions`` id；下一步把它交给 GenerateTopic
+    content_version_id: str
+    hotspot_id: str
+    source: str
+    title: str
+    url: str
+    #: 恒为 ``external-unverified``（PRD-AGT-003）；UI 靠它挂「待复核」标
+    trust_level: str
+    review_state: str
+    #: "ai" | "rule" | "none"：调用方没带理由时如实为 none，不由转换命令代猜
+    reason_source: str
+    breakdown_attached: bool
+    #: True 表示同内容简报已存在、本次直接复用（Agent 重试不刷版本）
+    reused: bool
+    #: 简报全文，供前端直接渲染
+    brief: str
+    #: 下一步该跑什么命令、带什么 payload
+    next_step: dict[str, Any]

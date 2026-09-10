@@ -54,6 +54,8 @@ _ROUTES: dict[str, str] = {
     "DiscoverHotspots": "worker.runtime.handlers.hotspots",
     "RecommendHotspots": "worker.runtime.handlers.hotspots",
     "RecordHotspotFeedback": "worker.runtime.handlers.hotspots",
+    # 热点 → 选题简报（外部内容先声明未核实）；确认后由既有 GenerateTopic 消费
+    "ConvertHotspotToTopic": "worker.runtime.handlers.hotspots",
     # PRD-SCR-003：段落级生成/重写/扩写/压缩
     "EditParagraph": "worker.runtime.handlers.edit_paragraph",
     "GetConfig": "worker.runtime.handlers.config",

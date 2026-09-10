@@ -74,6 +74,7 @@ RESULT_MODELS: dict[str, type[m.ResultModel]] = {
     "DiscoverHotspots": m.DiscoverHotspotsDetail,
     "RecommendHotspots": m.RecommendHotspotsDetail,
     "RecordHotspotFeedback": m.RecordHotspotFeedbackDetail,
+    "ConvertHotspotToTopic": m.ConvertHotspotToTopicDetail,
 }
 
 #: 严格模式开关。测试用 :func:`strict_results` 打开。

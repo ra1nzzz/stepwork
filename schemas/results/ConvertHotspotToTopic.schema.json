@@ -1,0 +1,70 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "content_version_id": {
+      "title": "Content Version Id",
+      "type": "string"
+    },
+    "hotspot_id": {
+      "title": "Hotspot Id",
+      "type": "string"
+    },
+    "source": {
+      "title": "Source",
+      "type": "string"
+    },
+    "title": {
+      "title": "Title",
+      "type": "string"
+    },
+    "url": {
+      "title": "Url",
+      "type": "string"
+    },
+    "trust_level": {
+      "title": "Trust Level",
+      "type": "string"
+    },
+    "review_state": {
+      "title": "Review State",
+      "type": "string"
+    },
+    "reason_source": {
+      "title": "Reason Source",
+      "type": "string"
+    },
+    "breakdown_attached": {
+      "title": "Breakdown Attached",
+      "type": "boolean"
+    },
+    "reused": {
+      "title": "Reused",
+      "type": "boolean"
+    },
+    "brief": {
+      "title": "Brief",
+      "type": "string"
+    },
+    "next_step": {
+      "additionalProperties": true,
+      "title": "Next Step",
+      "type": "object"
+    }
+  },
+  "required": [
+    "content_version_id",
+    "hotspot_id",
+    "source",
+    "title",
+    "url",
+    "trust_level",
+    "review_state",
+    "reason_source",
+    "breakdown_attached",
+    "reused",
+    "brief",
+    "next_step"
+  ],
+  "title": "ConvertHotspotToTopicDetail",
+  "type": "object"
+}

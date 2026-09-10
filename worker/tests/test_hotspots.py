@@ -26,6 +26,7 @@ from worker.runtime.db.connection import connect
 from worker.runtime.db.migrations import run_migrations
 from worker.runtime.db.repos import Repos
 from worker.runtime.deps import Deps
+from worker.runtime.hotspot.models import HotspotItem
 
 _MIG_DIR = Path(__file__).resolve().parents[2] / "migrations"
 
@@ -465,6 +466,393 @@ def test_feedback_requires_hotspot_id(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------
+# ConvertHotspotToTopic（方案 A：热点 → 选题简报 → 既有 GenerateTopic）
+# --------------------------------------------------------------------------
+
+
+class FakeTopicAI:
+    """给 ``GenerateTopic`` 用的假 AI：回一份合法的 angles。"""
+
+    name = "fake-topic-ai"
+    model = "fake-topic-1"
+
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    async def complete(self, prompt: str, schema: Any = None) -> dict[str, Any]:
+        self.prompts.append(prompt)
+        return {
+            "angles": [
+                {
+                    "id": "a1",
+                    "title": "换季穿搭的省钱思路",
+                    "rationale": "从热点里的换季话题切预算视角",
+                    "hook": "你衣柜里一半的衣服，换季时都白买了",
+                }
+            ]
+        }
+
+
+def _brief_rows(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM content_versions WHERE content_type='hotspot_brief' "
+        "ORDER BY created_at, rowid"
+    ).fetchall()
+
+
+def test_convert_brief_declares_provenance_and_trust(tmp_path: Path) -> None:
+    """PRD-AGT-003 的落点：外部内容必须自报出处**与信任等级**。"""
+    conn, repos = _new_db(tmp_path)
+    try:
+        _add_connection(conn, _write_server(tmp_path))
+        _discovered(conn, repos)
+        res = _run(
+            _env("ConvertHotspotToTopic", {"hotspotId": "i1"}), Deps(repos=repos)
+        )
+        assert res["ok"] is True, res
+        detail = res["detail"]
+        assert detail["trust_level"] == "external-unverified"
+        assert detail["review_state"] == "pending_review"
+        assert detail["reused"] is False
+
+        rows = _brief_rows(conn)
+        assert len(rows) == 1
+        producer = json.loads(rows[0]["producer"])
+        assert producer["kind"] == "hotspot-brief"
+        assert producer["hotspotId"] == "i1"
+        assert producer["hotspotSource"] == "toutiao_hot"
+        assert producer["trustLevel"] == "external-unverified"
+        # 没有父版本：它的来源是外部热点，不是本系统的某个版本
+        assert rows[0]["parent_version_id"] is None
+        # 出处要具体到链接，否则「具备来源」只是句口号
+        assert producer["sourceUrl"] == "u1"
+    finally:
+        conn.close()
+
+
+def test_brief_text_carries_the_unverified_warning(tmp_path: Path) -> None:
+    """免责头必须**在正文里**：下游读的是 content 文本，写在别处躲不过消费者。"""
+    conn, repos = _new_db(tmp_path)
+    try:
+        _add_connection(conn, _write_server(tmp_path))
+        _discovered(conn, repos)
+        res = _run(
+            _env("ConvertHotspotToTopic", {"hotspotId": "i1"}), Deps(repos=repos)
+        )
+        brief = res["detail"]["brief"]
+        assert "未经事实核实" in brief
+        assert "秋天穿搭的五个技巧" in brief
+        assert "u1" in brief
+        # 简报是素材包，不是选题：不含 angles
+        assert "angles" not in brief
+    finally:
+        conn.close()
+
+
+def test_convert_never_invents_a_reason(tmp_path: Path) -> None:
+    """没带理由就不编。**这条是本功能最容易做错的地方**：
+    编一句听起来合理的理由，用户没法分辨它是 AI 写的还是命令瞎凑的。"""
+    conn, repos = _new_db(tmp_path)
+    try:
+        _add_connection(conn, _write_server(tmp_path))
+        _discovered(conn, repos)
+        res = _run(
+            _env("ConvertHotspotToTopic", {"hotspotId": "i1"}), Deps(repos=repos)
+        )
+        assert res["detail"]["reason_source"] == "none"
+        assert res["detail"]["breakdown_attached"] is False
+        assert "入选理由" not in res["detail"]["brief"]
+        assert "打分分解" not in res["detail"]["brief"]
+        producer = json.loads(_brief_rows(conn)[0]["producer"])
+        assert producer["reasonSource"] == "none"
+        assert "breakdown" not in producer
+    finally:
+        conn.close()
+
+
+def test_convert_carries_reason_and_breakdown(tmp_path: Path) -> None:
+    """调用方把推荐页展示的那份带过来 —— 命令只搬运，不重算。"""
+    conn, repos = _new_db(tmp_path)
+    try:
+        _add_connection(conn, _write_server(tmp_path))
+        _discovered(conn, repos)
+        breakdown = {
+            "freshness": 1.0,
+            "heat": 0.8,
+            "brandFit": 0.92,
+            "novelty": 0.5,
+            "feedback": 0.5,
+            "penalty": 0.0,
+        }
+        res = _run(
+            _env(
+                "ConvertHotspotToTopic",
+                {
+                    "hotspotId": "i1",
+                    "reason": "正好在你的内容支柱上",
+                    "reasonSource": "ai",
+                    "breakdown": breakdown,
+                },
+            ),
+            Deps(repos=repos),
+        )
+        assert res["ok"] is True, res
+        assert res["detail"]["reason_source"] == "ai"
+        assert res["detail"]["breakdown_attached"] is True
+        brief = res["detail"]["brief"]
+        assert "入选理由（ai）：正好在你的内容支柱上" in brief
+        assert "品牌契合 0.92" in brief
+        producer = json.loads(_brief_rows(conn)[0]["producer"])
+        assert producer["breakdown"]["brandFit"] == 0.92
+    finally:
+        conn.close()
+
+
+def test_convert_is_idempotent_for_identical_input(tmp_path: Path) -> None:
+    """同（热点, 理由, 分解）重转 → 复用。Agent 会重试，不该刷出版本洪水。"""
+    conn, repos = _new_db(tmp_path)
+    try:
+        _add_connection(conn, _write_server(tmp_path))
+        _discovered(conn, repos)
+        payload = {"hotspotId": "i1", "reason": "合适"}
+        first = _run(_env("ConvertHotspotToTopic", payload), Deps(repos=repos))
+        second = _run(_env("ConvertHotspotToTopic", payload), Deps(repos=repos))
+        assert second["ok"] is True, second
+        assert second["detail"]["reused"] is True
+        assert (
+            second["detail"]["content_version_id"]
+            == first["detail"]["content_version_id"]
+        )
+        assert len(_brief_rows(conn)) == 1
+    finally:
+        conn.close()
+
+
+def test_convert_different_reason_is_a_new_version(tmp_path: Path) -> None:
+    """复用不能过头：理由变了就是另一份简报，不能返回旧的糊弄过去。"""
+    conn, repos = _new_db(tmp_path)
+    try:
+        _add_connection(conn, _write_server(tmp_path))
+        _discovered(conn, repos)
+        a = _run(
+            _env("ConvertHotspotToTopic", {"hotspotId": "i1", "reason": "甲"}),
+            Deps(repos=repos),
+        )
+        b = _run(
+            _env("ConvertHotspotToTopic", {"hotspotId": "i1", "reason": "乙"}),
+            Deps(repos=repos),
+        )
+        assert b["detail"]["reused"] is False
+        assert b["detail"]["content_version_id"] != a["detail"]["content_version_id"]
+        assert len(_brief_rows(conn)) == 2
+    finally:
+        conn.close()
+
+
+def test_convert_feeds_generate_topic_unchanged(tmp_path: Path) -> None:
+    """闭环：简报 id 直接当 ``GenerateTopic`` 的 sourceVersionId，**既有链路零改动**。
+
+    这是方案 A 的核心主张 —— 热点不必新开一条生成链路，它只是「又一种源文本」。
+    """
+    conn, repos = _new_db(tmp_path)
+    try:
+        _add_connection(conn, _write_server(tmp_path))
+        _discovered(conn, repos)
+        converted = _run(
+            _env(
+                "ConvertHotspotToTopic",
+                {"hotspotId": "i3", "reason": "开源项目的评测框架正好在支柱上"},
+            ),
+            Deps(repos=repos),
+        )
+        assert converted["ok"] is True, converted
+        cv_id = converted["detail"]["content_version_id"]
+        # next_step 不是装饰：照它跑必须真的成立
+        assert (
+            converted["detail"]["next_step"]["payload"]["source_version_id"] == cv_id
+        )
+
+        ai = FakeTopicAI()
+        topic = _run(
+            _env("GenerateTopic", {"source_version_id": cv_id, "count": 3}),
+            Deps(repos=repos, ai=ai),
+        )
+        assert topic["ok"] is True, topic
+        assert topic["detail"]["angle_count"] == 1
+        # AI 真的看到了简报正文（含未核实声明与出处），不是空上下文
+        assert "未经事实核实" in ai.prompts[0]
+        assert "AI 工具评测框架" in ai.prompts[0]
+        # 生成结果挂在简报之下，审计链完整
+        assert topic["detail"]["source_version_id"] == cv_id
+        row = conn.execute(
+            "SELECT parent_version_id FROM content_versions WHERE id=?",
+            (topic["artifact_ids"][0],),
+        ).fetchone()
+        assert row["parent_version_id"] == cv_id
+    finally:
+        conn.close()
+
+
+def test_brief_does_not_pollute_topic_history(tmp_path: Path) -> None:
+    """``load_topic_history`` 只认 topic_proposal —— 简报不该被当成历史选题，
+    否则「重复选题提醒」会把素材当选题比对，报出一堆假重复。"""
+    from worker.runtime.script.history import load_topic_history
+
+    conn, repos = _new_db(tmp_path)
+    try:
+        _add_connection(conn, _write_server(tmp_path))
+        _discovered(conn, repos)
+        res = _run(
+            _env("ConvertHotspotToTopic", {"hotspotId": "i1"}), Deps(repos=repos)
+        )
+        project_id = conn.execute(
+            "SELECT project_id FROM content_versions WHERE id=?",
+            (res["detail"]["content_version_id"],),
+        ).fetchone()["project_id"]
+        assert load_topic_history(conn, str(project_id)) == []
+    finally:
+        conn.close()
+
+
+def test_convert_missing_hotspot_is_actionable(tmp_path: Path) -> None:
+    conn, repos = _new_db(tmp_path)
+    try:
+        res = _run(
+            _env("ConvertHotspotToTopic", {"hotspotId": "nope"}), Deps(repos=repos)
+        )
+        assert res["ok"] is False
+        assert str(res["error"]).startswith("NOT_FOUND")
+        assert "DiscoverHotspots" in str(res["error"])
+    finally:
+        conn.close()
+
+
+def test_convert_is_scoped_to_workspace(tmp_path: Path) -> None:
+    """别的 workspace 抓到的热点，不该能借 id 转进本项目。"""
+    conn, repos = _new_db(tmp_path)
+    try:
+        repos.workspaces.ensure("ws-other")
+        repos.hotspots.insert_many(
+            "ws-other",
+            [
+                HotspotItem(
+                    id="foreign",
+                    source="toutiao_hot",
+                    title="别人家的热点",
+                    batch_id="b1",
+                    discovered_at="2026-09-10T00:00:00+00:00",
+                )
+            ],
+        )
+        res = _run(
+            _env("ConvertHotspotToTopic", {"hotspotId": "foreign"}), Deps(repos=repos)
+        )
+        assert res["ok"] is False
+        assert str(res["error"]).startswith("NOT_FOUND")
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},  # 缺 hotspotId
+        {"hotspotId": "  "},  # 只有空白
+        {"hotspotId": 123},  # 类型错
+    ],
+)
+def test_convert_requires_hotspot_id(tmp_path: Path, payload: dict[str, Any]) -> None:
+    conn, repos = _new_db(tmp_path)
+    try:
+        res = _run(_env("ConvertHotspotToTopic", payload), Deps(repos=repos))
+        assert res["ok"] is False
+        assert str(res["error"]).startswith("INVALID_ARGUMENT")
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"hotspotId": "i1", "breakdown": [1, 2]},
+        {"hotspotId": "i1", "reason": 5},
+        {"hotspotId": "i1", "reasonSource": 5},
+    ],
+)
+def test_convert_rejects_malformed_optionals(
+    tmp_path: Path, payload: dict[str, Any]
+) -> None:
+    conn, repos = _new_db(tmp_path)
+    try:
+        _add_connection(conn, _write_server(tmp_path))
+        _discovered(conn, repos)
+        res = _run(_env("ConvertHotspotToTopic", payload), Deps(repos=repos))
+        assert res["ok"] is False
+        assert str(res["error"]).startswith("INVALID_ARGUMENT")
+    finally:
+        conn.close()
+
+
+# --------------------------------------------------------------------------
+# 简报拼装（纯函数：可复盘，不跑命令就能断言「出来的长什么样」）
+# --------------------------------------------------------------------------
+
+
+def test_build_brief_ignores_unknown_breakdown_dims() -> None:
+    """打分维度将来会加（上游加一维不该让简报渲染出半张表，更不该崩）。"""
+    from worker.runtime.hotspot.brief import build_brief
+
+    item = HotspotItem(
+        id="x1", source="toutiao_hot", title="标题", url="u", batch_id="b"
+    )
+    text = build_brief(
+        item,
+        reason="理由",
+        reason_source="rule",
+        breakdown={"freshness": 0.5, "vibeCheck": 0.9, "note": "非数值"},
+    )
+    assert "时效 0.50" in text
+    # 未知维度与非数值一律不渲染
+    assert "vibeCheck" not in text
+    assert "非数值" not in text
+
+
+def test_build_brief_omits_empty_optional_facts() -> None:
+    """没有摘要/链接就不写空行 —— 简报是给人和 AI 读的，不是字段转储。"""
+    from worker.runtime.hotspot.brief import build_brief
+
+    item = HotspotItem(id="x2", source="rss", title="只有标题")
+    text = build_brief(item)
+    assert "标题：只有标题" in text
+    assert "摘要：" not in text
+    assert "链接：" not in text
+    # 缺失也要显式说「未提供」，而不是让读的人猜字段为什么不在
+    assert "发布时间：未提供" in text
+
+
+def test_server_crash_surfaces_stderr(tmp_path: Path) -> None:
+    """Server 起不来时错误里必须带 stderr —— 否则「在响应前退出」等于没说。
+
+    真机验收撞的：``python -m stepwork_hotspot_mcp.server`` 在包没装的
+    环境里直接退出，唯一有用的线索（``ModuleNotFoundError``）在
+    ``detail.stderr`` 里，被 ``str(e)`` 拍平丢掉了。
+    """
+    conn, repos = _new_db(tmp_path)
+    try:
+        _add_connection(
+            conn, f'"{sys.executable}" -m stepwork_hotspot_mcp_absent_module'
+        )
+        res = _run(_env("DiscoverHotspots"), Deps(repos=repos))
+        assert res["ok"] is False
+        msg = str(res["error"])
+        assert "UPSTREAM_ERROR" in msg
+        assert "Server 输出" in msg
+        # 具体到「哪个模块没找到」，而不是模糊的「起不来」
+        assert "stepwork_hotspot_mcp_absent_module" in msg
+    finally:
+        conn.close()
+
+
 # 迁移
 
 
@@ -488,7 +876,13 @@ def test_migration_0014_creates_both_tables(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "command",
-    ["DiscoverHotspots", "RecommendHotspots", "RecordHotspotFeedback"],
+    [
+        "DiscoverHotspots",
+        "RecommendHotspots",
+        "RecordHotspotFeedback",
+        # 会写 content_versions：外部 Agent 不得凭一条热点直接造选题素材
+        "ConvertHotspotToTopic",
+    ],
 )
 def test_hotspot_commands_not_agent_allowed(command: str) -> None:
     """外部 Agent 默认不能触发：Discover 是联网写库，Recommend 会调 AI（计费）。"""

@@ -16,7 +16,13 @@ import logging
 import os
 from typing import Any
 
-from worker.runtime.agents.mcp_client import McpStdioClient, flatten_content, parse_command
+from worker.runtime.agents.mcp_client import (
+    McpClientError,
+    McpStdioClient,
+    describe_error,
+    flatten_content,
+    parse_command,
+)
 from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
 
@@ -135,8 +141,12 @@ async def call_hotspot_tool(
             await client.initialize()
             result = await client.call_tool(tool, arguments)
     except RuntimeError as e:
-        # McpClientError 是 RuntimeError 的子类；这里统一转译，且不吞细节
-        raise DispatchError("UPSTREAM_ERROR", f"热点 Server 调用失败：{e}") from e
+        # McpClientError 是 RuntimeError 的子类；这里统一转译，且不吞细节。
+        # 用 describe_error 而不是 str(e)：后者会丢掉 detail.stderr，而 Server
+        # 起不来时唯一有用的线索就在那里（真机验收撞过 —— 报「在响应前退出」，
+        # 实际原因是 ModuleNotFoundError，包没装）。
+        hint = describe_error(e) if isinstance(e, McpClientError) else str(e)
+        raise DispatchError("UPSTREAM_ERROR", f"热点 Server 调用失败：{hint}") from e
     return _payload_text(result), conn_id
 
 
