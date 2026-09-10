@@ -239,3 +239,45 @@ class ExportEditTimelineDetail(ResultModel):
     scene_count: int
     marker_count: int
     note: str
+
+
+# ---------------------------------------------------------------------------
+# 热点域（S5：发现 / 推荐 / 反馈）
+# ---------------------------------------------------------------------------
+
+
+class ListHotspotSourcesDetail(ResultModel):
+    connection_id: str
+    sources: list[dict[str, Any]]
+    #: 自动找连接时用的关键字（UI 提示「登记命令里要含它」）
+    server_marker: str
+
+
+class DiscoverHotspotsDetail(ResultModel):
+    batch_id: str
+    connection_id: str
+    items: list[dict[str, Any]]
+    count: int
+    #: 实际落库条数；--no-save 时为 0
+    saved: int
+    sources: list[str]
+    #: 打算抓但失败了的源（与 skipped 分开：这是故障，不是没选）
+    errors: list[dict[str, Any]]
+    #: 这次没打算抓的源（如需登录的热点宝）
+    skipped: list[dict[str, Any]]
+
+
+class RecommendHotspotsDetail(ResultModel):
+    recommendations: list[dict[str, Any]]
+    count: int
+    #: 参与打分的候选总数（用于说明「从 N 条里挑出 M 条」）
+    considered: int
+    #: "ai" | "rule"：降级必须可见，否则 UI 会把模板句当 AI 洞见
+    reason_source: str
+    brand_applied: bool
+    reason_note: str | None = None
+
+
+class RecordHotspotFeedbackDetail(ResultModel):
+    hotspot_id: str
+    verdict: str

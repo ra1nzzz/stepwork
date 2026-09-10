@@ -12,7 +12,7 @@
 | 来源 | 类型 | 授权 | 复用方式 | 对应模块 |
 |---|---|---|---|---|
 | `github.com/ra1nzzz/YT-Agent-Ontology`（private，PHASE 0 complete） | 母规范仓库 | 自有 | **直接（契约遵循）** | 全局语义层 |
-| `github.com/ra1nzzz/stepwork-hotspot-mcp`（public，0.1.0） | 独立 MCP Server | 自有（AGPL） | **进程外调用**（`AddMcpServer` / `CallMcpTool`） | S5 上游热点发现；零运行时依赖，独立发版 |
+| `github.com/ra1nzzz/stepwork-hotspot-mcp`（public，0.1.0） | 独立 MCP Server | 自有（AGPL） | **进程外调用**（`AddMcpServer` / `CallMcpTool`，或命令层的 `DiscoverHotspots`） | S5 上游热点发现；**核心**零运行时依赖（独立发版），仅热点宝一个源需可选的 `[browser]`（playwright + CDP） |
 
 **关键引用点**
 
@@ -152,6 +152,7 @@
 | 阿里云通义万相 / `qwen-image` | 官方文档 | ❌ **不接** | — | 官方明确「图像生成模型走 DashScope 原生 API，**不支持 OpenAI 兼容（compatible-mode）**」：端点 `/api/v1/services/aigc/...`、尺寸 `W*H` 星号分隔、响应 `output.choices[0].message.content[0].image`。真要选它需单开适配器 |
 | StepFun 官方 ASR `/v1/audio/asr/file/submit+query` | 厂商文档 | 参考 | ASR 校验 | 用于验证 TTS 输出正确性 |
 | Playwright（Python · Apache-2.0，自带 Chromium） | 开源 | 直接 | **S1 `providers/renderer/playwright.py`** | 已实装「Chromium 逐帧截图 + ffmpeg `image2pipe` 管道直连」。本机装不上 Remotion 才用 Playwright；进度由帧数驱动（管道 ffmpeg 读不出总时长） |
+| 抖音热点宝 `douhot.douyin.com`（**无公开 API**） | 站点行为（实测） | 经 CDP 只读接入 | **S5 上游 `stepwork-hotspot-mcp` 的 `douhot.py`** | 微前端 SPA，数据在登录后带 `a_bogus` 签名的 XHR 里。**不伪造签名**（那是绕风控），改为 CDP 复用用户已登录浏览器：`msedge.exe --remote-debugging-port=9222` → 登录 → 由服务端 goto + 读响应体。`browser.close()` 对 `connect_over_cdp` 只是断开连接，不关用户浏览器。端点用 `DOUHOT_CDP_ENDPOINT` 覆盖 |
 | `fakes/fake_ffmpeg_pipe.py`（仓库内） | 自研 | 直接 | 测试 | fake ffmpeg 读 stdin 数 JPEG SOI 写 JSON 报告；`STEPWORK_FAKE_FFMPEG_SLEEP=1` 睡 30s 给取消测试证明 terminate 真生效 |
 | ffmpeg / ffprobe | 开源（GPL/LGPL，按构建） | 直接（外部二进制） | 渲染/合成 / 时长探测 | 参数必须用 argv list，不拼 shell；WinGet 装的常不在 PATH，本仓库用 `STEPWORK_FFMPEG_BIN` 显式指定 |
 

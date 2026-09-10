@@ -1,0 +1,28 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "connection_id": {
+      "title": "Connection Id",
+      "type": "string"
+    },
+    "sources": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Sources",
+      "type": "array"
+    },
+    "server_marker": {
+      "title": "Server Marker",
+      "type": "string"
+    }
+  },
+  "required": [
+    "connection_id",
+    "sources",
+    "server_marker"
+  ],
+  "title": "ListHotspotSourcesDetail",
+  "type": "object"
+}

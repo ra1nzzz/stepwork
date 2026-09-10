@@ -356,6 +356,71 @@ def build_parser() -> argparse.ArgumentParser:
         help="品牌档 id；缺省表示解除关联（payload.profileId = null）",
     )
 
+    # ----- hotspots（S5：上游热点发现 / 推荐 / 反馈） -----
+    hs = sub.add_parser("hotspots", help="上游热点：发现 / 推荐 / 反馈")
+    hs_sub = hs.add_subparsers(dest="hotspots_action", required=True)
+
+    hss = hs_sub.add_parser("sources", help="列出可用热点源（ListHotspotSources）")
+    hss.set_defaults(command_type="ListHotspotSources")
+    hss.add_argument("--connection-id", dest="connection_id", help="MCP 连接 id（缺省自动找）")
+
+    hsd = hs_sub.add_parser("discover", help="抓取热点并落库（DiscoverHotspots）")
+    hsd.set_defaults(command_type="DiscoverHotspots")
+    hsd.add_argument(
+        "--source",
+        dest="sources",
+        action="append",
+        metavar="SOURCE",
+        help="指定源（可重复）；不给 = 全部免登录源（热点宝需显式点名）",
+    )
+    hsd.add_argument("--limit", type=int, default=30, help="最多条数（1-100，默认 30）")
+    hsd.add_argument(
+        "--window-hours", dest="window_hours", type=int, default=48, help="只看最近 N 小时"
+    )
+    hsd.add_argument("--query", help="标题/摘要包含该词")
+    hsd.add_argument("--connection-id", dest="connection_id", help="MCP 连接 id（缺省自动找）")
+    hsd.add_argument(
+        "--no-save", dest="save", action="store_false", help="只返回不落库（跳过推荐去重）"
+    )
+
+    hsr = hs_sub.add_parser("recommend", help="按品牌与历史推荐热点（RecommendHotspots）")
+    hsr.set_defaults(command_type="RecommendHotspots")
+    hsr.add_argument("--batch-id", dest="batch_id", help="推荐指定批次（默认最近一批）")
+    hsr.add_argument(
+        "--source",
+        dest="sources",
+        action="append",
+        metavar="SOURCE",
+        help="跨批次按源筛（可重复）",
+    )
+    hsr.add_argument("--limit", type=int, default=10, help="返回条数（1-50，默认 10）")
+    hsr.add_argument(
+        "--reason-top-n",
+        dest="reason_top_n",
+        type=int,
+        default=5,
+        help="让 AI 写理由的条数（0 = 全用规则模板）",
+    )
+    hsr.add_argument(
+        "--no-brand",
+        dest="use_brand_profile",
+        action="store_false",
+        help="不使用项目品牌画像打分",
+    )
+    hsr.add_argument("--provider", help="AI Provider hint（写理由用）")
+
+    hsf = hs_sub.add_parser("feedback", help="记录对某条热点的态度（RecordHotspotFeedback）")
+    hsf.set_defaults(command_type="RecordHotspotFeedback")
+    hsf.add_argument("--hotspot-id", dest="hotspot_id", required=True, help="热点 id")
+    hsf.add_argument(
+        "--verdict",
+        required=True,
+        choices=("adopted", "ignored", "rejected"),
+        help="adopted 采纳 / ignored 不感兴趣 / rejected 明确不合适",
+    )
+    hsf.add_argument("--reason", help="可选：理由")
+    hsf.add_argument("--project", help="可选：关联项目 id")
+
     # ----- workspace（Tranche 2：PRD-WS-001） -----
     ws = sub.add_parser("workspace", help="工作区（Workspace）命令")
     ws_sub = ws.add_subparsers(dest="workspace_action", required=True)
@@ -852,6 +917,58 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
                 "profileId": getattr(args, "profile", None),
             }
         raise ValueError(f"unknown brand action: {action!r}")
+
+    if command == "hotspots":
+        action = getattr(args, "hotspots_action", None)
+        if action == "sources":
+            hs_payload: dict[str, Any] = {}
+            if getattr(args, "connection_id", None):
+                hs_payload["connectionId"] = args.connection_id
+            return hs_payload
+        if action == "discover":
+            discover_payload: dict[str, Any] = {
+                "limit": args.limit,
+                "windowHours": args.window_hours,
+                "save": bool(getattr(args, "save", True)),
+            }
+            if getattr(args, "sources", None):
+                discover_payload["sources"] = args.sources
+            # 其余可选项未给就不下发：handler 用自己的默认值，不让 CLI 替它决定
+            for camel, value in (
+                ("query", getattr(args, "query", None)),
+                ("connectionId", getattr(args, "connection_id", None)),
+            ):
+                if value is not None:
+                    discover_payload[camel] = value
+            return discover_payload
+        if action == "recommend":
+            recommend_payload: dict[str, Any] = {
+                "limit": args.limit,
+                "reasonTopN": args.reason_top_n,
+                "useBrandProfile": bool(getattr(args, "use_brand_profile", True)),
+            }
+            for camel, value in (
+                ("batchId", getattr(args, "batch_id", None)),
+                ("provider", getattr(args, "provider", None)),
+            ):
+                if value is not None:
+                    recommend_payload[camel] = value
+            if getattr(args, "sources", None):
+                recommend_payload["sources"] = args.sources
+            return recommend_payload
+        if action == "feedback":
+            feedback_payload: dict[str, Any] = {
+                "hotspotId": args.hotspot_id,
+                "verdict": args.verdict,
+            }
+            for camel, value in (
+                ("reason", getattr(args, "reason", None)),
+                ("projectId", getattr(args, "project", None)),
+            ):
+                if value is not None:
+                    feedback_payload[camel] = value
+            return feedback_payload
+        raise ValueError(f"unknown hotspots action: {action!r}")
 
     if command == "workspace":
         action = getattr(args, "workspace_action", None)

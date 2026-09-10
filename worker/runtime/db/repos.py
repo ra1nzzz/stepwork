@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any, Optional
 
+from worker.runtime.hotspot.models import VERDICTS, HotspotItem
 from worker.runtime.models import (
     ContentProject,
     ContentVersion,
@@ -30,6 +32,30 @@ from worker.runtime.models import (
 def _q(n: int) -> str:
     """生成 ``n`` 个逗号分隔的 ``?`` 占位符。"""
     return ",".join(["?"] * n)
+
+
+#: hotspot_items 的排序：同源内保持上游顺序（= 热度顺序），跨源按抓取时间
+_HOTSPOT_ORDER = "ORDER BY discovered_at DESC, source, rowid"
+
+
+def _row_to_hotspot(row: sqlite3.Row) -> HotspotItem:
+    raw_meta = row["meta_json"]
+    try:
+        meta = json.loads(raw_meta) if raw_meta else {}
+    except (TypeError, ValueError):
+        meta = {}
+    return HotspotItem(
+        id=str(row["id"]),
+        source=str(row["source"]),
+        title=str(row["title"]),
+        url=str(row["url"] or ""),
+        summary=str(row["summary"] or ""),
+        published_at=str(row["published_at"]) if row["published_at"] else None,
+        score=float(row["score"]) if row["score"] is not None else None,
+        meta=meta if isinstance(meta, dict) else {},
+        batch_id=str(row["batch_id"] or ""),
+        discovered_at=str(row["discovered_at"] or ""),
+    )
 
 
 def _row_to_workspace(row: sqlite3.Row) -> Workspace:
@@ -362,6 +388,115 @@ def _row_to_video_scene(row: sqlite3.Row) -> VideoScene:
     )
 
 
+class HotspotRepo:
+    """热点事实与反馈（migrations/0014）。
+
+    存在的理由：推荐要**去重**（不知上周推过什么就会反复推同一批）和
+    **可学习**（用户说「不感兴趣」之后得记得住）。两件事都要求热点不是
+    一次性的调用结果，而是库里的历史。
+    """
+
+    _INSERT_COLS = (
+        "id,batch_id,workspace_id,source,title,url,summary,"
+        "published_at,score,meta_json,discovered_at"
+    )
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def insert_many(
+        self, workspace_id: str, items: Sequence[HotspotItem]
+    ) -> int:
+        """批量落库；``id`` 冲突用 ``OR REPLACE`` 覆盖。
+
+        同 id = 同（源, 标题, 链接）：上一批次抓到过，这次又抓到，是同一条
+        事实，覆盖（刷新 discovered_at）比拒绝更符合语义。
+        """
+        if not items:
+            return 0
+        self.conn.executemany(
+            f"INSERT OR REPLACE INTO hotspot_items ({self._INSERT_COLS}) "
+            f"VALUES ({_q(11)})",
+            [item.to_row(workspace_id) for item in items],
+        )
+        self.conn.commit()
+        return len(items)
+
+    def list_by_batch(self, batch_id: str) -> list[HotspotItem]:
+        rows = self.conn.execute(
+            f"SELECT * FROM hotspot_items WHERE batch_id=? {_HOTSPOT_ORDER}",
+            (batch_id,),
+        ).fetchall()
+        return [_row_to_hotspot(r) for r in rows]
+
+    def list_recent(
+        self, workspace_id: str, *, limit: int = 200, sources: Sequence[str] | None = None
+    ) -> list[HotspotItem]:
+        """本工作区最近抓到的热点（跨批次）。"""
+        sql = "SELECT * FROM hotspot_items WHERE workspace_id=?"
+        params: list[Any] = [workspace_id]
+        if sources:
+            sql += f" AND source IN ({_q(len(sources))})"
+            params.extend(sources)
+        sql += f" {_HOTSPOT_ORDER} LIMIT ?"
+        params.append(limit)
+        rows = self.conn.execute(sql, params).fetchall()
+        return [_row_to_hotspot(r) for r in rows]
+
+    def latest_batch_id(self, workspace_id: str) -> str | None:
+        row = self.conn.execute(
+            "SELECT batch_id FROM hotspot_items WHERE workspace_id=? "
+            "ORDER BY discovered_at DESC LIMIT 1",
+            (workspace_id,),
+        ).fetchone()
+        return str(row["batch_id"]) if row else None
+
+    # -------------------------------------------------------------- 反馈
+
+    def record_feedback(
+        self,
+        *,
+        hotspot_id: str,
+        workspace_id: str,
+        verdict: str,
+        project_id: str | None = None,
+        reason: str | None = None,
+    ) -> None:
+        """记一条反馈。**同（热点, 工作区）覆盖而非追加**：一条热点只能有一个
+        结论，追加会让学习逻辑无所适从（到底听哪次的）。"""
+        if verdict not in VERDICTS:
+            raise ValueError(f"unknown verdict: {verdict}")
+        stamp = datetime.now(UTC).isoformat()
+        self.conn.execute(
+            "INSERT INTO hotspot_feedback "
+            "(hotspot_id, workspace_id, project_id, verdict, reason, "
+            "created_at, updated_at) VALUES (?,?,?,?,?,?,?) "
+            "ON CONFLICT(hotspot_id, workspace_id) DO UPDATE SET "
+            "verdict=excluded.verdict, reason=excluded.reason, "
+            "project_id=excluded.project_id, updated_at=excluded.updated_at",
+            (hotspot_id, workspace_id, project_id, verdict, reason, stamp, stamp),
+        )
+        self.conn.commit()
+
+    def feedback_map(self, workspace_id: str) -> dict[str, str]:
+        """``{hotspot_id: verdict}``；推荐时整体读入（量级在千级以内）。"""
+        rows = self.conn.execute(
+            "SELECT hotspot_id, verdict FROM hotspot_feedback WHERE workspace_id=?",
+            (workspace_id,),
+        ).fetchall()
+        return {str(r["hotspot_id"]): str(r["verdict"]) for r in rows}
+
+    def title_feedback_map(self, workspace_id: str) -> dict[str, str]:
+        """``{标题: verdict}`` —— 跨批次 url 变化时 id 会变，标题更稳。"""
+        rows = self.conn.execute(
+            "SELECT f.verdict AS verdict, i.title AS title "
+            "FROM hotspot_feedback f JOIN hotspot_items i ON i.id=f.hotspot_id "
+            "WHERE f.workspace_id=?",
+            (workspace_id,),
+        ).fetchall()
+        return {str(r["title"]): str(r["verdict"]) for r in rows}
+
+
 class VideoSceneRepo:
     """``video_scenes`` 表（S2 分幕事实表，migrations/0012）。"""
 
@@ -546,3 +681,4 @@ class Repos:
         self.jobs: JobRepo = JobRepo(conn)
         self.content_versions: ContentVersionRepo = ContentVersionRepo(conn)
         self.video_scenes: VideoSceneRepo = VideoSceneRepo(conn)
+        self.hotspots: HotspotRepo = HotspotRepo(conn)

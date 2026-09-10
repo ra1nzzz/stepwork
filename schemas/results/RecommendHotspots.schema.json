@@ -1,0 +1,50 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "recommendations": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Recommendations",
+      "type": "array"
+    },
+    "count": {
+      "title": "Count",
+      "type": "integer"
+    },
+    "considered": {
+      "title": "Considered",
+      "type": "integer"
+    },
+    "reason_source": {
+      "title": "Reason Source",
+      "type": "string"
+    },
+    "brand_applied": {
+      "title": "Brand Applied",
+      "type": "boolean"
+    },
+    "reason_note": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reason Note"
+    }
+  },
+  "required": [
+    "recommendations",
+    "count",
+    "considered",
+    "reason_source",
+    "brand_applied"
+  ],
+  "title": "RecommendHotspotsDetail",
+  "type": "object"
+}

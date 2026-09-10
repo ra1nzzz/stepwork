@@ -65,6 +65,17 @@ export interface DeleteAgentConnectionDetail {
   deleted: string;
 }
 
+export interface DiscoverHotspotsDetail {
+  batch_id: string;
+  connection_id: string;
+  items: Record<string, unknown>[];
+  count: number;
+  saved: number;
+  sources: string[];
+  errors: Record<string, unknown>[];
+  skipped: Record<string, unknown>[];
+}
+
 export interface EndAcpSessionDetail {
   ended: boolean;
 }
@@ -119,6 +130,12 @@ export interface ListAgentTasksDetail {
   note: string;
 }
 
+export interface ListHotspotSourcesDetail {
+  connection_id: string;
+  sources: Record<string, unknown>[];
+  server_marker: string;
+}
+
 export interface ListMcpToolsDetail {
   connection_id: string;
   tools: Record<string, unknown>[];
@@ -134,6 +151,20 @@ export interface ListPublishJobsDetail {
 
 export interface ListScheduledPublishesDetail {
   scheduled: Record<string, unknown>[];
+}
+
+export interface RecommendHotspotsDetail {
+  recommendations: Record<string, unknown>[];
+  count: number;
+  considered: number;
+  reason_source: string;
+  brand_applied: boolean;
+  reason_note?: string | null;
+}
+
+export interface RecordHotspotFeedbackDetail {
+  hotspot_id: string;
+  verdict: string;
 }
 
 export interface RecordPublishResultDetail {
@@ -207,6 +238,7 @@ export interface CommandResultDetails {
   CancelScheduledPublish: CancelScheduledPublishDetail;
   CreatePlatformVariant: CreatePlatformVariantDetail;
   DeleteAgentConnection: DeleteAgentConnectionDetail;
+  DiscoverHotspots: DiscoverHotspotsDetail;
   EndAcpSession: EndAcpSessionDetail;
   ExportBundle: ExportBundleDetail;
   ExportEditTimeline: ExportEditTimelineDetail;
@@ -218,10 +250,13 @@ export interface CommandResultDetails {
   ListAgentArtifacts: ListAgentArtifactsDetail;
   ListAgentConnections: ListAgentConnectionsDetail;
   ListAgentTasks: ListAgentTasksDetail;
+  ListHotspotSources: ListHotspotSourcesDetail;
   ListMcpTools: ListMcpToolsDetail;
   ListPlatformVariants: ListPlatformVariantsDetail;
   ListPublishJobs: ListPublishJobsDetail;
   ListScheduledPublishes: ListScheduledPublishesDetail;
+  RecommendHotspots: RecommendHotspotsDetail;
+  RecordHotspotFeedback: RecordHotspotFeedbackDetail;
   RecordPublishResult: RecordPublishResultDetail;
   RequestPublishAuthorization: RequestPublishAuthorizationDetail;
   SchedulePublish: SchedulePublishDetail;
@@ -243,6 +278,7 @@ export const CONTRACTED_COMMANDS = [
   "CancelScheduledPublish",
   "CreatePlatformVariant",
   "DeleteAgentConnection",
+  "DiscoverHotspots",
   "EndAcpSession",
   "ExportBundle",
   "ExportEditTimeline",
@@ -254,10 +290,13 @@ export const CONTRACTED_COMMANDS = [
   "ListAgentArtifacts",
   "ListAgentConnections",
   "ListAgentTasks",
+  "ListHotspotSources",
   "ListMcpTools",
   "ListPlatformVariants",
   "ListPublishJobs",
   "ListScheduledPublishes",
+  "RecommendHotspots",
+  "RecordHotspotFeedback",
   "RecordPublishResult",
   "RequestPublishAuthorization",
   "SchedulePublish",

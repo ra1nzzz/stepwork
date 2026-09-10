@@ -1,0 +1,19 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "hotspot_id": {
+      "title": "Hotspot Id",
+      "type": "string"
+    },
+    "verdict": {
+      "title": "Verdict",
+      "type": "string"
+    }
+  },
+  "required": [
+    "hotspot_id",
+    "verdict"
+  ],
+  "title": "RecordHotspotFeedbackDetail",
+  "type": "object"
+}

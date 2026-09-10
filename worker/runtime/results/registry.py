@@ -69,6 +69,11 @@ RESULT_MODELS: dict[str, type[m.ResultModel]] = {
     "ListAcpSessions": m.ListAcpSessionsDetail,
     # ---- render 域 ----
     "ExportEditTimeline": m.ExportEditTimelineDetail,
+    # ---- 热点域（S5） ----
+    "ListHotspotSources": m.ListHotspotSourcesDetail,
+    "DiscoverHotspots": m.DiscoverHotspotsDetail,
+    "RecommendHotspots": m.RecommendHotspotsDetail,
+    "RecordHotspotFeedback": m.RecordHotspotFeedbackDetail,
 }
 
 #: 严格模式开关。测试用 :func:`strict_results` 打开。

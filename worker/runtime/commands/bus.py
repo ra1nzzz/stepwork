@@ -48,6 +48,12 @@ _ROUTES: dict[str, str] = {
     "SynthesizeScenes": "worker.runtime.handlers.synthesize_scenes",
     # S2 配图阶段：逐幕生图 → image_uri（接口先于厂商实现）
     "IllustrateScenes": "worker.runtime.handlers.illustrate_scenes",
+    # S5 上游热点：发现（取事实）→ 推荐（下判断）→ 反馈（可学习）
+    # 走独立 MCP Server（P2），本仓只留命令与落库
+    "ListHotspotSources": "worker.runtime.handlers.hotspots",
+    "DiscoverHotspots": "worker.runtime.handlers.hotspots",
+    "RecommendHotspots": "worker.runtime.handlers.hotspots",
+    "RecordHotspotFeedback": "worker.runtime.handlers.hotspots",
     # PRD-SCR-003：段落级生成/重写/扩写/压缩
     "EditParagraph": "worker.runtime.handlers.edit_paragraph",
     "GetConfig": "worker.runtime.handlers.config",

@@ -1,0 +1,64 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "batch_id": {
+      "title": "Batch Id",
+      "type": "string"
+    },
+    "connection_id": {
+      "title": "Connection Id",
+      "type": "string"
+    },
+    "items": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Items",
+      "type": "array"
+    },
+    "count": {
+      "title": "Count",
+      "type": "integer"
+    },
+    "saved": {
+      "title": "Saved",
+      "type": "integer"
+    },
+    "sources": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Sources",
+      "type": "array"
+    },
+    "errors": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Errors",
+      "type": "array"
+    },
+    "skipped": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Skipped",
+      "type": "array"
+    }
+  },
+  "required": [
+    "batch_id",
+    "connection_id",
+    "items",
+    "count",
+    "saved",
+    "sources",
+    "errors",
+    "skipped"
+  ],
+  "title": "DiscoverHotspotsDetail",
+  "type": "object"
+}
