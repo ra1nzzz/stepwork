@@ -193,7 +193,8 @@ plugins/{official,registry}
 | 2026-09-08 | **S1 完成**：Playwright 逐帧渲染器探路通过；ROADMAP 打勾、COMPLETED §1.5 入账、REFERENCE 登记新依赖；详见上方 §1.5 |
 | 2026-09-09 | **S0 遗留闭合**：向 YT-Agent-Ontology 补 `mappings/stepwork.yaml`（13 实体）+ `products/stepwork/STEPWORK-ONTOLOGY-MIGRATION.md`（13 节）+ `prompts/STEPWORK-UNIFICATION-PROMPT.md`，入 `YT-Agent-Ontology@b1089e9`；PHASE 编号裁决写入 **D-008**（不新增生态 PHASE；三件套计 PHASE 3 兼容层资产；ContentOps 基线须在 PHASE 9 前冻结）。顺带修母规范 `inpeaknext` / `orchclaw` / `proagi` 三份映射的 YAML 语法（此前声称机器可读但 `yaml.safe_load` 报错），六份映射现已全部可解析 |
 
-| 2026-09-09 | **S5 最小验证**：建独立仓库 `ra1nzzz/stepwork-hotspot-mcp`（AGPL、零运行时依赖、stdio MCP），三源（HF Daily Papers / GitHub Trending / RSS）全部免密钥。STEPWORK 的 `McpStdioClient` 直连全通、真实出 12 条热点 0 errors。实测**中文热搜路线拿不到**（RSSHub 403、36氪/InfoQ 非真 RSS、微博镜像不可达、arXiv 连不通）→ 上游形态只能是「追技术圈动态」而非「追社会热点」。是否继续由弈韬裁决（见 `ROADMAP` S5） |
+| 2026-09-09 | **S5 最小验证**：建独立仓库 `ra1nzzz/stepwork-hotspot-mcp`（AGPL、零运行时依赖、stdio MCP），三源（HF Daily Papers / GitHub Trending / RSS）全部免密钥。STEPWORK 的 `McpStdioClient` 直连全通、真实出 12 条热点 0 errors |
+| 2026-09-10 | **S5 结论翻案 + 抖音热榜接入**：第一版「中文热搜拿不到」是**探测方法问题**（用第三方镜像代表微博、没跟 http→https 重定向把 arXiv 判死、默认 UA 触发 InfoQ 的 WAF 451）。实测补上 **抖音热榜官方接口**（50 条中文热榜词 + 热度值，免登录免密钥）+ arXiv + InfoQ，真实抓取 45 条 0 errors。抖音另两条路径已调研：热点宝 `douhot.douyin.com`（10 大榜单/200+ 垂类/热词趋势/活动日历，价值最高但**无公开 API**，只能浏览器自动化 + 登录态）；抖音开放平台 API **个人不可申请**（要企业资质，且热榜不在开放能力清单）。详见 `ROADMAP` S5 |
 
 **S2 剩余遗留项（2026-09-09 更新）**
 
