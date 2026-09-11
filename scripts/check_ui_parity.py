@@ -9,7 +9,8 @@
 来源          怎么取
 ============  ==========================================================
 权威路由      ``worker/runtime/commands/bus.py`` 的 ``_ROUTES``
-CLI 入口      ``cli/__main__.py`` 的 ``set_defaults(command_type="…")``
+CLI 入口      ``cli/`` **包内全部** ``set_defaults(command_type="…")``
+              （只看主模块会漏掉 ``cli/config.py`` 这类分文件）
 GUI 调用点    ``apps/desktop/src`` 下 ``buildEnvelope`` / ``runCommand`` /
               ``useCommand`` / ``useCommandMutation`` 的**字面量**首参
 detail 字段   ``worker/runtime/results/models.py`` 的 ``*Detail`` 定义
@@ -21,19 +22,24 @@ detail 字段   ``worker/runtime/results/models.py`` 的 ``*Detail`` 定义
 检查项与处理
 ------------
 
-============  =======================================  ==========
-检查          含义                                     不通过时
-============  =======================================  ==========
-A. CLI⊆bus    CLI 指向不存在的命令（拼写错）            硬失败
-B. GUI⊆bus    前端调了后端没有的命令                    硬失败
-C. GUI⊆CLI    **S6 那条**：GUI 能做但 CLI 做不到        只许减不许增
-D. 必需字段   ``_REQUIRED_UI_FIELDS`` 登记的字段要在前端有消费点  硬失败
-报告          动态调用点 / 未消费字段清单                仅打印
-============  =======================================  ==========
+==============  ================================================  ==========
+检查            含义                                              不通过时
+==============  ================================================  ==========
+A. CLI⊆bus      CLI 指向不存在的命令（拼写错）                     硬失败
+B. GUI⊆bus      前端调了后端没有的命令                             硬失败
+C1. GUI⊆可达    GUI 能做的，CLI 有没有**办法**做到                 硬失败
+                （有通用入口 ``call`` 时即为全部 bus 路由可达）
+C2. GUI⊆专门    GUI 能做的，CLI 有没有**专门子命令**（P4 一等公民）  只许减不许增
+D. 必需字段     ``_REQUIRED_UI_FIELDS`` 登记的字段要有前端消费点     硬失败
+报告            动态调用点 / 未消费字段清单                        仅打印
+==============  ================================================  ==========
 
-C 目前**不是**零——那是已知欠账，用 ``_KNOWN_GAP`` 冻结基线，**只许减不许增**：
-每补一个 CLI 子命令就从 ``_KNOWN_GAP`` 里删一个；补完即真正归零。冻结而不是
-直接硬失败，是为了让这道门禁**今天就能进 CI**（允许还债，禁止添债）。
+C 分成两层是因为「能做到」与「好用」是两个问题，混成一个数字必然被误读：
+有了通用入口后可达性即为 0，但「每个能力都有称手的专门入口」仍是要还的债。
+
+C2 用 ``_KNOWN_GAP`` 冻结基线，**只许减不许增**：每补一个 CLI 子命令就从
+``_KNOWN_GAP`` 里删一个；补完即 P4 的一等公民要求真正达成。冻结而不是直接
+硬失败，是为了让这道门禁**今天就能进 CI**（允许还债，禁止添债）。
 
 字段消费那一项（D）是**按名字**在前端源码里找的，有假阳性（``count`` /
 ``tool`` 这类通用名会在无关位置命中）。所以它只对 ``_REQUIRED_UI_FIELDS``
@@ -102,6 +108,11 @@ _REQUIRED_UI_FIELDS: Final[dict[str, tuple[str, ...]]] = {
 #: Agent 连接、审批、定时发布、品牌脚本、项目导入导出整片都只有 GUI 路径。
 #: 冻结而不是当场硬失败，是为了让这道门禁**今天就能进 CI**：允许还债，禁止添债。
 #: 每补一个 CLI 子命令，就从这里删一个；删空即 S6 验收项真正达成。
+#:
+#: 同日修正 —— 首版解析只看 ``cli/__main__.py``，漏掉了住在 ``cli/config.py``
+#: 的 ``GetConfig`` / ``UpdateConfig``，把它们误判成缺口（假报告）。改为扫整个
+#: ``cli/`` 包后这 2 条自动还清，故从 38 降到 **36**。这条教训值得留着：
+#: 缺口数字先降过一次是**修正误报**，不是真还债 —— 别拿它当进度吹。
 _KNOWN_GAP: Final[frozenset[str]] = frozenset(
     {
         "AddA2aAgent",
@@ -121,7 +132,6 @@ _KNOWN_GAP: Final[frozenset[str]] = frozenset(
         "ExportProject",
         "FireDueSchedules",
         "GetA2aServerStatus",
-        "GetConfig",
         "GetProvenance",
         "ImportBrandScript",
         "ImportProject",
@@ -141,7 +151,6 @@ _KNOWN_GAP: Final[frozenset[str]] = frozenset(
         "StopA2aServer",
         "UninstallPlugin",
         "UpdateBrandProfile",
-        "UpdateConfig",
     }
 )
 
@@ -194,7 +203,37 @@ def _bus_commands() -> set[str]:
 
 
 def _cli_commands() -> set[str]:
-    return set(_CLI_RE.findall(_read(_ROOT / "cli/__main__.py")))
+    """CLI 侧能到达的命令名（专门子命令）。
+
+    扫**整个 ``cli/`` 包**而不是只看 ``__main__.py``：``config`` 子命令树住在
+    ``cli/config.py``（``GetConfig`` / ``UpdateConfig``），只看主模块会把它们
+    误判成缺口 —— 这是本脚本第一个假报告，比缺报告更伤信用。
+    """
+    cli_dir = _ROOT / "cli"
+    return set(
+        _CLI_RE.findall(
+            "\n".join(
+                _read(p)
+                for p in sorted(cli_dir.rglob("*.py"))
+                if "tests" not in p.parts
+            )
+        )
+    )
+
+
+def _cli_has_catch_all() -> bool:
+    """CLI 是否存在通用转发入口（``call``）。
+
+    它决定「可达性缺口」是否为 0：有它则每个 bus 路由都能从 CLI 到达。
+    检测它而不是假设它 —— 哪天有人删了这个子命令，C1 的结论会静默失效。
+
+    匹配锚在**顶层** ``sub.add_parser`` 上：``mcp`` 子命令树里也有一个同名的
+    ``mcp call``（远端工具调用），写宽松了会把那个当成本逃生舱，删掉真货也
+    照样报「有兜底」。
+    """
+    return bool(
+        re.search(r'\bsub\.add_parser\(\s*"call"', _read(_ROOT / "cli/__main__.py"))
+    )
 
 
 def _gui_sources() -> list[Path]:
@@ -287,19 +326,33 @@ def main() -> int:
     if unknown:
         failures.append(f"B. GUI 调了无路由的命令（调用必失败）: {unknown}")
 
-    # ---- C. S6：GUI 能做但 CLI 做不到 ----
+    # ---- C1. 可达性：GUI 能做的，CLI 有没有办法做到 ----
+    # 通用转发入口 `call` 接受任意 command_type，等价于覆盖全部 bus 路由，
+    # 所以可达性缺口此时 = gui - bus（已由 B 项兜住）。
+    # 仍然单独打印：让「还差多少」的两种读法都可见 ——「能不能做到」与
+    # 「好不好用」是两件事，混成一句话必然被误读成「已经做完了」。
+    has_catch_all = _cli_has_catch_all()
+    reach_all = bus if has_catch_all else cli
+    unreachable = sorted(gui - reach_all)
+    origin = "逃生舱 `call` 覆盖全部 bus 路由" if has_catch_all else "无逃生舱，按专门子命令算"
+    print(f"[C1] 可达性缺口 {len(unreachable)} 条（{origin}）")
+    if unreachable:
+        failures.append(f"C1. GUI 可达但 CLI 完全无法到达: {unreachable}")
+
+    # ---- C2. 一等公民：GUI 能做的，CLI 有没有**专门子命令** ----
+    # 这才是 P4「双一等公民」的真实欠账，ratchet 只许减不许增。
     gap = gui - cli
     new_debt = sorted(gap - _KNOWN_GAP)
     repaid = sorted(_KNOWN_GAP - gap)
     total = len(gap) + len(repaid)
-    print(f"[C] GUI−CLI 缺口 {len(gap)} 条（已还清 {len(repaid)}/{total}）")
+    print(f"[C2] 一等公民缺口 {len(gap)} 条（已还清 {len(repaid)}/{total}）")
     for name in sorted(gap):
         mark = "欠账" if name in _KNOWN_GAP else "新增"
         print(f"    [{mark}] {name}")
     if repaid:
         print(f"    本次已还清: {repaid}（请从 _KNOWN_GAP 删除对应项）")
     if new_debt:
-        failures.append(f"C. 新增 GUI−CLI 缺口（禁止添债，只许还债）: {new_debt}")
+        failures.append(f"C2. 新增 GUI−CLI 缺口（禁止添债，只许还债）: {new_debt}")
 
     # ---- 报告：解析不了的动态调用点 ----
     if dynamic:

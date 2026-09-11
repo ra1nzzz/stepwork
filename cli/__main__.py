@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import difflib
 import json
 import mimetypes
 import os
@@ -67,6 +68,40 @@ def build_parser() -> argparse.ArgumentParser:
 
     # ----- config -----
     add_config_subcommands(sub)
+
+    # ----- call（通用转发入口 / P4 可达性兜底） -----
+    # 「GUI 能做但 CLI 做不到」的兜底：接受**任意** command_type 直接走
+    # Command Bus。它给全部路由提供**可达性**，但不提供手感 —— 常用能力仍
+    # 应有专门子命令（门禁 C2 在算这笔账，见 scripts/check_ui_parity.py）。
+    #
+    # ⚠️ dest 必须显式写成 command_type：顶层 `args.command` 存的是**子命令名**
+    # （build_payload 靠它路由），位置参数若沿用默认 dest 会把它覆盖掉
+    # —— 加 mcp 子命令时就是这么踩了一次。
+    call_p = sub.add_parser(
+        "call",
+        help="通用转发：以任意 command_type 调用（可达性兜底）",
+        description=(
+            "以任意 command_type 调用 Command Bus，供 CLI 尚无专门子命令的能力"
+            "使用。payload 用 --payload-json 传 JSON 对象；用 --list 查看全部命令。"
+        ),
+    )
+    call_p.add_argument(
+        "command_type",
+        nargs="?",
+        metavar="COMMAND_TYPE",
+        help="命令名（如 ListPlugins / PreviewPluginManifest）；--list 可查全部",
+    )
+    call_p.add_argument(
+        "--payload-json",
+        dest="payload_json",
+        help="可选：payload 的 JSON 对象字面量，如 '{\"limit\": 5}'",
+    )
+    call_p.add_argument(
+        "--list",
+        dest="list_commands",
+        action="store_true",
+        help="列出全部可调用的 command_type（JSON 数组）后退出",
+    )
 
     # ----- analyze -----
     an = sub.add_parser("analyze", help="分析源素材（AnalyzeSource）")
@@ -745,9 +780,54 @@ def _json_object(raw: str, flag: str) -> dict[str, Any]:
     return parsed
 
 
+def route_table() -> dict[str, str]:
+    """权威路由表（``bus._ROUTES``）的只读引用。
+
+    仅在 ``call --list`` 与目标校验时用 —— 刻意问后端要事实，而不是在 CLI
+    里维护第二份命令清单（那种副本一定会与真实路由脱节）。
+    """
+    from worker.runtime.commands.bus import _ROUTES  # noqa: PLC0415
+
+    return _ROUTES
+
+
+#: 通用转发**拒绝**的命令：它们已有专门的、带安全设计的 CLI 入口。
+#: 走 ``call --payload-json`` 会把密钥放进 argv / shell history，破坏
+#: 「CLI 永不接收明文密钥参数」这条不变量（cli/config.py 的 SET.7 约束）。
+#: 逃生舱补的是**缺口**，不该顺手把已有约束绕掉。
+_CALL_DENY: dict[str, str] = {
+    "UpdateConfig": "请用 `config set --file <path>` 或 `--stdin`（密钥不进 argv）",
+}
+
+
+def resolve_call_target(raw: str) -> str:
+    """校验通用转发（``call``）的目标命令名。
+
+    Raises:
+        ValueError: 命令被拒转发，或不存在（附近似建议）。
+    """
+    denied = _CALL_DENY.get(raw)
+    if denied:
+        raise ValueError(f"{raw} 不走通用转发：{denied}")
+    routes = route_table()
+    if raw not in routes:
+        near = difflib.get_close_matches(raw, sorted(routes), n=3, cutoff=0.6)
+        hint = f"；你是不是想用 {' / '.join(near)}" if near else ""
+        raise ValueError(f"unknown command_type: {raw}{hint}（用 `call --list` 查看全部）")
+    return raw
+
+
 def build_payload(args: argparse.Namespace) -> dict[str, Any]:
     """根据子命令把解析后的参数映射为命令 payload。"""
     command = getattr(args, "command", None)
+
+    if command == "call":
+        # payload 由调用方原样提供（目标命令自己才是它的权威解释者）；
+        # 不给就是空对象 —— 别在这里替目标命令猜默认值。
+        raw_payload = getattr(args, "payload_json", None)
+        if raw_payload is None:
+            return {}
+        return _json_object(raw_payload, "--payload-json")
 
     if command == "config":
         return config_payload(args)
@@ -1145,7 +1225,13 @@ def build_envelope_for(args: argparse.Namespace) -> dict[str, Any]:
     胜出），故这两个命令的信封 workspaceId 即目标工作区 id，语义一致。
     """
     command_type = getattr(args, "command_type", None)
+    # 通用转发的命令名来自用户输入，先校验再下发：未知命令在 CLI 就拦下并给
+    # 近似建议，比「信封下发后拿到 unknown commandType」有用得多。
+    if getattr(args, "command", None) == "call" and command_type:
+        command_type = resolve_call_target(command_type)
     if not command_type:
+        if getattr(args, "command", None) == "call":
+            raise ValueError("call 需要 COMMAND_TYPE（或用 `call --list` 查看全部）")
         raise ValueError("subcommand did not set command_type")
     payload = build_payload(args)
     # 子命令级 --project（如 import）优先于全局 --project-id
@@ -1185,6 +1271,12 @@ def main(argv: list[str] | None = None) -> int:
     """
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    # `call --list`：把权威路由表原样打出来（可发现性 —— 用不了看不见的命令）。
+    # 不构造信封，因此也不会碰到下面的 CLI_ARGUMENT 分支。
+    if getattr(args, "list_commands", False):
+        print(json.dumps(sorted(route_table()), indent=2, ensure_ascii=False))
+        return 0
 
     try:
         env = build_envelope_for(args)

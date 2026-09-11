@@ -21,7 +21,7 @@ from typing import Any
 import pytest
 
 import cli.__main__ as cli_mod
-from cli.__main__ import build_parser, main
+from cli.__main__ import build_parser, main, resolve_call_target, route_table
 
 
 def _subparser_choices(parser: argparse.ArgumentParser) -> dict[str, Any]:
@@ -1241,3 +1241,95 @@ def test_mcp_call_rejects_malformed_args_json(
     rc = main(["mcp", "call", "--connection-id", "c", "--tool", "t", "--args-json", bad])
     assert rc == 2
     assert "env" not in captured
+
+
+# ----- call（通用转发逃生舱 / P4 可达性兜底） -----
+
+
+def test_call_forwards_arbitrary_command_type(monkeypatch: pytest.MonkeyPatch) -> None:
+    """任意 command_type 都能通过 call 下发 —— 这是可达性兜底的全部意义。"""
+    captured = _capture_run_command(monkeypatch, {"ok": True, "detail": {}})
+    assert main(["call", "ListPlugins"]) == 0
+    assert captured["env"]["commandType"] == "ListPlugins"
+
+
+def test_call_defaults_payload_to_empty_object(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """不给 --payload-json 就是空对象：别替目标命令猜默认值。"""
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    assert main(["call", "ListBrandScripts"]) == 0
+    assert captured["env"]["payload"] == {}
+
+
+def test_call_passes_payload_json_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """payload 原样透传，CLI 不做键名翻译（目标命令才是它的权威解释者）。"""
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    rc = main(["call", "RequestPublishAuthorization", "--payload-json", '{"videoId": "v-1"}'])
+    assert rc == 0
+    assert captured["env"]["payload"] == {"videoId": "v-1"}
+
+
+@pytest.mark.parametrize("bad", ["{not json", "[1, 2]", "42"])
+def test_call_rejects_malformed_payload_json(
+    monkeypatch: pytest.MonkeyPatch, bad: str
+) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    assert main(["call", "ListPlugins", "--payload-json", bad]) == 2
+    assert "env" not in captured
+
+
+def test_call_rejects_unknown_command_with_suggestion(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """拼错的命令在 CLI 就拦下并给近似建议，比下发后拿 unknown commandType 有用。"""
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    rc = main(["call", "ListPlugin"])
+    assert rc == 2
+    assert "env" not in captured
+    err = json.loads(capsys.readouterr().out)["error"]
+    assert "ListPlugin" in err
+    # 建议里必须出现真实存在的命令（拼写相近），否则提示等于没有
+    assert "ListPlugins" in err
+
+
+def test_call_denies_update_config(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """UpdateConfig 有带安全设计的专门入口，逃生舱不得顺手绕掉「密钥不进 argv」。"""
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    assert main(["call", "UpdateConfig"]) == 2
+    assert "env" not in captured
+    err = json.loads(capsys.readouterr().out)["error"]
+    assert "config set" in err
+
+
+def test_call_requires_command_type(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["call"]) == 2
+    assert "COMMAND_TYPE" in json.loads(capsys.readouterr().out)["error"]
+
+
+def test_call_list_prints_route_table_without_dispatch(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--list 直接打权威路由表：用不了看不见的命令，可发现性靠它。"""
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    assert main(["call", "--list"]) == 0
+    assert "env" not in captured
+    listed = json.loads(capsys.readouterr().out)
+    assert isinstance(listed, list)
+    # 与后端路由表逐字一致（而不是 CLI 维护的第二份清单）
+    assert listed == sorted(route_table())
+    assert "ListPlugins" in listed
+
+
+def test_call_target_accepts_command_that_has_own_subcommand() -> None:
+    """GetConfig 有专门子命令，但走通用转发同样合法 —— 可达性不看手感。"""
+    assert resolve_call_target("GetConfig") == "GetConfig"
+
+
+def test_call_target_rejects_unknown() -> None:
+    with pytest.raises(ValueError, match="unknown command_type"):
+        resolve_call_target("NoSuchCommand")
