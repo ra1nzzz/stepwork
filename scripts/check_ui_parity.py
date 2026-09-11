@@ -264,6 +264,14 @@ def main() -> int:
         return 2
     cli = _cli_commands()
     gui, dynamic = _gui_commands()
+    # 解析集为空必须当场失败，不能让它「差集为空 → 检查通过」——
+    # 那是这道门禁唯一会**静默变绿**的失效方式，比报错危险得多。
+    if not cli:
+        print("FAIL: 未能从 cli/__main__.py 解析出任何 command_type 映射（正则失效？）")
+        return 2
+    if not gui:
+        print("FAIL: 未能解析出任何前端命令调用点（解析失效会让本检查静默变绿）")
+        return 2
 
     print(f"权威路由 bus   {len(bus)} 条")
     print(f"CLI 入口       {len(cli)} 条")
