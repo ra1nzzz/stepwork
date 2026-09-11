@@ -233,8 +233,9 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
 - ✅ **热点 → 选题已打通（2026-09-10，方案 A）**：`ConvertHotspotToTopic` 落一份
   带出处与信任等级的「选题简报」，确认后由**既有** `GenerateTopic` 消费 ——
   见下「热点转选题」一节
-- 未做：CLI `mcp` 子命令（CLI 现在**没有** mcp 入口，属 S6 的 GUI/CLI 对等
-  缺口）、前端热点面板 + 推荐理由展示（S6）
+- ✅ **CLI `mcp` 子命令已补（2026-09-12）**：登记 / 看工具 / 调用三个入口
+  （`mcp add|tools|call`），S6 的 GUI/CLI 对等缺口收窄一格 —— 详见 S6 一节
+- 未做：前端热点面板 + 推荐理由展示（S6）
 
 **抖音热点：三条路径的调研结论（2026-09-10）**
 
@@ -361,6 +362,33 @@ CLI 侧同样验过（`hotspots convert --hotspot-id … --reason … --breakdow
 - [ ] MCP 工具清单与命令总线自动同步（扩展 `gen_result_types.py` 机制）
 - [ ] 至少 1 个真实外部 Agent 端到端调用成功（非 fake）
 
+**已推进（2026-09-12）：CLI `mcp` 子命令**
+
+补上 `AddMcpServer` / `ListMcpTools` / `CallMcpTool` 的 CLI 入口：
+
+```
+stepwork-cli mcp add   --command "python -m stepwork_hotspot_mcp.server" [--name …]
+stepwork-cli mcp tools --connection-id <id>
+stepwork-cli mcp call  --connection-id <id> --tool list_sources [--args-json '{"k":1}']
+```
+
+这一项的由来是**验收时被自己绊到**：S5 登记热点 MCP 只能靠临时脚本直接调
+`AddMcpServer`，因为 CLI **根本没有 mcp 入口** —— GUI/CLI 不对等不是纸面缺口，
+是当场要绕路。
+
+踩到一个 `dest` 冲突值得记：`mcp add --command` 的 `dest` 默认就是 `command`，
+而顶层 `args.command` 存的是**子命令名**（`cli/__main__.py` 的 `build_payload`
+靠它路由）→ 被覆盖后报 `unknown command: 'python -m my_server'`。
+改 `dest="server_command"` 解决。**新增子命令参数前，先确认 `dest` 不撞顶层
+`command` / 子命令组自己的 `dest`**。
+
+真机验收 PASS（真实子进程 + 真实 stdio MCP Server，报告
+`.workbuddy/hotspot-acceptance/mcp-cli-report.md`）：`mcp add` 探测到
+`server_info={"name":"stepwork-hotspot-mcp","version":"0.1.0"}` 与 3 个工具；
+`mcp call --tool list_sources` 回落 gzip 后 2007 字符 / 13 个源，
+`is_error=false`、`trust_level=external-unverified`、`review_state=pending_review`；
+错误路径退出码 1 且带 `MCP_CLIENT_RPC_ERROR: unknown tool: nope`。
+
 **依赖**：S2
 
 ---
@@ -371,14 +399,24 @@ CLI 侧同样验过（`hotspots convert --hotspot-id … --reason … --breakdow
 
 **内容**
 - 当前 `publisher-engine/` 是**全空壳**（5 个子目录仅 `.gitkeep`），从零建
+- **底座候选已定：[OpenCLI](https://github.com/jackwener/opencli)（Apache-2.0）** ——
+  见 `docs/adr/ADR-012-opencli-absorption.md`。它有 `douyin`（含 `draft`/`drafts`）、
+  `xiaohongshu`、`weibo`、`bilibili` 的现成适配器，且许可证与 AGPL 兼容
+  （对比：`douyin-live-info` 是 CC BY-NC，只能借鉴原理）
+- ⛔ **只走 fill / draft 路径**：ADR-008 规定 V0.x 只允许 FILL_AND_PREVIEW，
+  「最终点击发布必须由用户手动完成」→ **禁用 OpenCLI 的 `publish` 命令**
+- 接入形态照 S2 的 `ImageProvider` 先例：**接口先于实现**，列 `[publish-opencli]`
+  可选依赖；未装 / daemon 未起 / 未登录一律显式 `UNAVAILABLE` / `NEED_LOGIN`，不静默降级
 - 优先复用自研 `ProAGI`（Computer Use / 环境交互）的发布自动化思路
 - 已有基础：`handlers/publish.py`（定时发布、平台变体、授权请求、审计）
 
 **验收**
-- [ ] 至少 1 个平台打通发布闭环
+- [ ] 至少 1 个平台打通发布闭环（**fill + 存草稿**，人不点发布）
 - [ ] `platform_variants` / `publish_jobs` 表已有，接通
 
 **依赖**：S2。**优先级低于 S3–S6**（发布不是北极星瓶颈）。
+**风险**：OpenCLI 的适配器会随站点改版失效（上游自己都要 `autofix` 修）→
+「发布失败」必须是**明确降级 + 人工兜底**，绝不静默失败。
 
 ---
 

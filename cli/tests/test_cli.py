@@ -1159,3 +1159,85 @@ def test_scenes_save_rejects_malformed_json(
     assert rc == 2  # 2 = 用法错误（参数问题），与命令执行失败区分
     # 没走到 dispatch：畸形输入不该发到 worker
     assert "env" not in captured
+
+
+# ----- S6：mcp（出站 MCP 连接的 CLI 对等） -----
+
+
+def test_mcp_group_exposes_expected_actions() -> None:
+    actions = set(_subparser_choices(_find_subparser(build_parser(), "mcp")))
+    assert actions == {"add", "tools", "call"}
+
+
+def test_mcp_add_builds_addmcpserver_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    rc = main(["mcp", "add", "--command", "python -m my_server", "--name", "my-hot"])
+
+    assert rc == 0
+    env = captured["env"]
+    assert env["commandType"] == "AddMcpServer"
+    assert env["payload"] == {"command": "python -m my_server", "name": "my-hot"}
+
+
+def test_mcp_add_omits_absent_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    assert main(["mcp", "add", "--command", "srv"]) == 0
+    # 契约：name 缺省不写入，由 handler 自己从命令首段推导
+    assert captured["env"]["payload"] == {"command": "srv"}
+
+
+def test_mcp_add_requires_command() -> None:
+    with pytest.raises(SystemExit) as ei:
+        main(["mcp", "add", "--name", "x"])
+    assert ei.value.code == 2
+
+
+def test_mcp_tools_builds_listmcptools_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    assert main(["mcp", "tools", "--connection-id", "mcpc_1"]) == 0
+    assert captured["env"]["commandType"] == "ListMcpTools"
+    assert captured["env"]["payload"] == {"connectionId": "mcpc_1"}
+
+
+def test_mcp_call_builds_callmcptool_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    rc = main(
+        [
+            "mcp",
+            "call",
+            "--connection-id",
+            "mcpc_1",
+            "--tool",
+            "discover_hotspots",
+            "--args-json",
+            '{"limit": 5}',
+        ]
+    )
+
+    assert rc == 0
+    env = captured["env"]
+    assert env["commandType"] == "CallMcpTool"
+    assert env["payload"] == {
+        "connectionId": "mcpc_1",
+        "toolName": "discover_hotspots",
+        "arguments": {"limit": 5},
+    }
+
+
+def test_mcp_call_omits_arguments_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    assert main(["mcp", "call", "--connection-id", "c", "--tool", "t"]) == 0
+    assert "arguments" not in captured["env"]["payload"]
+
+
+@pytest.mark.parametrize("bad", ["{not json", "[1, 2]", "42"])
+def test_mcp_call_rejects_malformed_args_json(
+    monkeypatch: pytest.MonkeyPatch, bad: str
+) -> None:
+    """畸形 / 非对象 JSON 要给出 CLI_ARGUMENT 而不是 traceback，且不下发。"""
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    rc = main(["mcp", "call", "--connection-id", "c", "--tool", "t", "--args-json", bad])
+    assert rc == 2
+    assert "env" not in captured

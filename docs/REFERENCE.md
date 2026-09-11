@@ -154,6 +154,7 @@
 | Playwright（Python · Apache-2.0，自带 Chromium） | 开源 | 直接 | **S1 `providers/renderer/playwright.py`** | 已实装「Chromium 逐帧截图 + ffmpeg `image2pipe` 管道直连」。本机装不上 Remotion 才用 Playwright；进度由帧数驱动（管道 ffmpeg 读不出总时长） |
 | 抖音热点宝 `douhot.douyin.com`（**无公开 API**） | 站点行为（实测） | 经 CDP 只读接入 | **S5 上游 `stepwork-hotspot-mcp` 的 `douhot.py`** | 微前端 SPA，数据在登录后带 `a_bogus` 签名的 XHR 里。**不伪造签名**（那是绕风控），改为 CDP 复用用户已登录浏览器：`msedge.exe --remote-debugging-port=9222` → 登录 → 由服务端 goto + 读响应体。`browser.close()` 对 `connect_over_cdp` 只是断开连接，不关用户浏览器。端点用 `DOUHOT_CDP_ENDPOINT` 覆盖 |
 | `fakes/fake_ffmpeg_pipe.py`（仓库内） | 自研 | 直接 | 测试 | fake ffmpeg 读 stdin 数 JPEG SOI 写 JSON 报告；`STEPWORK_FAKE_FFMPEG_SLEEP=1` 睡 30s 给取消测试证明 terminate 真生效 |
+| **OpenCLI** `jackwener/opencli`（v1.8.8，**Apache-2.0**，Node ≥ 20.18.1） | 开源 CLI（第三方） | ✅ **消费，不内嵌** → ADR-012 | **S7 发布引擎**（fill/draft 路径）；S5 记为备选 | 复用本机 Chrome 登录态，100+ 站点确定性命令（`douyin` 含 `draft`/`drafts`、`xiaohongshu`、`weibo`、`bilibili`、`weixin create-draft`…），亦可经 CDP 驱动 Electron 应用。**许可证干净**（Apache→AGPL 兼容）。⛔ V0.x **禁用其 `publish` 命令**（ADR-008 只允许 FILL_AND_PREVIEW）。重依赖：Node + Chrome 扩展 + 常驻 daemon（`127.0.0.1:19825`）→ 列可选依赖、显式报错。反向：`opencli external register stepwork --binary stepwork-cli` 即可双向互操作 |
 | ffmpeg / ffprobe | 开源（GPL/LGPL，按构建） | 直接（外部二进制） | 渲染/合成 / 时长探测 | 参数必须用 argv list，不拼 shell；WinGet 装的常不在 PATH，本仓库用 `STEPWORK_FFMPEG_BIN` 显式指定 |
 
 > ⚠️ **ffmpeg 授权**：STEPWORK 为 AGPL-3.0，与 GPL 兼容；若未来改双许可闭源，需确认 ffmpeg 构建版本（LGPL vs GPL）的链接方式。己见 `LICENSE_AUDIT.md`（已归档，待更新）。
@@ -166,6 +167,7 @@
 |---|---|---|
 | Remotion 的分镜与音画对齐思路 | 分幕时间轴驱动渲染的编排模型（**未取代码**，本机装不上 Remotion） | S2 timeline |
 | 各短视频平台的发布自动化实践 | 环境交互 + 表单填充的抽象（未取代码） | S7 发布 |
+| OpenCLI 的适配器工程法（Apache-2.0，见 §4） | `sysexits.h` 退出码语义（66/69/75/77/78 表达**可操作状态**）、`recon → init → verify` 适配器编写流程、站点知识持久化、行形状约束（≤12 顶层键）与网络捕获脱敏 | S7 / 全局错误语义 |
 
 ---
 

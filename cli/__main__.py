@@ -356,6 +356,43 @@ def build_parser() -> argparse.ArgumentParser:
         help="品牌档 id；缺省表示解除关联（payload.profileId = null）",
     )
 
+    # ----- mcp（S6：出站 MCP 连接，与 GUI 的 Agent Connections 页对等） -----
+    # 没有这组子命令时，「登记热点 MCP」只能靠脚本直接调 AddMcpServer ——
+    # 而这正是 S5 真机验收里被迫做的事（见 .workbuddy/hotspot-acceptance/）。
+    mcp = sub.add_parser("mcp", help="出站 MCP Server：登记 / 看工具 / 调用")
+    mcp_sub = mcp.add_subparsers(dest="mcp_action", required=True)
+
+    mcp_add = mcp_sub.add_parser("add", help="登记并探测一个 MCP Server（AddMcpServer）")
+    mcp_add.set_defaults(command_type="AddMcpServer")
+    mcp_add.add_argument(
+        "--command",
+        # ⚠️ dest 不能叫 "command"：顶层 `args.command` 存的是**子命令名**，
+        # build_payload 就靠它路由。同名会把子命令名覆盖成启动命令
+        # （实测报 `unknown command: 'python -m my_server'`）。
+        dest="server_command",
+        required=True,
+        help='启动命令，含参数（如 "python -m my_server"）；登记时会先探测，连不上不落库',
+    )
+    mcp_add.add_argument("--name", help="可选：连接名（默认取命令首段）")
+
+    mcp_ls = mcp_sub.add_parser("tools", help="列出某连接的工具（ListMcpTools）")
+    mcp_ls.set_defaults(command_type="ListMcpTools")
+    mcp_ls.add_argument(
+        "--connection-id", dest="connection_id", required=True, help="连接 id（mcp add 返回）"
+    )
+
+    mcp_call = mcp_sub.add_parser("call", help="调用远端工具（CallMcpTool）")
+    mcp_call.set_defaults(command_type="CallMcpTool")
+    mcp_call.add_argument(
+        "--connection-id", dest="connection_id", required=True, help="连接 id"
+    )
+    mcp_call.add_argument("--tool", dest="tool_name", required=True, help="工具名")
+    mcp_call.add_argument(
+        "--args-json",
+        dest="args_json",
+        help="可选：工具参数（JSON 对象字面量，如 '{\"limit\": 5}'）",
+    )
+
     # ----- hotspots（S5：上游热点发现 / 推荐 / 反馈） -----
     hs = sub.add_parser("hotspots", help="上游热点：发现 / 推荐 / 反馈")
     hs_sub = hs.add_subparsers(dest="hotspots_action", required=True)
@@ -693,6 +730,21 @@ def _analysis_save_payload(args: argparse.Namespace) -> dict[str, Any]:
     return payload
 
 
+def _json_object(raw: str, flag: str) -> dict[str, Any]:
+    """把 ``--xxx-json`` 的字符串解析成 JSON 对象。
+
+    在 CLI 就拦下解析失败：别让它变成一次「命令已下发但信封被拒」的往返，
+    用户看不出是自己参数写坏了。**必须是对象**（数组/标量没有对应的 payload 形状）。
+    """
+    try:
+        parsed = json.loads(raw)
+    except ValueError as e:
+        raise ValueError(f"{flag} 不是合法 JSON: {e}") from None
+    if not isinstance(parsed, dict):
+        raise ValueError(f"{flag} 必须是 JSON 对象")
+    return parsed
+
+
 def build_payload(args: argparse.Namespace) -> dict[str, Any]:
     """根据子命令把解析后的参数映射为命令 payload。"""
     command = getattr(args, "command", None)
@@ -940,6 +992,26 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
             }
         raise ValueError(f"unknown brand action: {action!r}")
 
+    if command == "mcp":
+        action = getattr(args, "mcp_action", None)
+        if action == "add":
+            add_payload: dict[str, Any] = {"command": args.server_command}
+            if getattr(args, "name", None):
+                add_payload["name"] = args.name
+            return add_payload
+        if action == "tools":
+            return {"connectionId": args.connection_id}
+        if action == "call":
+            call_payload: dict[str, Any] = {
+                "connectionId": args.connection_id,
+                "toolName": args.tool_name,
+            }
+            raw_args = getattr(args, "args_json", None)
+            if raw_args is not None:
+                call_payload["arguments"] = _json_object(raw_args, "--args-json")
+            return call_payload
+        raise ValueError(f"unknown mcp action: {action!r}")
+
     if command == "hotspots":
         action = getattr(args, "hotspots_action", None)
         if action == "sources":
@@ -1001,15 +1073,9 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
                     convert_payload[camel] = value
             raw_breakdown = getattr(args, "breakdown_json", None)
             if raw_breakdown is not None:
-                # JSON 解析失败在 CLI 就拦下：别让它变成一次「命令已下发但
-                # 信封被拒」的往返，用户看不出是自己参数写坏了
-                try:
-                    parsed = json.loads(raw_breakdown)
-                except ValueError as e:
-                    raise ValueError(f"--breakdown-json 不是合法 JSON: {e}") from None
-                if not isinstance(parsed, dict):
-                    raise ValueError("--breakdown-json 必须是 JSON 对象")
-                convert_payload["breakdown"] = parsed
+                convert_payload["breakdown"] = _json_object(
+                    raw_breakdown, "--breakdown-json"
+                )
             return convert_payload
         raise ValueError(f"unknown hotspots action: {action!r}")
 
