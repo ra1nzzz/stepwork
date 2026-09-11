@@ -20,7 +20,8 @@ vi.mock("./tauri", () => ({
   getWorkspaceId: () => "ws-test",
 }));
 
-const { runCommand, CommandError, commandKey, errorText } = await import("./useCommand");
+const { runCommand, CommandError, commandKey, errorText, describeCommandError } =
+  await import("./useCommand");
 
 function ok(detail: unknown) {
   return { ok: true, commandId: "c", job_id: null, artifact_ids: [], error: null, detail };
@@ -119,5 +120,36 @@ describe("errorText", () => {
   it("非 Error 也要有可读输出，不能显示 [object Object]", () => {
     expect(errorText(null)).toBe("未知错误");
     expect(errorText("字符串错误")).toBe("字符串错误");
+  });
+});
+
+describe("describeCommandError 带上 detail（排查类场景）", () => {
+  it("detail.message / stderr 一并回显，不只给错误码", () => {
+    const text = describeCommandError(
+      new CommandError("MCP_CLIENT_RPC_ERROR", {
+        message: "Server 在响应前退出",
+        stderr: "ModuleNotFoundError: No module named 'stepwork_hotspot_mcp'",
+      }),
+    );
+    expect(text).toContain("MCP_CLIENT_RPC_ERROR");
+    expect(text).toContain("ModuleNotFoundError");
+  });
+
+  it("detail 是字符串时直接带上", () => {
+    expect(describeCommandError(new CommandError("BAD", "参数少了 hotspotId"))).toBe(
+      "BAD — 参数少了 hotspotId",
+    );
+  });
+
+  it("detail 里没有可读字段时退化成错误码，不出现空段", () => {
+    expect(describeCommandError(new CommandError("OPAQUE", { nested: { a: 1 } }))).toBe(
+      "OPAQUE",
+    );
+    expect(describeCommandError(new CommandError("OPAQUE", null))).toBe("OPAQUE");
+  });
+
+  it("非 CommandError 仍走 errorText 的兜底", () => {
+    expect(describeCommandError(new Error("boom"))).toBe("boom");
+    expect(describeCommandError(null)).toBe("未知错误");
   });
 });

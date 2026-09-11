@@ -124,6 +124,11 @@ jobs:
       - name: 响应契约生成物同步检查
         run: python scripts/gen_result_types.py --check
 
+      # S6 验收清单第一条（P4）：GUI 能做但 CLI 做不到的能力会在这里被点名。
+      # 已有欠账冻结在脚本的 _KNOWN_GAP 里（只许减不许增），新增缺口直接红。
+      - name: GUI/CLI 能力对等检查
+        run: python scripts/check_ui_parity.py
+
       - name: Type check (mypy)
         working-directory: worker
         run: mypy .

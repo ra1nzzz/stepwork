@@ -11,6 +11,7 @@
 
 import { useScriptStore } from "@/stores/useScriptStore";
 import { useViewStore } from "@/stores/useViewStore";
+import { HotspotPanel } from "@/features/hotspots/HotspotPanel";
 
 export function CreateAngleView() {
   const setCreateSubView = useViewStore((s) => s.setCreateSubView);
@@ -212,6 +213,13 @@ export function CreateAngleView() {
           )}
         </aside>
       </section>
+
+      {/*
+        第二条起手线：素材转写之外，也可以从上游热点起手（S6）。
+        两条路的产物都是「一个 content_version」——热点路径走完会把简报版本
+        写进 useScriptStore.sourceVersionId，上面那套生成角度流程零改动即可复用。
+      */}
+      <HotspotPanel />
 
       <div className="inline-actions gap-top-lg">
         <button

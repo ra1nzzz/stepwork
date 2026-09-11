@@ -137,3 +137,29 @@ export function errorText(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error ?? "未知错误");
 }
+
+/**
+ * 连同 `detail` 一起转成可展示文案 —— 排查类场景用这个，不要用 `errorText`。
+ *
+ * `errorText` 只给错误码，够用于「一行红字提示」；但真正可操作的信息在
+ * `detail` 里：外部 MCP Server 的 `detail.message` / `detail.stderr` 才是
+ * 「包没装」「连接没登记」这类原因。只回显「Server 在响应前退出」等于没说
+ * —— 后端 `agents/mcp_client.describe_error()` 是为了同一件事，两边对齐。
+ */
+export function describeCommandError(error: unknown): string {
+  if (!(error instanceof CommandError)) return errorText(error);
+  const parts: string[] = [error.code];
+  const detail = error.detail;
+  if (typeof detail === "string") {
+    if (detail.trim()) parts.push(detail.trim());
+  } else if (detail && typeof detail === "object") {
+    const rec = detail as Record<string, unknown>;
+    for (const key of ["message", "stderr", "hint"]) {
+      const value = rec[key];
+      if (typeof value === "string" && value.trim()) {
+        parts.push(`${key}: ${value.trim()}`);
+      }
+    }
+  }
+  return parts.join(" — ");
+}

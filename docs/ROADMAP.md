@@ -235,7 +235,9 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
   见下「热点转选题」一节
 - ✅ **CLI `mcp` 子命令已补（2026-09-12）**：登记 / 看工具 / 调用三个入口
   （`mcp add|tools|call`），S6 的 GUI/CLI 对等缺口收窄一格 —— 详见 S6 一节
-- 未做：前端热点面板 + 推荐理由展示（S6）
+- ✅ **前端热点面板已落地（2026-09-12）**：判据层 + 面板挂在「02 原创角度」，
+  六条产品红线（降级可见 / 退化提示 / 待复核标 / 空态解释 / 乘性口径 / next_step 键名）
+  由 23 例单测钉住 —— 详见 S6 一节
 
 **抖音热点：三条路径的调研结论（2026-09-10）**
 
@@ -358,7 +360,8 @@ CLI 侧同样验过（`hotspots convert --hotspot-id … --reason … --breakdow
 - 补 `worker/runtime/publish/` 与命令总线的对齐
 
 **验收**
-- [ ] 「GUI 能做但 CLI 做不到」的能力数为 0（脚本可枚举校验）
+- [x] 可枚举校验脚本就位：`scripts/check_ui_parity.py`（进 CI；缺口冻结基线，**只许减不许增**）
+- [ ] 「GUI 能做但 CLI 做不到」的能力数**归零** —— 脚本实测 **38 条**（见下）
 - [ ] MCP 工具清单与命令总线自动同步（扩展 `gen_result_types.py` 机制）
 - [ ] 至少 1 个真实外部 Agent 端到端调用成功（非 fake）
 
@@ -388,6 +391,48 @@ stepwork-cli mcp call  --connection-id <id> --tool list_sources [--args-json '{"
 `mcp call --tool list_sources` 回落 gzip 后 2007 字符 / 13 个源，
 `is_error=false`、`trust_level=external-unverified`、`review_state=pending_review`；
 错误路径退出码 1 且带 `MCP_CLIENT_RPC_ERROR: unknown tool: nope`。
+
+**已推进（2026-09-12 · 第二批）：对等门禁 + 前端热点面板**
+
+*1. 先把「验收」本身做成可执行的 —— `scripts/check_ui_parity.py`（进 CI）*
+
+不靠人工维护一张能力清单（那种清单一定会和代码脱节），直接解析三面事实：
+权威路由（`bus.py` 的 `_ROUTES`）、CLI 入口（`cli/__main__.py` 的
+`set_defaults(command_type=…)`）、GUI **真实调用点**（`buildEnvelope` /
+`runCommand` / `useCommand` 的字面量首参，并解开
+`const commandType = a ? "X" : "Y"` 这层别名）。另加一项 detail 字段消费清单：
+契约里登记的字段在前端有没有真实读点。
+
+它当场推翻了一个乐观假设：缺口**不是 1 条（就差个 mcp），是 38 条** —— 插件、
+Agent 连接、审批、定时发布、品牌脚本、项目导入导出整片能力只有 GUI 路径。
+所以 C 项不能直接硬失败（会红到今天不能进 CI），改为**冻结基线**：
+`_KNOWN_GAP` 记下 38 条，**只许减不许增**。补一个删一个，删空即本条验收达成。
+
+顺带修掉脚本自己一个假报告：动态调用点的正则原写成「首参不是引号」
+（`\(\s*(?!")`），而 `\s*` 可以零宽匹配 —— 于是**每一处跨行的字面量调用**
+都被误报成「解析不了」。改成「首参是标识符」后收敛到真实的 2 处。
+
+*2. 前端热点面板 —— 判据先落成纯函数，UI 只做渲染*
+
+- `features/hotspots/viewModel.ts`：契约读取（顶层 snake_case / 条目 camelCase
+  **只在这一处**读，键名写错不会报错只会静默 undefined）+ 六条产品红线的判据：
+  理由降级可见（`rule` 绝不能当 AI 洞见）、品牌闸门退化提示、外部素材「待复核」标、
+  空态给解释（没数据 ≠ 被筛掉）、打分口径不得展示成加总（乘性公式）、
+  下一步 payload 键名直接取自契约（`source_version_id`，不让 UI 手写）
+- `features/hotspots/HotspotPanel.tsx`：抓取 → 推荐 → 转简报 → 交棒角度。
+  挂在「02 原创角度」而不是新开一级导航 —— 侧栏 7 项是 PRD Ch.7 定的，而两条
+  起手线（素材分析 / 热点推荐）的产物都是「一个 `content_version`」，挂在**消费
+  来源的地方**最自然；简报落库后写 `sourceVersionId`，既有 `GenerateTopic` 流程
+  零改动复用
+- `lib/useCommand.ts` 新增 `describeCommandError()`：`errorText` 只给错误码，
+  但可操作信息在 `detail` 里（外部 MCP Server 的 `message` / `stderr`）——
+  后端早有 `agents/mcp_client.describe_error()` 做同一件事，前端这次对齐
+
+*3. 判据层测试 23 例（夹具取自真机 CLI 输出，不手搓）*
+
+**前提是先把前端依赖装上**：`apps/desktop` 此前 `node_modules` 为空，
+`npm ci` 后前端测试才第一次真正跑起来（`vitest` 81 passed）。这一条本身就是
+「CI 绿 ≠ 本地可验」的提醒 —— 依赖没装时 `npm test` 根本到不了断言。
 
 **依赖**：S2
 

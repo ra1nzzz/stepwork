@@ -28,6 +28,10 @@ dist-ssr/
 .pnpm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+# `npm run build` 的 `tsc -b` 会把 vite.config.ts 编译成这两个文件丢回源码目录
+# （配置源码是 .ts，产物不该入库）
+apps/desktop/vite.config.js
+apps/desktop/vite.config.d.ts
 
 # Python
 __pycache__/
