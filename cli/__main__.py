@@ -25,6 +25,7 @@ from typing import Any
 
 from cli.config import add_config_subcommands, config_payload
 from worker.runtime.app import build_envelope, run_command
+from worker.runtime.publish.platforms import PLATFORM_RULES
 
 # 本协议适配器的固定身份（schemas/command-envelope.schema.json：source=cli）。
 SOURCE = "cli"
@@ -753,7 +754,11 @@ def build_parser() -> argparse.ArgumentParser:
     pvc.add_argument(
         "--platform",
         required=True,
-        choices=["douyin", "generic"],
+        # **从规则表派生**，不手写副本 —— 此前这里硬编码 ("douyin", "generic")，
+        # 而后端支持 5 个平台：`--platform bilibili` 被 CLI 拒掉，同一件事从别的
+        # 入口发却是通的。这是同一类漂移的**第三份副本**（publish_common.py 的
+        # 平台白名单修过一次），故这次直接消除副本本身而非补全列表。
+        choices=sorted(PLATFORM_RULES),
         help="目标平台",
     )
     pvc.add_argument("--title", required=True, help="变体标题")
@@ -809,6 +814,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="可选：带时区的 ISO 时间 → payload.scheduledAt（走平台原生定时字段）",
     )
+
+    ppp = pub_sub.add_parser(
+        "provider",
+        help="探测发布 Provider 是否可用（ProbePublishProvider；只探状态不发布）",
+    )
+    ppp.set_defaults(command_type="ProbePublishProvider")
 
     ptr = pub_sub.add_parser(
         "auth-request", help="申请一次性发布授权（RequestPublishAuthorization）"
@@ -1655,6 +1666,10 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
             return fp
         if action == "auth-request":
             return {"variantId": args.variant_id}
+        if action == "provider":
+            # 只探状态：无入参 —— 可用性是**环境**的函数（PATH/daemon/登录态），
+            # 不是 payload 的函数
+            return {}
         if action == "schedule":
             scp: dict[str, Any] = {
                 "variantId": args.variant_id,

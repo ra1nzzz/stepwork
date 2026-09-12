@@ -121,7 +121,8 @@
         "RequestPublishAuthorization",
         "RecordPublishResult",
         "ListPublishJobs",
-        "BuildPlatformFillPackage"
+        "BuildPlatformFillPackage",
+        "ProbePublishProvider"
       ],
       "description": "Command type identifier. See SYSTEM_SPEC §7.2 for the canonical list."
     },

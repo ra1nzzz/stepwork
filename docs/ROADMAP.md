@@ -626,6 +626,42 @@ Server，13 个源）；这条是**入站**：外部 Agent 当 client，连 STEP
 - [ ] 至少 1 个平台打通发布闭环（**fill + 存草稿**，人不点发布）
 - [ ] `platform_variants` / `publish_jobs` 表已有，接通
 
+**已推进（2026-09-12 · 第七批）：接口层与三态可用性 —— 协议里没有 `publish`**
+
+S7 的第一步不是接 OpenCLI，而是**先把契约定下来**（照 S2 定 `ImageProvider` 的
+先例）。落地为 `worker/runtime/providers/publish/`：
+
+| 层 | 内容 |
+|---|---|
+| 协议 | `base.py`：`PublishProvider`（PEP 544 结构化协议）只有 `name` + `probe` |
+| 状态 | `AvailabilityState` 三态：`ready` / `unavailable` / `need_login` |
+| 映射 | `classify_exit()`：`sysexits.h` → 三态（借鉴 OpenCLI 语义，ADR-012） |
+| 实现 | `opencli.py`：`shutil.which` + `<bin> doctor`；进程纪律照 `McpStdioClient` |
+| 出口 | 命令 `ProbePublishProvider`（总线 + schema + 前端类型 + 结果契约 + CLI `publish provider`） |
+
+⛔ **这一层最重要的设计是「没有什么」**：协议里**根本不存在 `publish`**。
+把 ADR-008 写成「有 `publish` 方法但调用处拦住」，是让承诺停在注释里 ——
+拦住一处调用，拦不住下一处；写成结构性缺失，才无法被绕过。
+`worker/tests/test_publish_provider.py` 里那条断言是**变更检测器**而非现状描述：
+日后有人给协议加动作，它当场红，逼那次改动去走 ADR。
+同 `scripts/check_mcp_surface.py` 的 E 检查项一个原则 ——
+**安全保证要么是可执行的，要么就是没有。**
+
+两条刻意的取舍：
+
+- **`fill` 这一轮不定**：契约照**已核实的事实**写，不照想象写。`probe` 的形状来自
+  ADR-012 已核实的 `opencli doctor` + 退出码语义；而 `fill` 的参数形状取决于各家
+  `draft` 命令的**实际**选项，没在真机上核实过就写死，后来者会照着一个错的契约
+  去实现 —— 签名定错比没有签名更坏。
+- **「未配置」≠「不认识」**：真机一跑才发现，拼错的渠道名（`opencil`）被报成
+  「（环境变量）为空」—— 用户明明设了值，却被指去查一个不存在的「没配置」问题。
+  现在点名那个值。**报错写错方向比不报还费时间。**
+
+真机三态（本机未装 opencli）：未配置 → `unavailable` + 点名环境变量；
+`opencli` 未装 → `unavailable` + 给出 `npm i -g @jackwener/opencli`；
+`opencil` → 点名拼错值。`fill` / `NEED_LOGIN` 两条路径靠 `deps.publish` 注入
+替身覆盖 —— 否则它们只有在装了外部工具的机器上才走过，等于长期无人看守。
+
 **依赖**：S2。**优先级低于 S3–S6**（发布不是北极星瓶颈）。
 **风险**：OpenCLI 的适配器会随站点改版失效（上游自己都要 `autofix` 修）→
 「发布失败」必须是**明确降级 + 人工兜底**，绝不静默失败。

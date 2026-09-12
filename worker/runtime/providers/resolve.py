@@ -35,6 +35,8 @@ from worker.runtime.providers.image.local import LocalImageProvider
 from worker.runtime.providers.image.openai_compatible import (
     OpenAICompatibleImageProvider,
 )
+from worker.runtime.providers.publish.base import PublishProvider
+from worker.runtime.providers.publish.opencli import OpenCliPublishProvider
 from worker.runtime.providers.renderer.base import RendererProvider
 from worker.runtime.providers.renderer.ffmpeg import FFmpegRenderer
 from worker.runtime.providers.tts.base import TTSProvider
@@ -521,4 +523,27 @@ def image_provider_from_hint(
         return LocalImageProvider()
     if kind in IMAGE_PRESETS or kind in _GENERIC_IMAGE_KINDS:
         return _build_image(kind, workspace_id)
+    return None
+
+
+def resolve_publish_provider() -> PublishProvider | None:
+    """按 ``STEPWORK_PUBLISH_PROVIDER`` 解析发布 Provider（S7）。
+
+    - **未设置（默认）→ ``None``**：发布能力显式关闭。与
+      :func:`resolve_image` 同一条规矩 —— 宁可挡住，也不给一个「看起来能用」
+      的出口。发布比配图更该如此：假装的填充会让人以为内容已经排上了。
+    - ``opencli``：经 PATH 调 OpenCLI（ADR-012 的底座候选），只走 fill/draft
+      路径（ADR-008）。
+
+    **可用性不在这里判断** —— 解析期只能看「装没装」，看不到「daemon 起没起、
+    登录没有」，而那两种状态才是用户真正会撞上的。所以这里只负责**构建**，
+    三态判别交给 :meth:`PublishProvider.probe` 在运行期回答。
+
+    未知取值返回 ``None``（→ ``UNAVAILABLE``），不猜、不回落 —— 拼错的渠道名
+    若能「凑合跑」，错误就会一直留在配置里。用 ``STEPWORK_OPENCLI_BIN`` 可指定
+    可执行文件名或路径（默认 ``opencli``）。
+    """
+    kind = (_env("STEPWORK_PUBLISH_PROVIDER") or "").strip().lower()
+    if kind == "opencli":
+        return OpenCliPublishProvider(binary=_env("STEPWORK_OPENCLI_BIN") or "opencli")
     return None

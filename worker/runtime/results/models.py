@@ -46,6 +46,21 @@ class BuildPlatformFillPackageDetail(ResultModel):
     fill_package: dict[str, Any]
 
 
+class ProbePublishProviderDetail(ResultModel):
+    #: "ready" | "unavailable" | "need_login"（ADR-012 三态，绝不静默降级）
+    state: str
+    #: 探的是哪个渠道；未配置时为 ""
+    provider: str
+    #: 现在是什么状态（可读）
+    detail: str
+    #: 你要做什么（可执行的一步，不是「请检查配置」）
+    hint: str
+    #: 外部工具原始退出码，仅用于诊断；None = 没拿到（没装 / 超时被杀）
+    exit_code: int | None = None
+    #: 恒为 False（ADR-008：本能力永不自动发布）
+    auto_publish: bool
+
+
 class RequestPublishAuthorizationDetail(ResultModel):
     approval_id: str
     publish_job_id: str

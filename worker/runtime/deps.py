@@ -32,6 +32,9 @@ class Deps:
     ai: Any = None
     tts: Any = None
     image: Any = None
+    #: 发布 Provider（S7）。生产由主装配注入，handler 回落到
+    #: ``providers.resolve.resolve_publish_provider()``
+    publish: Any = None
     renderer: Any = None
     scene_detector: Any = None
     notify: Any = None

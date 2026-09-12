@@ -1,0 +1,46 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "state": {
+      "title": "State",
+      "type": "string"
+    },
+    "provider": {
+      "title": "Provider",
+      "type": "string"
+    },
+    "detail": {
+      "title": "Detail",
+      "type": "string"
+    },
+    "hint": {
+      "title": "Hint",
+      "type": "string"
+    },
+    "exit_code": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Exit Code"
+    },
+    "auto_publish": {
+      "title": "Auto Publish",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "state",
+    "provider",
+    "detail",
+    "hint",
+    "auto_publish"
+  ],
+  "title": "ProbePublishProviderDetail",
+  "type": "object"
+}

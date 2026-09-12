@@ -36,6 +36,7 @@ RESULT_MODELS: dict[str, type[m.ResultModel]] = {
     "ListPlatformVariants": m.ListPlatformVariantsDetail,
     "ExportBundle": m.ExportBundleDetail,
     "BuildPlatformFillPackage": m.BuildPlatformFillPackageDetail,
+    "ProbePublishProvider": m.ProbePublishProviderDetail,
     "RequestPublishAuthorization": m.RequestPublishAuthorizationDetail,
     "RecordPublishResult": m.RecordPublishResultDetail,
     "ListPublishJobs": m.ListPublishJobsDetail,

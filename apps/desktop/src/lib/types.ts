@@ -193,7 +193,8 @@ export interface CommandEnvelope {
     | "RequestPublishAuthorization"
     | "RecordPublishResult"
     | "ListPublishJobs"
-    | "BuildPlatformFillPackage";
+    | "BuildPlatformFillPackage"
+    | "ProbePublishProvider";
   schemaVersion: string;
   actor: { type: "user" | "agent" | "plugin" | "system" | "desktop"; id: string };
   source: string;

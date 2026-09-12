@@ -152,6 +152,10 @@ _ROUTES: dict[str, str] = {
     "ListPublishJobs": "worker.runtime.handlers.publish",
     # PRD-PUB-003：填充包（ADR-008 只填写+预览，绝不自动发布）
     "BuildPlatformFillPackage": "worker.runtime.handlers.publish",
+    # S7 发布引擎：发布 Provider 的三态可用性（ADR-012）。**只探状态**，
+    # 不触发任何发布动作；会 spawn 外部进程，故不进 agent 白名单（照
+    # ListMcpTools 的先例 —— 只读 ≠ 可以放开）
+    "ProbePublishProvider": "worker.runtime.handlers.publish_provider",
     # PRD-AGT-008 / §9.1 §9.2：审批中心
     "CreateApprovalRequest": "worker.runtime.handlers.approvals",
     "ListApprovalRequests": "worker.runtime.handlers.approvals",

@@ -168,6 +168,15 @@ export interface ListScheduledPublishesDetail {
   scheduled: Record<string, unknown>[];
 }
 
+export interface ProbePublishProviderDetail {
+  state: string;
+  provider: string;
+  detail: string;
+  hint: string;
+  exit_code?: number | null;
+  auto_publish: boolean;
+}
+
 export interface RecommendHotspotsDetail {
   recommendations: Record<string, unknown>[];
   count: number;
@@ -271,6 +280,7 @@ export interface CommandResultDetails {
   ListPlatformVariants: ListPlatformVariantsDetail;
   ListPublishJobs: ListPublishJobsDetail;
   ListScheduledPublishes: ListScheduledPublishesDetail;
+  ProbePublishProvider: ProbePublishProviderDetail;
   RecommendHotspots: RecommendHotspotsDetail;
   RecordHotspotFeedback: RecordHotspotFeedbackDetail;
   RecordPublishResult: RecordPublishResultDetail;
@@ -312,6 +322,7 @@ export const CONTRACTED_COMMANDS = [
   "ListPlatformVariants",
   "ListPublishJobs",
   "ListScheduledPublishes",
+  "ProbePublishProvider",
   "RecommendHotspots",
   "RecordHotspotFeedback",
   "RecordPublishResult",
