@@ -270,6 +270,9 @@ def _fake_opencli_echoing_env(tmp_path: Path, var_name: str) -> str:
 
     POSIX 的 ``printf`` 用单引号包 JSON、再为变量单独开一段引号 ——
     ``echo`` 会吞掉双引号，而少了引号就不是 JSON 了。
+    下面那段三引号拼接已在 Git Bash 里**手工真跑过**，产出能被 ``json.load`` 解析；
+    但要注意 **Windows 上走不到这个分支**，它只在 CI 的 Linux 上被执行 ——
+    本机跑绿不代表这段被覆盖过。
     """
     if os.name == "nt":
         script = tmp_path / "fake-opencli-env.cmd"
