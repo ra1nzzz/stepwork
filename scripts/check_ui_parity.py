@@ -29,17 +29,20 @@ A. CLI⊆bus      CLI 指向不存在的命令（拼写错）                   
 B. GUI⊆bus      前端调了后端没有的命令                             硬失败
 C1. GUI⊆可达    GUI 能做的，CLI 有没有**办法**做到                 硬失败
                 （有通用入口 ``call`` 时即为全部 bus 路由可达）
-C2. GUI⊆专门    GUI 能做的，CLI 有没有**专门子命令**（P4 一等公民）  只许减不许增
+C2. GUI⊆专门    GUI 能做的，CLI 有没有**专门子命令**（P4 一等公民）  硬失败
 D. 必需字段     ``_REQUIRED_UI_FIELDS`` 登记的字段要有前端消费点     硬失败
 报告            动态调用点 / 未消费字段清单                        仅打印
 ==============  ================================================  ==========
 
 C 分成两层是因为「能做到」与「好用」是两个问题，混成一个数字必然被误读：
-有了通用入口后可达性即为 0，但「每个能力都有称手的专门入口」仍是要还的债。
+``call`` 通用入口把**可达性**一次补到 0，但「每个能力都有称手的专门入口」
+是另算的一笔账。
 
-C2 用 ``_KNOWN_GAP`` 冻结基线，**只许减不许增**：每补一个 CLI 子命令就从
-``_KNOWN_GAP`` 里删一个；补完即 P4 的一等公民要求真正达成。冻结而不是直接
-硬失败，是为了让这道门禁**今天就能进 CI**（允许还债，禁止添债）。
+**两层的现状（2026-09-12 第二批）：C1 = 0，C2 = 0。** 也就是说这道门禁现在
+是**双硬失败**，没有冻结基线可躲。演进过程值得留在这里：先立门禁量出 38 条
+缺口 → 给 ``call`` 逃生舱把 C1 清零（可达性）→ 再逐域补 36 个专门子命令把
+C2 清零（手感）。``_KNOWN_GAP`` 保留为空集合，作为**防回退护栏**：今后任何
+「GUI 新增能力但 CLI 没跟」都会当场红，而不是记进基线慢慢还。
 
 字段消费那一项（D）是**按名字**在前端源码里找的，有假阳性（``count`` /
 ``tool`` 这类通用名会在无关位置命中）。所以它只对 ``_REQUIRED_UI_FIELDS``
@@ -102,57 +105,26 @@ _REQUIRED_UI_FIELDS: Final[dict[str, tuple[str, ...]]] = {
     ),
 }
 
-#: 已知欠账：GUI 可达但 CLI 尚无入口的命令（S6 验收项未达成）。**只许减不许增**。
+#: 已知欠账：GUI 可达但 CLI 尚无专门入口的命令。**只许减不许增**。
 #:
-#: 2026-09-12 冻结基线 —— 实测 38 条，比原以为的「就差一个 mcp」大得多：插件、
-#: Agent 连接、审批、定时发布、品牌脚本、项目导入导出整片都只有 GUI 路径。
-#: 冻结而不是当场硬失败，是为了让这道门禁**今天就能进 CI**：允许还债，禁止添债。
-#: 每补一个 CLI 子命令，就从这里删一个；删空即 S6 验收项真正达成。
+#: 演进的三个阶段（别把中间态当成结论）：
 #:
-#: 同日修正 —— 首版解析只看 ``cli/__main__.py``，漏掉了住在 ``cli/config.py``
-#: 的 ``GetConfig`` / ``UpdateConfig``，把它们误判成缺口（假报告）。改为扫整个
-#: ``cli/`` 包后这 2 条自动还清，故从 38 降到 **36**。这条教训值得留着：
-#: 缺口数字先降过一次是**修正误报**，不是真还债 —— 别拿它当进度吹。
-_KNOWN_GAP: Final[frozenset[str]] = frozenset(
-    {
-        "AddA2aAgent",
-        "AddAcpAgent",
-        "BuildPlatformFillPackage",
-        "CancelScheduledPublish",
-        "CheckPluginHealth",
-        "DecideApprovalRequest",
-        "DeleteAgentConnection",
-        "DeleteAsset",
-        "DeleteBrandScript",
-        "DiffContentVersions",
-        "DisablePlugin",
-        "EnablePlugin",
-        "ExportDiagnosticsBundle",
-        "ExportEditTimeline",
-        "ExportProject",
-        "FireDueSchedules",
-        "GetA2aServerStatus",
-        "GetProvenance",
-        "ImportBrandScript",
-        "ImportProject",
-        "InstallPlugin",
-        "ListAgentArtifacts",
-        "ListAgentConnections",
-        "ListAgentTasks",
-        "ListApprovalRequests",
-        "ListBrandScripts",
-        "ListPlugins",
-        "ListScheduledPublishes",
-        "PreviewPluginManifest",
-        "RequestPublishAuthorization",
-        "SchedulePublish",
-        "SetAgentConnectionStatus",
-        "StartA2aServer",
-        "StopA2aServer",
-        "UninstallPlugin",
-        "UpdateBrandProfile",
-    }
-)
+#: 1. **2026-09-12 首版** —— 实测 38 条，比原以为的「就差一个 mcp」大得多：
+#:    插件、Agent 连接、审批、定时发布、品牌脚本、项目导入导出整片都只有
+#:    GUI 路径。冻结而不是当场硬失败，是为了让门禁**当天就能进 CI**。
+#: 2. **同日修正** —— 首版解析只看 ``cli/__main__.py``，漏掉住在
+#:    ``cli/config.py`` 的 ``GetConfig`` / ``UpdateConfig`` → 2 条**假缺口**。
+#:    改扫整个 ``cli/`` 包后自动还清，38 → 36。**这 2 条是修正误报，不是
+#:    真还债**，别拿它当进度吹。
+#: 3. **同日第二批** —— 逐域补齐 36 个专门子命令（``plugin`` / ``agent`` /
+#:    ``a2a`` / ``acp`` / ``approvals`` / ``diagnostics`` / ``provenance``
+#:    七个新组 + ``publish`` / ``brand`` / ``project`` / ``assets`` /
+#:    ``versions`` 五组扩展）→ 归零。
+#:
+#: 现在这里是**空集合，作为防回退护栏保留**：语义从「允许还债、禁止添债」
+#: 收紧成「禁止添债」。今后 GUI 新增能力而 CLI 没跟，C2 会当场红。
+#: 真需要临时挂账时**在注释里写清为什么、什么时候清**，别默默往里塞。
+_KNOWN_GAP: Final[frozenset[str]] = frozenset()
 
 #: bus 的路由行。与 worker/tests/test_command_registry.py 同源。
 #: 命令名允许含数字：A2A 这类协议名本身带数字（StartA2aServer）。
@@ -345,7 +317,11 @@ def main() -> int:
     new_debt = sorted(gap - _KNOWN_GAP)
     repaid = sorted(_KNOWN_GAP - gap)
     total = len(gap) + len(repaid)
-    print(f"[C2] 一等公民缺口 {len(gap)} 条（已还清 {len(repaid)}/{total}）")
+    # 基线为空时别说「已还清 X/Y」：分母 0 读起来像没在算账。直说它是硬门禁。
+    if _KNOWN_GAP:
+        print(f"[C2] 一等公民缺口 {len(gap)} 条（已还清 {len(repaid)}/{total}）")
+    else:
+        print(f"[C2] 一等公民缺口 {len(gap)} 条（基线已清空 → 本项为硬门禁）")
     for name in sorted(gap):
         mark = "欠账" if name in _KNOWN_GAP else "新增"
         print(f"    [{mark}] {name}")

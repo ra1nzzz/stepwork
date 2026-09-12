@@ -288,6 +288,18 @@ def build_parser() -> argparse.ArgumentParser:
     ag.set_defaults(command_type="GetSourceAsset")
     ag.add_argument("asset_id", help="素材 id")
 
+    ad = asset_sub.add_parser("delete", help="删除素材记录（DeleteAsset）")
+    ad.set_defaults(command_type="DeleteAsset")
+    ad.add_argument(
+        "--id", dest="asset_id", required=True, help="素材 id → payload.assetId"
+    )
+    ad.add_argument(
+        "--project",
+        dest="project_id",
+        default=None,
+        help="可选：素材所属项目 id → 信封 projectId（handler 按 assetId 定位，一般不必给）",
+    )
+
     # ----- cleanup（PRD-SRC-005：手动触发清理） -----
     cl = sub.add_parser("cleanup", help="清理临时/下载中间文件（RunCleanup）")
     cl.set_defaults(command_type="RunCleanup")
@@ -352,6 +364,37 @@ def build_parser() -> argparse.ArgumentParser:
     pc.set_defaults(command_type="CreateProject")
     pc.add_argument("--title", required=True, help="项目标题 → payload.title")
 
+    px = proj_sub.add_parser("export", help="导出项目包为 zip（ExportProject）")
+    px.set_defaults(command_type="ExportProject")
+    px.add_argument("--id", dest="project_id", required=True, help="项目 id → payload.projectId")
+    px.add_argument(
+        "--no-assets",
+        dest="include_assets",
+        action="store_false",
+        help="不打包素材文件（默认打包）",
+    )
+    px.add_argument(
+        "--no-jobs",
+        dest="include_jobs",
+        action="store_false",
+        help="不打包任务历史（默认打包）",
+    )
+
+    pi = proj_sub.add_parser("import", help="导入项目包（ImportProject）")
+    pi.set_defaults(command_type="ImportProject")
+    pi.add_argument(
+        "--bundle-path",
+        dest="bundle_path",
+        required=True,
+        help="项目 zip 的绝对路径 → payload.bundlePath",
+    )
+    pi.add_argument(
+        "--keep-ids",
+        dest="remap_id",
+        action="store_false",
+        help="保留包内原 id（默认重新分配，避免与现有项目撞 id）",
+    )
+
     # ----- brand（Tranche 2：BrandProfile） -----
     brand = sub.add_parser("brand", help="品牌档（BrandProfile）命令")
     brand_sub = brand.add_subparsers(dest="brand_action", required=True)
@@ -389,6 +432,61 @@ def build_parser() -> argparse.ArgumentParser:
         "--profile",
         default=None,
         help="品牌档 id；缺省表示解除关联（payload.profileId = null）",
+    )
+
+    bu = brand_sub.add_parser("update", help="更新品牌档（UpdateBrandProfile）")
+    bu.set_defaults(command_type="UpdateBrandProfile")
+    bu.add_argument("--id", dest="profile_id", required=True, help="品牌档 id → payload.profileId")
+    # 与 create 同名同义：只有显式给出的字段才进 payload（未给的列不动）
+    bu.add_argument("--name", help="可选：名称")
+    bu.add_argument("--tone", help="可选：语气")
+    bu.add_argument("--positioning", help="可选：定位")
+    bu.add_argument("--audience", help="可选：受众")
+    bu.add_argument(
+        "--pillar",
+        dest="pillars",
+        action="append",
+        metavar="PILLAR",
+        help="可选：内容支柱（可重复，整体替换）→ payload.contentPillars",
+    )
+    bu.add_argument(
+        "--banned",
+        dest="banned",
+        action="append",
+        metavar="EXPR",
+        help="可选：禁用表达（可重复，整体替换）→ payload.bannedExpressions",
+    )
+
+    bs = brand_sub.add_parser("scripts", help="列出品牌历史脚本（ListBrandScripts）")
+    bs.set_defaults(command_type="ListBrandScripts")
+    bs.add_argument(
+        "--profile-id", dest="profile_id", required=True, help="品牌档 id → payload.profileId"
+    )
+    bs.add_argument("--keyword", default=None, help="可选：标题 / 正文关键词过滤")
+
+    bsi = brand_sub.add_parser("script-import", help="导入历史脚本（ImportBrandScript）")
+    bsi.set_defaults(command_type="ImportBrandScript")
+    bsi.add_argument(
+        "--profile-id", dest="profile_id", required=True, help="品牌档 id → payload.profileId"
+    )
+    # 正文可能很长：--content 走短句内联，--file 走文件（与 `analysis save` 同款）
+    bsi.add_argument(
+        "--content", default=None, help="脚本正文（与 --file 二选一）→ payload.content"
+    )
+    bsi.add_argument(
+        "--file",
+        dest="content_file",
+        metavar="PATH",
+        default=None,
+        help="脚本正文文件（与 --content 二选一）",
+    )
+    bsi.add_argument("--title", default=None, help="可选：标题 → payload.title")
+    bsi.add_argument("--source", default=None, help="可选：来源标记（如 manual / douyin）")
+
+    bsd = brand_sub.add_parser("script-delete", help="删除历史脚本（DeleteBrandScript）")
+    bsd.set_defaults(command_type="DeleteBrandScript")
+    bsd.add_argument(
+        "--script-id", dest="script_id", required=True, help="脚本 id → payload.scriptId"
     )
 
     # ----- mcp（S6：出站 MCP 连接，与 GUI 的 Agent Connections 页对等） -----
@@ -631,6 +729,18 @@ def build_parser() -> argparse.ArgumentParser:
     vg.set_defaults(command_type="GetContentVersion")
     vg.add_argument("version_id", help="content_version id")
 
+    vd = ver_sub.add_parser("diff", help="比较两个内容版本（DiffContentVersions）")
+    vd.set_defaults(command_type="DiffContentVersions")
+    vd.add_argument(
+        "--version-id", dest="version_id", required=True, help="目标版本 id → payload.versionId"
+    )
+    vd.add_argument(
+        "--base-version-id",
+        dest="base_version_id",
+        default=None,
+        help="可选：基线版本 id → payload.baseVersionId（缺省由 handler 取上一版）",
+    )
+
     # ----- publish（Tranche 2：PRD-PUB-001/002） -----
     pub = sub.add_parser("publish", help="发布（平台变体 / 导出）命令")
     pub_sub = pub.add_subparsers(dest="publish_action", required=True)
@@ -671,6 +781,73 @@ def build_parser() -> argparse.ArgumentParser:
     pe.set_defaults(command_type="ExportBundle")
     pe.add_argument("variant_id", help="平台变体 id")
 
+    ptl = pub_sub.add_parser(
+        "timeline", help="导出可继续剪辑的时间线（ExportEditTimeline）"
+    )
+    ptl.set_defaults(command_type="ExportEditTimeline")
+    ptl.add_argument(
+        "--project", dest="project_id", required=True, help="项目 id → payload.projectId"
+    )
+    ptl.add_argument(
+        "--format",
+        default="otio",
+        choices=["otio", "edl"],
+        help="导出格式：otio（Resolve/Premiere/FCP/Avid 都读）或 edl（最大公约数）",
+    )
+
+    pfl = pub_sub.add_parser(
+        "fill", help="生成平台填充包（BuildPlatformFillPackage；不点最终发布）"
+    )
+    pfl.set_defaults(command_type="BuildPlatformFillPackage")
+    pfl.add_argument("--variant-id", dest="variant_id", required=True, help="平台变体 id")
+    pfl.add_argument(
+        "--cover", dest="cover_path", default=None, help="可选：封面图路径 → payload.coverPath"
+    )
+    pfl.add_argument(
+        "--scheduled-at",
+        dest="scheduled_at",
+        default=None,
+        help="可选：带时区的 ISO 时间 → payload.scheduledAt（走平台原生定时字段）",
+    )
+
+    ptr = pub_sub.add_parser(
+        "auth-request", help="申请一次性发布授权（RequestPublishAuthorization）"
+    )
+    ptr.set_defaults(command_type="RequestPublishAuthorization")
+    ptr.add_argument("--variant-id", dest="variant_id", required=True, help="平台变体 id")
+
+    psc = pub_sub.add_parser("schedule", help="排一条定时发布（SchedulePublish）")
+    psc.set_defaults(command_type="SchedulePublish")
+    psc.add_argument("--variant-id", dest="variant_id", required=True, help="平台变体 id")
+    psc.add_argument(
+        "--at",
+        dest="scheduled_at",
+        required=True,
+        help="带时区的 ISO 时间 → payload.scheduledAt（不带时区会按 UTC 解释，容易差几小时）",
+    )
+    psc.add_argument("--note", default=None, help="可选：备注 → payload.note")
+
+    psu = pub_sub.add_parser("unschedule", help="取消一条排期（CancelScheduledPublish）")
+    psu.set_defaults(command_type="CancelScheduledPublish")
+    psu.add_argument(
+        "--schedule-id", dest="schedule_id", required=True, help="排期 id → payload.scheduleId"
+    )
+
+    psl = pub_sub.add_parser("schedules", help="列出排期（ListScheduledPublishes）")
+    psl.set_defaults(command_type="ListScheduledPublishes")
+    psl.add_argument(
+        "--project",
+        dest="project_id",
+        default=None,
+        help="可选：项目 id → payload.projectId（缺省返回全部）",
+    )
+    psl.add_argument("--status", default=None, help="可选：按状态过滤")
+
+    pfd = pub_sub.add_parser(
+        "fire-due", help="触发全部到点排期（FireDueSchedules）"
+    )
+    pfd.set_defaults(command_type="FireDueSchedules")
+
     # ----- analysis（Tranche 2：PRD-ANA-004） -----
     ana = sub.add_parser("analysis", help="分析报告命令")
     ana_sub = ana.add_subparsers(dest="analysis_action", required=True)
@@ -688,6 +865,198 @@ def build_parser() -> argparse.ArgumentParser:
         "--parent",
         dest="parent_version_id",
         help="可选：父版本 id → payload.parentVersionId",
+    )
+
+    # ===== S6 第二批：GUI/CLI 一等公民对等 =====
+    # 下面这些组是为了把 scripts/check_ui_parity.py 的 C2 缺口（GUI 有专门
+    # 界面、CLI 只能走通用 `call`）一条条补掉。通用 `call` 保的是**可达性**，
+    # 这里补的是**手感**：常用路径要有名字、有 --help、有必填校验。
+    #
+    # 键名一律照 handler 实际读的写（多数两种都收，取 camelCase 与 GUI 一致）；
+    # 改这些 payload 前先回读对应 handler 的 `p.get(...)`，别凭印象。
+
+    # ----- plugin（插件：装 / 卸 / 启停 / 健康检查） -----
+    plg = sub.add_parser("plugin", help="插件：列出 / 装 / 卸 / 启停 / 健康检查")
+    plg_sub = plg.add_subparsers(dest="plugin_action", required=True)
+
+    plgl = plg_sub.add_parser("list", help="列出已安装插件（ListPlugins）")
+    plgl.set_defaults(command_type="ListPlugins")
+
+    plgp = plg_sub.add_parser(
+        "preview", help="读取插件目录的 manifest 与权限（PreviewPluginManifest）"
+    )
+    plgp.set_defaults(command_type="PreviewPluginManifest")
+    plgp.add_argument(
+        "--path", required=True, help="含 manifest.json 的插件目录 → payload.path"
+    )
+
+    plgi = plg_sub.add_parser("install", help="安装插件（InstallPlugin）")
+    plgi.set_defaults(command_type="InstallPlugin")
+    plgi.add_argument(
+        "--path", required=True, help="含 manifest.json 的插件目录 → payload.path"
+    )
+
+    plgu = plg_sub.add_parser("uninstall", help="卸载插件（UninstallPlugin）")
+    plgu.set_defaults(command_type="UninstallPlugin")
+    plgu.add_argument("--id", dest="plugin_id", required=True, help="插件 id → payload.pluginId")
+
+    plge = plg_sub.add_parser("enable", help="启用插件（EnablePlugin）")
+    plge.set_defaults(command_type="EnablePlugin")
+    plge.add_argument("--id", dest="plugin_id", required=True, help="插件 id → payload.pluginId")
+
+    plgd = plg_sub.add_parser("disable", help="停用插件（DisablePlugin）")
+    plgd.set_defaults(command_type="DisablePlugin")
+    plgd.add_argument("--id", dest="plugin_id", required=True, help="插件 id → payload.pluginId")
+
+    plgh = plg_sub.add_parser("health", help="插件健康检查（CheckPluginHealth）")
+    plgh.set_defaults(command_type="CheckPluginHealth")
+    plgh.add_argument("--id", dest="plugin_id", required=True, help="插件 id → payload.pluginId")
+
+    # ----- agent（出站 Agent 连接与任务） -----
+    agt = sub.add_parser("agent", help="Agent 连接与任务：查看 / 启停 / 解绑")
+    agt_sub = agt.add_subparsers(dest="agent_action", required=True)
+
+    agtl = agt_sub.add_parser("connections", help="列出 Agent 连接（ListAgentConnections）")
+    agtl.set_defaults(command_type="ListAgentConnections")
+
+    agtt = agt_sub.add_parser("tasks", help="列出 Agent 任务（ListAgentTasks）")
+    agtt.set_defaults(command_type="ListAgentTasks")
+
+    agta = agt_sub.add_parser("artifacts", help="列出 Agent 产物（ListAgentArtifacts）")
+    agta.set_defaults(command_type="ListAgentArtifacts")
+
+    agts = agt_sub.add_parser(
+        "set-status", help="启用 / 停用某条连接（SetAgentConnectionStatus）"
+    )
+    agts.set_defaults(command_type="SetAgentConnectionStatus")
+    agts.add_argument(
+        "--id", dest="connection_id", required=True, help="连接 id → payload.connectionId"
+    )
+    agts.add_argument(
+        "--status",
+        required=True,
+        choices=["active", "inactive"],
+        help="目标状态 → payload.status",
+    )
+
+    agtd = agt_sub.add_parser("disconnect", help="删除某条连接（DeleteAgentConnection）")
+    agtd.set_defaults(command_type="DeleteAgentConnection")
+    agtd.add_argument(
+        "--id", dest="connection_id", required=True, help="连接 id → payload.connectionId"
+    )
+
+    # ----- a2a（入站 Server 开关 + 出站对端登记） -----
+    a2a = sub.add_parser("a2a", help="A2A：入站 Server 开关 + 出站对端登记")
+    a2a_sub = a2a.add_subparsers(dest="a2a_action", required=True)
+
+    a2a_add = a2a_sub.add_parser(
+        "add", help="登记并探测一个 A2A 对端（AddA2aAgent）"
+    )
+    a2a_add.set_defaults(command_type="AddA2aAgent")
+    a2a_add.add_argument("--url", required=True, help="对端 base url → payload.url")
+    a2a_add.add_argument(
+        "--token",
+        default=None,
+        help=(
+            "可选：对端要求的 Bearer token → payload.token。"
+            "这是**单次调用的对端凭据**（不落库、不进日志），与 config 的"
+            "「密钥永不进 argv」约束无关"
+        ),
+    )
+
+    a2a_start = a2a_sub.add_parser(
+        "start", help="启动入站 A2A Server（StartA2aServer；token 仅本次返回）"
+    )
+    a2a_start.set_defaults(command_type="StartA2aServer")
+    a2a_start.add_argument(
+        "--port", type=int, default=None, help="可选：监听端口 → payload.port（缺省由 worker 决定）"
+    )
+
+    a2a_stop = a2a_sub.add_parser("stop", help="停止入站 A2A Server（StopA2aServer）")
+    a2a_stop.set_defaults(command_type="StopA2aServer")
+
+    a2a_status = a2a_sub.add_parser(
+        "status", help="查看入站 A2A Server 状态（GetA2aServerStatus）"
+    )
+    a2a_status.set_defaults(command_type="GetA2aServerStatus")
+
+    # ----- acp（本地 ACP Agent 子进程） -----
+    acp = sub.add_parser("acp", help="ACP：登记本地 ACP Agent 子进程")
+    acp_sub = acp.add_subparsers(dest="acp_action", required=True)
+
+    acp_add = acp_sub.add_parser("add", help="登记并启动本地 ACP Agent（AddAcpAgent）")
+    acp_add.set_defaults(command_type="AddAcpAgent")
+    acp_add.add_argument(
+        "--command",
+        # ⚠️ dest 不能叫 "command"：顶层 `args.command` 存的是子命令名，
+        # build_payload 靠它路由。mcp add 就是在这里踩过一次。
+        dest="acp_command",
+        required=True,
+        help="启动命令 → payload.command",
+    )
+
+    # ----- approvals（审批中心） -----
+    apv = sub.add_parser("approvals", help="审批中心：待办列表 / 批准或驳回")
+    apv_sub = apv.add_subparsers(dest="approvals_action", required=True)
+
+    apvl = apv_sub.add_parser("list", help="列出审批请求（ListApprovalRequests）")
+    apvl.set_defaults(command_type="ListApprovalRequests")
+    apvl.add_argument("--status", default=None, help="可选：按状态过滤（如 pending）")
+    apvl.add_argument("--limit", type=int, default=None, help="可选：最多返回条数")
+
+    apvd = apv_sub.add_parser(
+        "decide", help="批准 / 驳回一条审批（DecideApprovalRequest）"
+    )
+    apvd.set_defaults(command_type="DecideApprovalRequest")
+    apvd.add_argument(
+        "--id", dest="approval_id", required=True, help="审批 id → payload.approvalId"
+    )
+    apvd.add_argument(
+        "--decision", required=True, choices=["approve", "reject"], help="决定 → payload.decision"
+    )
+
+    # ----- diagnostics（脱敏诊断包） -----
+    dgn = sub.add_parser("diagnostics", help="诊断包导出（默认脱敏）")
+    dgn_sub = dgn.add_subparsers(dest="diagnostics_action", required=True)
+
+    dgne = dgn_sub.add_parser("export", help="导出诊断包（ExportDiagnosticsBundle）")
+    dgne.set_defaults(command_type="ExportDiagnosticsBundle")
+    dgne.add_argument(
+        "--desensitize",
+        dest="desensitize",
+        action="store_true",
+        default=None,
+        help="强制脱敏（不指定时跟随配置）",
+    )
+    dgne.add_argument(
+        "--no-desensitize",
+        dest="desensitize",
+        action="store_false",
+        default=None,
+        help="不脱敏 —— **只在本地自查用**，别把这种包发出去",
+    )
+    dgne.add_argument(
+        "--max-log-lines",
+        dest="max_log_lines",
+        type=int,
+        default=None,
+        help="可选：最多纳入的日志行数 → payload.maxLogLines",
+    )
+
+    # ----- provenance（溯源） -----
+    prv = sub.add_parser("provenance", help="溯源：查 Artifact / 版本 / 脚本的来源链")
+    prv_sub = prv.add_subparsers(dest="provenance_action", required=True)
+
+    prvg = prv_sub.add_parser("get", help="查询溯源记录（GetProvenance）")
+    prvg.set_defaults(command_type="GetProvenance")
+    prvg.add_argument(
+        "--subject-type",
+        dest="subject_type",
+        required=True,
+        help="主体类型（如 content_version / artifact）→ payload.subjectType",
+    )
+    prvg.add_argument(
+        "--subject-id", dest="subject_id", required=True, help="主体 id → payload.subjectId"
     )
 
     return parser
@@ -763,6 +1132,29 @@ def _analysis_save_payload(args: argparse.Namespace) -> dict[str, Any]:
     if getattr(args, "parent_version_id", None):
         payload["parentVersionId"] = args.parent_version_id
     return payload
+
+
+def _script_content(args: argparse.Namespace) -> str:
+    """取 ``brand script-import`` 的脚本正文：``--content`` 与 ``--file`` 二选一。
+
+    正文动辄上千字，走 argv 既难看又有 shell 引用风险，所以两条路都给：
+    短句用 ``--content``，长的写文件走 ``--file``（与 ``analysis save`` 同款）。
+
+    Raises:
+        ValueError: 两者都给 / 都不给 / 文件不存在。
+    """
+    inline: str | None = getattr(args, "content", None)
+    path: str | None = getattr(args, "content_file", None)
+    if inline and path:
+        raise ValueError("--content 与 --file 只能给一个")
+    if path:
+        if not os.path.isfile(path):
+            raise ValueError(f"script file not found: {path}")
+        with open(path, encoding="utf-8") as f:
+            inline = f.read()
+    if not inline or not inline.strip():
+        raise ValueError("script-import 需要脚本正文：--content <text> 或 --file <path>")
+    return inline
 
 
 def _json_object(raw: str, flag: str) -> dict[str, Any]:
@@ -1007,6 +1399,8 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
             return {"limit": args.limit} if args.limit is not None else {}
         if action == "get":
             return {"assetId": args.asset_id}
+        if action == "delete":
+            return {"assetId": args.asset_id}
         raise ValueError(f"unknown assets action: {action!r}")
 
     if command == "cleanup":
@@ -1046,6 +1440,16 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
             # 契约（worker/runtime/handlers/projects.py）：title 必填，
             # brandProfileId 可选（CLI 暂不暴露）
             return {"title": args.title}
+        if action == "export":
+            # 契约（project_io.py）：includeAssets / includeJobs 默认 true，
+            # 这里显式发出去 —— 默认值写在两个地方迟早对不上，发明确值最省事
+            return {
+                "projectId": args.project_id,
+                "includeAssets": args.include_assets,
+                "includeJobs": args.include_jobs,
+            }
+        if action == "import":
+            return {"bundlePath": args.bundle_path, "remapId": args.remap_id}
         raise ValueError(f"unknown project action: {action!r}")
 
     if command == "brand":
@@ -1070,6 +1474,34 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
                 "projectId": args.project,
                 "profileId": getattr(args, "profile", None),
             }
+        if action == "update":
+            # 语义是 PATCH 不是 PUT：只有显式给出的字段才进 payload，
+            # 没给的列不动。这里沿用 create 的取值口径。
+            up: dict[str, Any] = {"profileId": args.profile_id}
+            for key in ("name", "positioning", "audience", "tone"):
+                value = getattr(args, key, None)
+                if value:
+                    up[key] = value
+            if getattr(args, "pillars", None):
+                up["contentPillars"] = args.pillars
+            if getattr(args, "banned", None):
+                up["bannedExpressions"] = args.banned
+            return up
+        if action == "scripts":
+            sp: dict[str, Any] = {"profileId": args.profile_id}
+            if getattr(args, "keyword", None):
+                sp["keyword"] = args.keyword
+            return sp
+        if action == "script-import":
+            content = _script_content(args)
+            sip: dict[str, Any] = {"profileId": args.profile_id, "content": content}
+            if getattr(args, "title", None):
+                sip["title"] = args.title
+            if getattr(args, "source", None):
+                sip["source"] = args.source
+            return sip
+        if action == "script-delete":
+            return {"scriptId": args.script_id}
         raise ValueError(f"unknown brand action: {action!r}")
 
     if command == "mcp":
@@ -1186,6 +1618,11 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
             return payload
         if action == "get":
             return {"versionId": args.version_id}
+        if action == "diff":
+            vdf: dict[str, Any] = {"versionId": args.version_id}
+            if getattr(args, "base_version_id", None):
+                vdf["baseVersionId"] = args.base_version_id
+            return vdf
         raise ValueError(f"unknown versions action: {action!r}")
 
     if command == "publish":
@@ -1206,6 +1643,37 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
             return {"projectId": args.project}
         if action == "export-bundle":
             return {"variantId": args.variant_id}
+        if action == "timeline":
+            return {"projectId": args.project_id, "format": args.format}
+        if action == "fill":
+            # ADR-008：这里只产出「内容与约束」，不点最终发布
+            fp: dict[str, Any] = {"variantId": args.variant_id}
+            if getattr(args, "cover_path", None):
+                fp["coverPath"] = args.cover_path
+            if getattr(args, "scheduled_at", None):
+                fp["scheduledAt"] = args.scheduled_at
+            return fp
+        if action == "auth-request":
+            return {"variantId": args.variant_id}
+        if action == "schedule":
+            scp: dict[str, Any] = {
+                "variantId": args.variant_id,
+                "scheduledAt": args.scheduled_at,
+            }
+            if getattr(args, "note", None):
+                scp["note"] = args.note
+            return scp
+        if action == "unschedule":
+            return {"scheduleId": args.schedule_id}
+        if action == "schedules":
+            sls: dict[str, Any] = {}
+            if getattr(args, "project_id", None):
+                sls["projectId"] = args.project_id
+            if getattr(args, "status", None):
+                sls["status"] = args.status
+            return sls
+        if action == "fire-due":
+            return {}
         raise ValueError(f"unknown publish action: {action!r}")
 
     if command == "analysis":
@@ -1213,6 +1681,80 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
         if action == "save":
             return _analysis_save_payload(args)
         raise ValueError(f"unknown analysis action: {action!r}")
+
+    # ----- S6 第二批新增组（GUI/CLI 一等公民对等） -----
+
+    if command == "plugin":
+        action = getattr(args, "plugin_action", None)
+        if action == "list":
+            return {}
+        if action in ("preview", "install"):
+            return {"path": args.path}
+        if action in ("uninstall", "enable", "disable", "health"):
+            return {"pluginId": args.plugin_id}
+        raise ValueError(f"unknown plugin action: {action!r}")
+
+    if command == "agent":
+        action = getattr(args, "agent_action", None)
+        if action in ("connections", "tasks", "artifacts"):
+            return {}
+        if action == "set-status":
+            return {"connectionId": args.connection_id, "status": args.status}
+        if action == "disconnect":
+            return {"connectionId": args.connection_id}
+        raise ValueError(f"unknown agent action: {action!r}")
+
+    if command == "a2a":
+        action = getattr(args, "a2a_action", None)
+        if action == "add":
+            ap: dict[str, Any] = {"url": args.url}
+            if getattr(args, "token", None):
+                ap["token"] = args.token
+            return ap
+        if action == "start":
+            # port 缺省不写入：让 worker 自己挑端口，别在 CLI 写死默认值
+            return {"port": args.port} if args.port is not None else {}
+        if action in ("stop", "status"):
+            return {}
+        raise ValueError(f"unknown a2a action: {action!r}")
+
+    if command == "acp":
+        action = getattr(args, "acp_action", None)
+        if action == "add":
+            return {"command": args.acp_command}
+        raise ValueError(f"unknown acp action: {action!r}")
+
+    if command == "approvals":
+        action = getattr(args, "approvals_action", None)
+        if action == "list":
+            alp: dict[str, Any] = {}
+            if getattr(args, "status", None):
+                alp["status"] = args.status
+            if getattr(args, "limit", None) is not None:
+                alp["limit"] = args.limit
+            return alp
+        if action == "decide":
+            return {"approvalId": args.approval_id, "decision": args.decision}
+        raise ValueError(f"unknown approvals action: {action!r}")
+
+    if command == "diagnostics":
+        action = getattr(args, "diagnostics_action", None)
+        if action == "export":
+            dgp: dict[str, Any] = {}
+            # desensitize 默认 None：不指定就跟随配置，别在 CLI 替配置做决定
+            if getattr(args, "desensitize", None) is not None:
+                dgp["desensitize"] = args.desensitize
+            if getattr(args, "max_log_lines", None) is not None:
+                dgp["maxLogLines"] = args.max_log_lines
+            return dgp
+        raise ValueError(f"unknown diagnostics action: {action!r}")
+
+    if command == "provenance":
+        action = getattr(args, "provenance_action", None)
+        if action == "get":
+            # handler 两种命名都收（subjectType / subject_type），取 camelCase
+            return {"subjectType": args.subject_type, "subjectId": args.subject_id}
+        raise ValueError(f"unknown provenance action: {action!r}")
 
     raise ValueError(f"unknown command: {command!r}")
 

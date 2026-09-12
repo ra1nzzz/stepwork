@@ -1333,3 +1333,326 @@ def test_call_target_accepts_command_that_has_own_subcommand() -> None:
 def test_call_target_rejects_unknown() -> None:
     with pytest.raises(ValueError, match="unknown command_type"):
         resolve_call_target("NoSuchCommand")
+
+
+# ----- S6 第二批：逐域补齐的一等公民子命令 -----
+#
+# 用一张表钉住「子命令 → commandType + payload 字面量」。
+#
+# 为什么值得逐条断言而不是只断言 commandType：handler 取参数普遍写成
+# `p.get("a") or p.get("b")`（兼容两种命名）。这带来一个无声失败模式 ——
+# **键名写错了既不报错也不生效**，命令成功、字段静默为默认值。所以这里断言
+# 完整 payload，键名错了当场红。
+#
+# 表驱动而不是 47 个独立函数：新增一个子命令就是加一行，评审时一眼看过。
+
+_S6_COMMANDS: list[tuple[list[str], str, dict[str, Any]]] = [
+    # --- plugin ---
+    (["plugin", "list"], "ListPlugins", {}),
+    (
+        ["plugin", "preview", "--path", "/tmp/plg"],
+        "PreviewPluginManifest",
+        {"path": "/tmp/plg"},
+    ),
+    (
+        ["plugin", "install", "--path", "/tmp/plg"],
+        "InstallPlugin",
+        {"path": "/tmp/plg"},
+    ),
+    (
+        ["plugin", "uninstall", "--id", "plg_1"],
+        "UninstallPlugin",
+        {"pluginId": "plg_1"},
+    ),
+    (["plugin", "enable", "--id", "plg_1"], "EnablePlugin", {"pluginId": "plg_1"}),
+    (["plugin", "disable", "--id", "plg_1"], "DisablePlugin", {"pluginId": "plg_1"}),
+    (
+        ["plugin", "health", "--id", "plg_1"],
+        "CheckPluginHealth",
+        {"pluginId": "plg_1"},
+    ),
+    # --- agent ---
+    (["agent", "connections"], "ListAgentConnections", {}),
+    (["agent", "tasks"], "ListAgentTasks", {}),
+    (["agent", "artifacts"], "ListAgentArtifacts", {}),
+    (
+        ["agent", "set-status", "--id", "agc_1", "--status", "inactive"],
+        "SetAgentConnectionStatus",
+        {"connectionId": "agc_1", "status": "inactive"},
+    ),
+    (
+        ["agent", "disconnect", "--id", "agc_1"],
+        "DeleteAgentConnection",
+        {"connectionId": "agc_1"},
+    ),
+    # --- a2a ---
+    (
+        ["a2a", "add", "--url", "http://127.0.0.1:9/"],
+        "AddA2aAgent",
+        {"url": "http://127.0.0.1:9/"},
+    ),
+    (
+        ["a2a", "add", "--url", "http://127.0.0.1:9/", "--token", "tk"],
+        "AddA2aAgent",
+        {"url": "http://127.0.0.1:9/", "token": "tk"},
+    ),
+    # port 缺省不写入：让 worker 自己挑端口，别在 CLI 写死
+    (["a2a", "start"], "StartA2aServer", {}),
+    (["a2a", "start", "--port", "8787"], "StartA2aServer", {"port": 8787}),
+    (["a2a", "stop"], "StopA2aServer", {}),
+    (["a2a", "status"], "GetA2aServerStatus", {}),
+    # --- acp ---
+    (
+        ["acp", "add", "--command", "npx -y some-acp-agent"],
+        "AddAcpAgent",
+        {"command": "npx -y some-acp-agent"},
+    ),
+    # --- approvals ---
+    (["approvals", "list"], "ListApprovalRequests", {}),
+    (
+        ["approvals", "list", "--status", "pending", "--limit", "5"],
+        "ListApprovalRequests",
+        {"status": "pending", "limit": 5},
+    ),
+    (
+        ["approvals", "decide", "--id", "apr_1", "--decision", "approve"],
+        "DecideApprovalRequest",
+        {"approvalId": "apr_1", "decision": "approve"},
+    ),
+    # --- diagnostics ---
+    # 不指定 desensitize 时不写入：跟随配置，别在 CLI 替配置做决定
+    (["diagnostics", "export"], "ExportDiagnosticsBundle", {}),
+    (
+        ["diagnostics", "export", "--no-desensitize"],
+        "ExportDiagnosticsBundle",
+        {"desensitize": False},
+    ),
+    (
+        ["diagnostics", "export", "--desensitize", "--max-log-lines", "50"],
+        "ExportDiagnosticsBundle",
+        {"desensitize": True, "maxLogLines": 50},
+    ),
+    # --- provenance ---
+    (
+        ["provenance", "get", "--subject-type", "content_version", "--subject-id", "cv_1"],
+        "GetProvenance",
+        {"subjectType": "content_version", "subjectId": "cv_1"},
+    ),
+    # --- brand 扩展 ---
+    (
+        ["brand", "update", "--id", "bp_1", "--tone", "warm", "--pillar", "A", "--pillar", "B"],
+        "UpdateBrandProfile",
+        {"profileId": "bp_1", "tone": "warm", "contentPillars": ["A", "B"]},
+    ),
+    (
+        ["brand", "scripts", "--profile-id", "bp_1", "--keyword", "钩子"],
+        "ListBrandScripts",
+        {"profileId": "bp_1", "keyword": "钩子"},
+    ),
+    (
+        ["brand", "script-import", "--profile-id", "bp_1", "--content", "正文"],
+        "ImportBrandScript",
+        {"profileId": "bp_1", "content": "正文"},
+    ),
+    (
+        ["brand", "script-delete", "--script-id", "brs_1"],
+        "DeleteBrandScript",
+        {"scriptId": "brs_1"},
+    ),
+    # --- project 扩展 ---
+    (
+        ["project", "export", "--id", "p_1"],
+        "ExportProject",
+        {"projectId": "p_1", "includeAssets": True, "includeJobs": True},
+    ),
+    (
+        ["project", "export", "--id", "p_1", "--no-assets", "--no-jobs"],
+        "ExportProject",
+        {"projectId": "p_1", "includeAssets": False, "includeJobs": False},
+    ),
+    (
+        ["project", "import", "--bundle-path", "C:/tmp/a.zip"],
+        "ImportProject",
+        {"bundlePath": "C:/tmp/a.zip", "remapId": True},
+    ),
+    (
+        ["project", "import", "--bundle-path", "C:/tmp/a.zip", "--keep-ids"],
+        "ImportProject",
+        {"bundlePath": "C:/tmp/a.zip", "remapId": False},
+    ),
+    # --- assets 扩展 ---
+    (["assets", "delete", "--id", "sa_1"], "DeleteAsset", {"assetId": "sa_1"}),
+    # --- versions 扩展 ---
+    (
+        ["versions", "diff", "--version-id", "cv_2"],
+        "DiffContentVersions",
+        {"versionId": "cv_2"},
+    ),
+    (
+        ["versions", "diff", "--version-id", "cv_2", "--base-version-id", "cv_1"],
+        "DiffContentVersions",
+        {"versionId": "cv_2", "baseVersionId": "cv_1"},
+    ),
+    # --- publish 扩展 ---
+    (
+        ["publish", "timeline", "--project", "p_1"],
+        "ExportEditTimeline",
+        {"projectId": "p_1", "format": "otio"},
+    ),
+    (
+        ["publish", "timeline", "--project", "p_1", "--format", "edl"],
+        "ExportEditTimeline",
+        {"projectId": "p_1", "format": "edl"},
+    ),
+    (
+        ["publish", "fill", "--variant-id", "pv_1"],
+        "BuildPlatformFillPackage",
+        {"variantId": "pv_1"},
+    ),
+    (
+        [
+            "publish", "fill", "--variant-id", "pv_1",
+            "--cover", "C:/tmp/c.png",
+            "--scheduled-at", "2026-09-20T10:00:00+08:00",
+        ],
+        "BuildPlatformFillPackage",
+        {
+            "variantId": "pv_1",
+            "coverPath": "C:/tmp/c.png",
+            "scheduledAt": "2026-09-20T10:00:00+08:00",
+        },
+    ),
+    (
+        ["publish", "auth-request", "--variant-id", "pv_1"],
+        "RequestPublishAuthorization",
+        {"variantId": "pv_1"},
+    ),
+    (
+        ["publish", "schedule", "--variant-id", "pv_1", "--at", "2026-09-20T10:00:00+08:00"],
+        "SchedulePublish",
+        {"variantId": "pv_1", "scheduledAt": "2026-09-20T10:00:00+08:00"},
+    ),
+    (
+        ["publish", "unschedule", "--schedule-id", "sch_1"],
+        "CancelScheduledPublish",
+        {"scheduleId": "sch_1"},
+    ),
+    (["publish", "schedules"], "ListScheduledPublishes", {}),
+    (
+        ["publish", "schedules", "--project", "p_1", "--status", "pending"],
+        "ListScheduledPublishes",
+        {"projectId": "p_1", "status": "pending"},
+    ),
+    (["publish", "fire-due"], "FireDueSchedules", {}),
+]
+
+
+@pytest.mark.parametrize(
+    ("argv", "command_type", "payload"),
+    _S6_COMMANDS,
+    # ids 必须预先算好：传给 parametrize 的 callable 是**逐参数值**调用的，
+    # 拿不到整个用例元组，写成 lambda 会在 payload 那一项上炸掉收集。
+    ids=[" ".join(case[0]) for case in _S6_COMMANDS],
+)
+def test_s6_subcommand_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+    argv: list[str],
+    command_type: str,
+    payload: dict[str, Any],
+) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    assert main(argv) == 0
+    env = captured["env"]
+    assert env["commandType"] == command_type
+    assert env["payload"] == payload
+
+
+def test_s6_table_has_no_accidental_duplicates() -> None:
+    """表里的重复条目必须都是「同一个命令的多种开关组合」，不能是复制粘贴漏改。"""
+    seen = [case[1] for case in _S6_COMMANDS]
+    duplicates = {c for c in seen if seen.count(c) > 1}
+    # 合法的重复：a2a add（带/不带 token）、a2a start（带/不带 port）、
+    # diagnostics export（三种开关组合）、project export / import（各两种）、
+    # versions diff（两种）、approvals list（带/不带过滤）、
+    # publish timeline / fill / schedules（各两种）
+    allowed_multi = {
+        "AddA2aAgent",
+        "StartA2aServer",
+        "ExportDiagnosticsBundle",
+        "ExportProject",
+        "ImportProject",
+        "DiffContentVersions",
+        "ListApprovalRequests",
+        "ExportEditTimeline",
+        "BuildPlatformFillPackage",
+        "ListScheduledPublishes",
+    }
+    assert duplicates <= allowed_multi, f"意外的重复 commandType: {duplicates - allowed_multi}"
+
+
+def test_acp_add_command_does_not_clobber_subcommand_name() -> None:
+    """`acp add --command` 的 dest 不能叫 command —— 那会覆盖顶层子命令名。
+
+    `mcp add --command` 就在这里踩过一次（报 unknown command: 'python -m …'）。
+    """
+    parser = build_parser()
+    args = parser.parse_args(["acp", "add", "--command", "npx -y agent"])
+    assert args.command == "acp"
+    assert args.acp_command == "npx -y agent"
+
+
+def test_brand_script_import_reads_content_from_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """长正文走 --file（与 analysis save 同款），内容原文进 payload。"""
+    f = tmp_path / "script.txt"
+    f.write_text("第一句。\n第二句。", encoding="utf-8")
+
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    rc = main(["brand", "script-import", "--profile-id", "bp_1", "--file", str(f)])
+    assert rc == 0
+    assert captured["env"]["payload"]["content"] == "第一句。\n第二句。"
+
+
+def test_brand_script_import_rejects_both_sources(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    rc = main(
+        ["brand", "script-import", "--profile-id", "bp_1", "--content", "x", "--file", "y"]
+    )
+    assert rc == 2
+    assert "env" not in captured
+
+
+def test_brand_script_import_requires_some_content(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    assert main(["brand", "script-import", "--profile-id", "bp_1"]) == 2
+    assert "env" not in captured
+
+
+def test_brand_script_import_rejects_missing_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _capture_run_command(monkeypatch, {"ok": True})
+    rc = main(["brand", "script-import", "--profile-id", "bp_1", "--file", "no/such.txt"])
+    assert rc == 2
+    assert "env" not in captured
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["plugin", "install"],  # 缺 --path
+        ["plugin", "enable"],  # 缺 --id
+        ["agent", "set-status", "--id", "c"],  # 缺 --status
+        ["agent", "set-status", "--id", "c", "--status", "bogus"],  # 非法枚举
+        ["approvals", "decide", "--id", "a"],  # 缺 --decision
+        ["a2a", "add"],  # 缺 --url
+        ["project", "import"],  # 缺 --bundle-path
+        ["publish", "schedule", "--variant-id", "v"],  # 缺 --at
+        ["provenance", "get", "--subject-type", "t"],  # 缺 --subject-id
+        ["brand", "update"],  # 缺 --id
+    ],
+)
+def test_s6_subcommands_reject_missing_required_args(argv: list[str]) -> None:
+    """必填参数缺失一律 SystemExit(2) 走 argparse，不构造信封。"""
+    with pytest.raises(SystemExit) as ei:
+        main(argv)
+    assert ei.value.code == 2

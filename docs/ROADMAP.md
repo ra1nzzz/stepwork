@@ -360,15 +360,16 @@ CLI 侧同样验过（`hotspots convert --hotspot-id … --reason … --breakdow
 - 补 `worker/runtime/publish/` 与命令总线的对齐
 
 **验收**
-- [x] 可枚举校验脚本就位：`scripts/check_ui_parity.py`（进 CI；缺口冻结基线，**只许减不许增**）
+- [x] 可枚举校验脚本就位：`scripts/check_ui_parity.py`（进 CI）
 - [x] 「GUI 能做但 CLI **到不了**」的能力数**归零** —— 通用逃生舱 `call` 覆盖全部 98 条路由，实测 **0 条**
-- [ ] 「GUI 能做但 CLI 没有**专门子命令**」的能力数归零（P4 一等公民）—— 实测 **36 条**（见下）
+- [x] 「GUI 能做但 CLI 没有**专门子命令**」的能力数归零（P4 一等公民）—— 实测 **0 条**（原 36 → 0）
 - [ ] MCP 工具清单与命令总线自动同步（扩展 `gen_result_types.py` 机制）
 - [ ] 至少 1 个真实外部 Agent 端到端调用成功（非 fake）
 
 > **为什么拆成两条**：「能不能做到」和「好不好用」是两个问题。达标判据是前者
 > （GUI 能做的 CLI 必须有办法做到），但把两者混成一个数字，会被读成「已经做完了」。
-> 门禁因此分 C1（可达性，硬失败）/ C2（专门子命令，ratchet）两层。
+> 门禁因此分 C1（可达性）/ C2（专门子命令）两层 —— **现已双零，都是硬失败**，
+> 不再有冻结基线可躲。
 
 **已推进（2026-09-12）：CLI `mcp` 子命令**
 
@@ -476,6 +477,41 @@ stepwork-cli call --list          # 打印权威路由表（JSON 数组）
 
 **注意**：C2 的 36 条里，`GetConfig`/`UpdateConfig` 两条是**修正误报**还掉的，
 不是真补子命令 —— 别把这 2 条算成进度。
+
+**已推进（2026-09-12 · 第四批）：逐域补齐 36 个专门子命令 —— 一等公民缺口归零**
+
+上一批用 `call` 把**可达性**补到 0；这批把**手感**补到 0，CLI 入口从 47 涨到 **83**。
+
+新增 7 个组、扩展 5 个组，共 36 个专门子命令：
+
+| 域 | 子命令 |
+|---|---|
+| `plugin`（新） | `list` `preview --path` `install --path` `uninstall --id` `enable --id` `disable --id` `health --id` |
+| `agent`（新） | `connections` `tasks` `artifacts` `set-status --id --status` `disconnect --id` |
+| `a2a`（新） | `add --url [--token]` `start [--port]` `stop` `status` |
+| `acp`（新） | `add --command` |
+| `approvals`（新） | `list [--status] [--limit]` `decide --id --decision` |
+| `diagnostics`（新） | `export [--desensitize/--no-desensitize] [--max-log-lines]` |
+| `provenance`（新） | `get --subject-type --subject-id` |
+| `publish`（扩） | `timeline` `fill` `auth-request` `schedule` `unschedule` `schedules` `fire-due` |
+| `brand`（扩） | `update` `scripts` `script-import` `script-delete` |
+| `project`（扩） | `export` `import` |
+| `assets`（扩） | `delete` |
+| `versions`（扩） | `diff` |
+
+补齐过程中值得记的三点：
+
+1. **键名一律回读 handler 再写**，不凭印象。handler 普遍写成
+   `p.get("a") or p.get("b")`（兼容两种命名），这带来一个**无声失败模式**：
+   键名写错既不报错也不生效，命令成功、字段静默为默认值。所以测试用一张表
+   断言**完整 payload 字面量**（47 条），而不是只断言 `commandType`。
+2. **`acp add --command` 的 `dest` 必须绕开顶层 `command`** ——
+   `mcp add` 在这里踩过一次（子命令名被启动命令覆盖 → `unknown command`）。
+   已单独留一条测试钉住。
+3. **逃生舱与专门入口不是二选一**：`call` 保留，专门子命令照顾常用路径。
+   门禁 C2 现在**基线清空（`_KNOWN_GAP` 为空集合）**，语义从「允许还债、
+   禁止添债」收紧成纯粹的**禁止添债** —— 今后 GUI 新增能力而 CLI 没跟会当场红。
+   已用负向用例验证过护栏确实会响（临时拆掉一个映射 → exit 1 并点名）。
 
 **依赖**：S2
 
