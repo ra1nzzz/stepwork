@@ -13,7 +13,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { buildEnvelope, dispatchCommand, getWorkspaceId } from "@/lib/tauri";
-import { errorText, runCommand } from "@/lib/useCommand";
+import { describeCommandError, errorText, runCommand } from "@/lib/useCommand";
 import { openLocalPath } from "@/lib/shell";
 import { useViewStore } from "@/stores/useViewStore";
 import { useRenderStore } from "@/stores/useRenderStore";
@@ -26,6 +26,15 @@ import type {
   PublishPlatform,
   ScheduledPublish,
 } from "@/lib/types";
+import {
+  diagnosticsLine,
+  fixHint,
+  isUsable,
+  MANUAL_PUBLISH_NOTICE,
+  stateBadge,
+  toProviderStatus,
+  type ProviderStatusView,
+} from "./providerViewModel";
 
 interface ProjectOption {
   id: string;
@@ -55,6 +64,35 @@ export function PublishView() {
   const selectedProjectId = useViewStore((s) => s.selectedProjectId);
   const setSelectedProjectId = useViewStore((s) => s.setSelectedProjectId);
   const videoVersionId = useRenderStore((s) => s.videoVersionId);
+
+  /**
+   * S7 发布通道状态（ADR-012 三态）。**与项目无关** —— 可用性是环境的函数
+   * （PATH / daemon / 登录态），所以不带 projectId。
+   *
+   * 只读探测：`ProbePublishProvider` 不触发任何发布动作，探测失败也不该
+   * 静默沿用上一轮的成功状态（会把「刚坏掉」显示成「还好」）。
+   */
+  const [providerStatus, setProviderStatus] =
+    useState<ProviderStatusView | null>(null);
+  const [providerError, setProviderError] = useState<string | null>(null);
+  const [providerChecking, setProviderChecking] = useState(false);
+
+  const loadProviderStatus = useCallback(async () => {
+    setProviderChecking(true);
+    setProviderError(null);
+    try {
+      setProviderStatus(toProviderStatus(await runCommand("ProbePublishProvider")));
+    } catch (e) {
+      setProviderError(describeCommandError(e));
+      setProviderStatus(null);
+    } finally {
+      setProviderChecking(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadProviderStatus();
+  }, [loadProviderStatus]);
 
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [projectId, setProjectId] = useState<string | null>(selectedProjectId);
@@ -380,6 +418,65 @@ export function PublishView() {
         <span className={`status ${error ? "danger" : isLoading ? "ai" : "success"}`}>
           {error ? "出错" : isLoading ? "加载中" : `${variants.length} 个变体`}
         </span>
+      </section>
+
+      {/* S7 发布通道：只探状态，不触发任何发布动作（ADR-012 三态 / ADR-008 边界） */}
+      <section className="panel section-gap" data-od-id="publish-provider-panel">
+        <div className="panel-head">
+          <div>
+            <h2 className="panel-title">发布通道</h2>
+            <div className="panel-meta">
+              {providerStatus
+                ? providerStatus.provider
+                  ? `渠道：${providerStatus.provider}`
+                  : "未配置发布通道"
+                : providerError
+                  ? "检测失败"
+                  : "检测中…"}
+            </div>
+          </div>
+          <div className="inline-actions">
+            {providerStatus ? (
+              <span className={`status ${stateBadge(providerStatus).tone}`}>
+                {stateBadge(providerStatus).label}
+              </span>
+            ) : (
+              <span className="status ai">检测中</span>
+            )}
+            <button
+              className="btn small ghost"
+              type="button"
+              onClick={() => void loadProviderStatus()}
+              disabled={providerChecking}
+            >
+              {providerChecking ? "检测中…" : "重新检测"}
+            </button>
+          </div>
+        </div>
+        <div className="panel-body">
+          {providerError ? (
+            <p className="error-text text-danger">{providerError}</p>
+          ) : providerStatus ? (
+            <>
+              <p className="panel-meta flush">{fixHint(providerStatus)}</p>
+              {/* 不可用时要说清「不影响什么」：否则用户会以为整条发布链路废了
+                  （生成填充包与导出确实照常可用，只是暂时不能自动填表） */}
+              {!isUsable(providerStatus) && (
+                <p className="panel-meta">
+                  生成填充包与导出不受影响 —— 只是暂时不能自动填进平台表单。
+                </p>
+              )}
+              {diagnosticsLine(providerStatus) && (
+                <p className="panel-meta mono">{diagnosticsLine(providerStatus)}</p>
+              )}
+            </>
+          ) : (
+            <p className="panel-meta flush">正在检测发布通道…</p>
+          )}
+          {/* ADR-008：这句话无条件显示，不依赖上面的状态（也正因如此它没有
+              输入可以依赖 —— 见 providerViewModel 里为什么把它做成常量） */}
+          <p className="panel-meta">{MANUAL_PUBLISH_NOTICE}</p>
+        </div>
       </section>
 
       <section className="layout-main section-gap" data-od-id="publish-layout">
