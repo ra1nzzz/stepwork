@@ -5,9 +5,20 @@
  * 其中 **10 处根本没检查 `res.ok`** —— 后端拒了，UI 照常刷新、显示旧状态、
  * 一句提示都没有。用户点「停用连接」没反应，也不知道为什么。
  *
- * 这里的关键设计是**不给静默失败留出口**：`res.ok === false` 一律抛成异常进
- * error 通道。调用方要么渲染 error，要么让它冒泡 —— 但不可能「忘了检查」，
- * 因为根本没有「检查」这个步骤可以忘。
+ * 本模块的设计是**不给静默失败留出口**：`res.ok === false` 一律抛成异常进
+ * error 通道。调用方要么渲染 error，要么让它冒泡。
+ *
+ * ⚠️ **但请注意现状（2026-09-13 实测）—— 这套 hooks 尚未被采用：**
+ * - `runCommand`：3 处真实调用（`AgentView` / `HotspotPanel` / `PublishView`）
+ * - `useCommand` / `useCommandMutation`：**全仓零调用**。二者的前置条件已满足
+ *   （`main.tsx` 挂了 `QueryClientProvider`），即用了能跑，只是没人用
+ * - 其余 **72 处**仍是手写 `buildEnvelope + dispatchCommand`，且**都检查了 `.ok`**
+ *   —— 靠人记得，不是靠结构保证
+ *
+ * 所以上面那段应读作「**这套写法成立时才会有的性质**」，而非「当前已全局成立」。
+ * 真正把 72 处钉住的是 `commandUsage.test.ts`（含检测器自检，改坏一处会点名）；
+ * 迁移完成前，**照抄邻近文件的手写写法仍是这一层的现实默认** —— 复制粘贴时
+ * 请连 `if (!res.ok)` 一起复制。
  *
  * 配合 `results.generated.ts`，`data` 是按 commandType 推导的强类型。
  */
@@ -45,8 +56,9 @@ export type DetailOf<K extends CommandType> = NonNullable<
 /**
  * 执行一条命令并把失败转成异常。
  *
- * 这是本模块唯一与 worker 通信的地方 —— 所有「ok 检查」集中在此一处，
- * 而不是散落在 79 个调用点各写一遍（那必然会漏，实际就漏了 10 处）。
+ * 这是**本模块内**唯一与 worker 通信的地方 —— 「ok 检查」在此集中一处。
+ * 注意「本模块内」：仓库里另有 72 处仍各自手写检查（原因见文件头现状说明），
+ * 它们的集中点是 `commandUsage.test.ts` 的断言，而不是这个函数。
  */
 export async function runCommand<K extends CommandType>(
   commandType: K,

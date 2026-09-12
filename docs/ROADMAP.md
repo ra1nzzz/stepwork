@@ -601,6 +601,45 @@ Server，13 个源）；这条是**入站**：外部 Agent 当 client，连 STEP
 `.` 会把本地 `.workbuddy/` 验收探针也拉进来，而那些文件 CI 里根本不存在 →
 「本地红、CI 绿」是最难查的一类不一致。
 
+**已推进（2026-09-13 · 前端数据层的死挂点与形状断言）**
+
+起因是补 S7 前端入口时顺手 grep 了一下「有没有人用 `useCommand`」，结果是零。查下去发现
+这不是「组件忘了用」，而是一个**结构性死挂点**：
+
+| 事实 | 判据 | 结论 |
+|---|---|---|
+| react-query 已接入 | `main.tsx` 有 `QueryClientProvider` + `new QueryClient` | 不是「用不了」，是「没人用」 |
+| hooks 零调用 | `grep -rn "useCommand" src --include=*.ts* \| grep -v lib/useCommand` → 空 | `useCommand` / `useCommandMutation` 是死代码 |
+| `runCommand` 仅 3 处 | `AgentView` / `HotspotPanel` / `PublishView` | 而这三个文件**同时**还在手写 `dispatchCommand` |
+| 手写风格仍是主流 | 72 处 | 旧写法没被清除，新写法没被采纳 |
+
+**要害在 docstring 与现状脱节**：`useCommand.ts` 写着「不可能『忘了检查』，因为根本没有
+『检查』这个步骤可以忘」—— 那是**这套写法成立时才有的性质**，而现实中 72 处各自手写、
+各自记着检查。注释描述的是意图，不是现状；新人照它理解，会以为这层已经收口了。
+
+**先量化再动手**：写探针扫「拿到 `dispatchCommand` 返回值却没读 `.ok`」的调用点，初判 7 处可疑。
+逐条复核后 **7 处全是误报** —— `Promise.all` 数组解构（`assetRes.ok` 在 14 行外）、
+函数定义行、跨函数委派（`bridgeConfig` → `adaptConfig` 内有 `if (!res.ok)`）。
+即：**当前不存在真实缺陷**，静默失败出口是被各处手写补齐堵住的。
+
+因此**不迁移**那 72 处（改 20+ 文件的风险大于收益），改为把这个性质**变成可执行的断言** ——
+`apps/desktop/src/lib/commandUsage.test.ts`：
+
+- **检测器自检**：喂合成源码（漏检 / 已检 / `Promise.all` 漏一个 / 直接 return / 丢弃 / 豁免标记）
+  断言检测器逐条判对。光有「跑一遍是绿的」证明不了护栏有效 —— 它可能什么都没匹配上
+- **全仓断言 0 违规**：72 个调用点必须都读过 `.ok`，否则测试红并**点名**文件与行号
+- **覆盖面下限**：源码里 `dispatchCommand(` 出现次数 ≥ 60（实测 76），防止大删之后这条
+  测试变成「空转的绿」
+- **豁免要写出来**：白名单只有 `lib/tauri.ts`（通信层，原样交出结果）与 `lib/useCommand.ts`
+  （全仓唯一集中检查点），每项必须写理由；行内豁免须写 `// ok-check: <理由>`
+
+**负向验证**（真实源码，不是合成输入）：把 `ProjectDetailView` 的 `if (!proj.ok)` 改成
+`if (!proj.commandId)` → 测试红，报 `features/projects/ProjectDetailView.tsx:76  \`proj\` 从未读过 \`.ok\``，
+**失败仅 1 条**（没有连带炸一串），退出码 1；还原后复绿、`git diff` 为空。
+
+同时**改注释说真话**：`useCommand.ts` 的文件头补上现状（3 处 / 0 处 / 72 处）与一句可操作提醒 ——
+迁移完成前，照抄邻近文件的手写写法仍是这一层的现实默认，**复制粘贴时请连 `if (!res.ok)` 一起复制**。
+
 **依赖**：S2
 
 ---
