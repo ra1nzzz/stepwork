@@ -363,7 +363,9 @@ CLI 侧同样验过（`hotspots convert --hotspot-id … --reason … --breakdow
 - [x] 可枚举校验脚本就位：`scripts/check_ui_parity.py`（进 CI）
 - [x] 「GUI 能做但 CLI **到不了**」的能力数**归零** —— 通用逃生舱 `call` 覆盖全部 98 条路由，实测 **0 条**
 - [x] 「GUI 能做但 CLI 没有**专门子命令**」的能力数归零（P4 一等公民）—— 实测 **0 条**（原 36 → 0）
-- [ ] MCP 工具清单与命令总线自动同步（扩展 `gen_result_types.py` 机制）
+- [x] MCP 工具清单与命令总线自动同步 —— 落地为 `scripts/check_mcp_surface.py`（进 CI），
+      8 项检查全绿、6 条护栏做过负向验证。比原计划的「扩展 `gen_result_types.py` 机制」
+      更进一步：那份机制管的是**生成物同步**，这里管的是**跨对象自洽**（详见下方第五批）
 - [ ] 至少 1 个真实外部 Agent 端到端调用成功（非 fake）
 
 > **为什么拆成两条**：「能不能做到」和「好不好用」是两个问题。达标判据是前者
@@ -512,6 +514,50 @@ stepwork-cli call --list          # 打印权威路由表（JSON 数组）
    门禁 C2 现在**基线清空（`_KNOWN_GAP` 为空集合）**，语义从「允许还债、
    禁止添债」收紧成纯粹的**禁止添债** —— 今后 GUI 新增能力而 CLI 没跟会当场红。
    已用负向用例验证过护栏确实会响（临时拆掉一个映射 → exit 1 并点名）。
+
+**已推进（2026-09-12 · 第五批）：MCP 工具面一致性门禁 —— 「根授权保证」从注释变成事实**
+
+MCP 是第四个入口，但它比 CLI / GUI 多担一条**安全边界**：只暴露只读工具，且
+`update_config` / `UpdateConfig` **永不注册**（密钥不可能经 MCP 写入）。这条保证
+此前只写在 `mcp/server.py` 的模块 docstring 与注释里 —— 那是**承诺**：有人加一个
+`update_config` 工具，注释一个字都不会变，没有任何东西会响。
+
+新增 `scripts/check_mcp_surface.py`（进 CI，紧挨 `check_ui_parity.py`）。它不认人工
+清单，用 `ast` 解析五处真实定义（MCP 的 `_TOOL_COMMANDS` / `TOOLS` / `_build_payload`；
+bus 的 `_ROUTES` / `_AGENT_ALLOWED_COMMANDS` / `_AGENT_SOURCES` / `_AGENT_ACTOR_TYPES`
+/ `_ALLOWED_CONFIG_ACTORS`），做 8 项检查：
+
+| 检查 | 含义 |
+|---|---|
+| A | 六处定义都解析出了东西 —— 解析失效必须 exit 2 报明白，绝不静默变绿 |
+| B | MCP 指向的命令必须真实存在于 `_ROUTES`（拼写错必死） |
+| C | `TOOLS` 与 `_TOOL_COMMANDS` 必须是**同一批名字**（双向） |
+| D | MCP 暴露的命令必须在 bus 的 agent 只读白名单内 |
+| E | `update_config` / `UpdateConfig` 在 MCP 面与配置白名单里永不出现 |
+| F | `inputSchema` 自洽：`type: object` / `required ⊆ properties` / 每个属性有 `type` |
+| G | 声明的 property 必须真被 `_build_payload` 读（否则 Agent 传了被静默丢弃） |
+| H | `_build_payload` 读的键必须被声明过（否则 Agent 根本没法提供） |
+
+三点值得记：
+
+1. **C 是最有价值的一条**，因为它挡的是一种「不报错、只让人迷惑」的坏法：只写
+   `_TOOL_COMMANDS` → 工具存在但 `tools/list` 里看不到；只写 `TOOLS` → 广告了一个
+   「调用即 `unknown tool`」的工具。两个方向都不会自己报错。
+2. **顺手清掉三处手写副本**（漂移的根源）：模块 docstring 里枚举的 9 个命令名、
+   `list_tools()` docstring 里的 `exactly 9 tools`、以及测试里重复的工具名清单。
+   第二份副本就是第二个会忘记同步的地方 —— 全部改成指向 `_TOOL_COMMANDS`；测试里
+   保留的那份**换了个身份**：不再是清单副本，而是**安全边界的变更检测器**（扩充 MCP
+   工具面必须是刻意动作，必须在测试里显式改一行）。
+3. **G / H 只能做函数级判定，逐工具的精确版放进测试**：`_build_payload` 是一条 if
+   链，静态切分支会因 fall-through 出假报告，而假报告会让人不再信任这道门禁。于是
+   `mcp/tests/test_mcp.py` 里用探针值**逐个工具真跑一次** `_build_payload`，断言每个
+   声明的参数都真的落进了 payload。
+
+**负向验证当场抓到自己的一个真漏洞**：把 `_TOOL_COMMANDS` 改名后，脚本并非按设计
+打印 `FAIL A` 并 exit 2，而是**抛 traceback 退出 1**。检查项 A 的全部意义就是「解析
+坏了要说人话」—— traceback 会被读成「脚本自己坏了」，而且不告诉你要改哪个对象。
+改为逐对象解析、一次列全所有坏掉的对象。六条护栏（A / B / C / E / F / G）逐一验证
+会响且点名正确，收尾复跑确认 `mcp/server.py` 已还原。
 
 **依赖**：S2
 

@@ -7,13 +7,17 @@ It exposes a *fixed* set of **read-only** tools that map onto the worker's
 Command Bus (``worker.runtime.app.run_command``). The MCP surface is
 deliberately a strict subset of the bus:
 
-* Only read-only commands are reachable (``GetConfig`` / ``ListProjects`` /
-  ``GetProject`` / ``GetJobStatus`` / ``ListJobs`` / ``AnalyzeSource`` /
-  ``ListContentVersions`` / ``GetContentVersion`` / ``ListBrandProfiles``).
+* Only read-only commands are reachable. The authoritative list is
+  ``_TOOL_COMMANDS`` below and it is deliberately **not** repeated here: a
+  second copy of a list is a second thing to forget. It is pinned against the
+  bus' routing table (``_ROUTES``) and its agent allowlist
+  (``_AGENT_ALLOWED_COMMANDS``) by ``scripts/check_mcp_surface.py``, which
+  runs in CI.
 * ``update_config`` / ``UpdateConfig`` is **never** registered. This is the
   root authorization guarantee: secrets can never be written through the MCP
   surface, and ``get_config`` only ever returns the worker-masked view
   (secrets already replaced with ``••••``; only ``hasKey: bool`` is exposed).
+  The same gate asserts that guarantee instead of merely promising it.
 
 The worker process is **not** spawned as a subprocess (sandbox limitation);
 ``run_command`` is invoked in-process.
@@ -33,6 +37,11 @@ SERVER_NAME = "stepwork-mcp"
 SERVER_VERSION = "0.1.0"
 
 # Tool name -> Command Bus command_type. Read-only only.
+#
+# This dict and ``TOOLS`` must name **exactly** the same tools: a tool only in
+# ``TOOLS`` is advertised but answers ``unknown tool`` when called; a tool only
+# here is callable but invisible to ``tools/list``. Neither direction errors on
+# its own, which is why ``scripts/check_mcp_surface.py`` (CI) fails on both.
 _TOOL_COMMANDS: dict[str, str] = {
     "get_config": "GetConfig",
     "list_projects": "ListProjects",
@@ -192,7 +201,12 @@ class McpError(Exception):
 
 
 def list_tools() -> list[dict[str, Any]]:
-    """Return the fixed, read-only tool catalogue (exactly 9 tools)."""
+    """Return the fixed, read-only tool catalogue.
+
+    The count is whatever ``TOOLS`` holds and is not restated here: two copies
+    of a number is one copy too many. ``scripts/check_mcp_surface.py`` pins
+    ``TOOLS`` and ``_TOOL_COMMANDS`` to the same name set.
+    """
     return TOOLS
 
 

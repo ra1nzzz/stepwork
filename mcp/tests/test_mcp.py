@@ -2,8 +2,12 @@
 
 Guarantees verified:
 
-1. ``tools/list`` exposes exactly the 9 read-only tools and **never**
-   ``update_config`` (the root authorization guarantee).
+1. ``tools/list`` exposes the frozen read-only catalogue and **never**
+   ``update_config`` (the root authorization guarantee). Structural drift
+   (same name set as ``_TOOL_COMMANDS``, commands ⊆ bus routes, ⊆ the agent
+   allowlist, no ``UpdateConfig`` anywhere) is enforced in CI by
+   ``scripts/check_mcp_surface.py``; the frozen list here pins the *surface
+   itself* so widening it takes a deliberate edit.
 2. ``tools/call`` for ``get_config`` builds a Command Bus envelope with
    ``source == "mcp"`` and ``actor.type == "agent"`` and returns the
    worker-masked ``detail`` unchanged.
@@ -17,6 +21,8 @@ Guarantees verified:
 6. The Tranche 2 read-only tools (``list_content_versions`` /
    ``get_content_version`` / ``list_brand_profiles``) build the camelCase
    payloads the contract defines, omitting optional keys when absent.
+7. Every property a tool declares in its ``inputSchema`` really reaches the
+   payload — no declared-but-silently-dropped argument.
 
 ``run_command`` is monkeypatched so the tests exercise the MCP layer in
 isolation (no real worker / DB needed). The real ``build_envelope`` is used
@@ -33,6 +39,29 @@ import pytest
 
 import mcp.server as server
 
+#: Frozen read-only catalogue — the MCP security boundary.
+#:
+#: Deliberately a second copy of ``server.TOOLS``. Widening the MCP surface is
+#: a security decision, so it must require an edit here on purpose rather than
+#: ride along silently. The *structural* invariants (``TOOLS`` vs
+#: ``_TOOL_COMMANDS`` name sets, commands ⊆ ``_ROUTES``, ⊆
+#: ``_AGENT_ALLOWED_COMMANDS``, no ``UpdateConfig``) live in
+#: ``scripts/check_mcp_surface.py`` and are not repeated here.
+_FROZEN_READ_ONLY_TOOLS: tuple[str, ...] = (
+    "get_config",
+    "list_projects",
+    "get_project",
+    "get_job_status",
+    "list_jobs",
+    "analyze_source",
+    "list_content_versions",
+    "get_content_version",
+    "list_brand_profiles",
+)
+
+#: 探针值。用独一无二的对象而非字符串，避免和任何默认值/合法取值撞车。
+_PROBE = object()
+
 # A fake *masked* config detail: secrets are already replaced with •••• and
 # only ``hasKey`` booleans are present. The MCP layer must return this as-is.
 FAKE_MASKED_DETAIL: dict[str, object] = {
@@ -41,31 +70,43 @@ FAKE_MASKED_DETAIL: dict[str, object] = {
 }
 
 
-def test_tools_list_has_exactly_nine_read_only_tools() -> None:
+def test_tools_list_matches_frozen_read_only_catalogue() -> None:
     tools = server.list_tools()
-    names = [t["name"] for t in tools]
+    names = tuple(t["name"] for t in tools)
 
-    # Deliberate count bump (Tranche 2): the read-only content-version /
-    # brand-profile query tools joined the catalogue.
-    # ``update_config`` stays unreachable.
-    assert len(tools) == 9
-    assert names == [
-        "get_config",
-        "list_projects",
-        "get_project",
-        "get_job_status",
-        "list_jobs",
-        "analyze_source",
-        "list_content_versions",
-        "get_content_version",
-        "list_brand_profiles",
-    ]
+    assert names == _FROZEN_READ_ONLY_TOOLS, (
+        "MCP 工具面是对外安全边界，扩充必须是刻意动作：先确认新工具只读、"
+        "已在 _TOOL_COMMANDS 注册，再同步本常量"
+    )
+    # 结构性自洽（与 check_mcp_surface.py 检查项 C 同源，这里给出更近的失败点）
+    assert set(names) == set(server._TOOL_COMMANDS)
     assert "update_config" not in names
 
     # Defense in depth: the forbidden *command_type* must never be reachable
     # from any registered tool either.
     reachable_command_types = {server._TOOL_COMMANDS[n] for n in names}
     assert "UpdateConfig" not in reachable_command_types
+
+
+def test_every_declared_property_reaches_the_payload() -> None:
+    """每个工具声明的 property 都必须真被 ``_build_payload`` 放进 payload。
+
+    这是 ``scripts/check_mcp_surface.py`` 检查项 G 的**逐工具精确版**：那道门禁
+    只能做函数级判断（``_build_payload`` 是一条 if 链，静态切分支会出假报告），
+    而这里执行真的函数，能证明「这个工具的这个参数确实被转发（含改名转发）」。
+
+    要挡的反例：给 ``list_jobs`` 的 inputSchema 加上 ``offset`` 却忘了在
+    ``_build_payload`` 里读它 —— Agent 传了、命令成功、字段静默丢失、零报错。
+    这是「键名写错既不报错也不生效」在 MCP 面的翻版。
+    """
+    for tool in server.list_tools():
+        name = tool["name"]
+        for prop in tool["inputSchema"].get("properties", {}):
+            payload = server._build_payload(name, {prop: _PROBE})
+            assert _PROBE in payload.values(), (
+                f"{name} 声明了参数 {prop!r}，但 _build_payload 没把它放进 payload"
+                f"（Agent 传了也会被静默丢弃）；实际 payload={payload!r}"
+            )
 
 
 def test_tools_call_get_config_builds_agent_envelope_and_returns_masked_detail(

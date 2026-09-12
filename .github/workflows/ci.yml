@@ -121,6 +121,12 @@ jobs:
         working-directory: worker
         run: ruff check .
 
+      # 上一步带 working-directory: worker，覆盖不到 scripts/ —— 而两道门禁脚本
+      # （check_ui_parity / check_mcp_surface）自己就住在那里。放门禁的代码没人看
+      # 很别扭，补这一步（实测本来就干净，零成本）。
+      - name: Ruff lint (scripts)
+        run: ruff check scripts/
+
       - name: 响应契约生成物同步检查
         run: python scripts/gen_result_types.py --check
 
@@ -128,6 +134,11 @@ jobs:
       # 已有欠账冻结在脚本的 _KNOWN_GAP 里（只许减不许增），新增缺口直接红。
       - name: GUI/CLI 能力对等检查
         run: python scripts/check_ui_parity.py
+
+      # S6 验收清单第四条：MCP 工具清单与命令总线必须自动同步。
+      # 这条把「MCP 只读、update_config 永不注册」从注释变成代码事实。
+      - name: MCP 工具面一致性检查
+        run: python scripts/check_mcp_surface.py
 
       - name: Type check (mypy)
         working-directory: worker
