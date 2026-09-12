@@ -68,3 +68,58 @@ Chrome 登录态」做成 100+ 站点的**确定性 CLI 命令**，另可经 CDP
   `publish_authorization`，不得绕过（SOUL：外部动作要谨慎）
 
 **关联**：ADR-006（双许可）、ADR-008（发布自动化边界）、`docs/ROADMAP.md` S7 / S5、REFERENCE.md §4
+
+## 2026-09-13 落地补充（装完之后，全是真机事实）
+
+**已装**：`npm i -g @jackwener/opencli` → **v1.8.7**（上文记的 v1.8.8 在 npm 上不存在，
+最新即 1.8.7；许可证 Apache-2.0 ✅ 与 ADR 一致）。只装了工具，**没装浏览器扩展** ——
+所以「填表」这条路当前不可达，只能探到达不到。
+
+**已落地**：`worker/runtime/providers/publish/{base,opencli}.py` —— 只有 `probe`，
+没有任何 `publish` 路径。判据从 ADR 设想的 `doctor` 换成
+`auth status --site <site> --format json`。
+
+### 三条真机修正（其中一条推翻了本 ADR 的「借鉴」项）
+
+1. **「退出码沿用 `sysexits.h` 语义表达可操作状态」这条被证伪** —— 它在**文档里**
+   成立、在**实现里**不成立：`dist/src/doctor.js` 里根本没有 `process.exit`，
+   实测「扩展未连接」时它打印 `[FAIL] Connectivity` 却照样 `exit 0`；
+   `auth status` 在 `status="error"` 时也 `exit 0`。
+   ⇒ 上文「借鉴四条设计」的第 1 条要打折：**只借鉴语法，不指望语义**。
+   我们侧把语义收窄成「非 0 一定不可用，`0` 什么都不证明」（`base.classify_exit`）。
+2. **Windows 上 npm 全局命令是 `.cmd`**：`CreateProcess` 只自动补 `.exe`，
+   用裸名 spawn 必然 `FileNotFoundError [WinError 2]`；必须 `cmd /c <path>` 包装。
+3. **它的连接超时是 45s，且这个数是可覆盖的**：扩展没连时 `auth status` 会等满
+   `DEFAULT_BROWSER_CONNECT_TIMEOUT`（`dist/src/browser/config.js`，默认 **45**，
+   可由 `OPENCLI_BROWSER_CONNECT_TIMEOUT` 覆盖），实测 **t+46.1s 才写出第一个字节**、
+   紧接着退出、`exit 0`。我们主动把这个变量压到 8s（实测全程 9.3s），
+   自己的保险丝设 35s。
+
+   ⚠️ 记一条**我自己的误判**供后来者避坑：我先把它读成「输出完不退出 + stdout 非
+   tty 全缓冲」，并据此写了「轮询到完整 JSON 就 kill」的收工信号。对照实验逐条证伪：
+   `--version` 经同一管道 0.6s 返回 6 字节且正常退出；重定向到文件同样为空
+   （因为那时它还没写）。**真因只是慢**，而我的 25s 上限在它写第一个字节前就动刀。
+   ⇒ 结论：**给外部工具的等待上限，必须大于它自己的上限**，否则你测到的是
+   自己的耐心，不是它的状态。
+
+### `fill` 已侦察、**刻意未落地**
+
+真实形状已抓到（`opencli browser --help` / `browser <session> fill --help`）：
+
+```
+opencli browser <session> fill [options] [targetOrText] [text]
+  --role/--name/--label/--text/--testid/--nth/--tab
+→ JSON: { filled, verified, text, actual }
+```
+
+**不写进 `PublishProvider`**，理由是本 ADR 与 `base.py` 已经在讲的那一条：
+契约照**已核实的事实**写。这份形状只来自 `--help` 与文档，**没在真机上填过一次**
+（扩展没装，跑不通）。照它写死签名，后来者会照着一个没验证过的契约去实现 ——
+而这一轮我们刚刚为「照文档假设」付过一次学费（第 1、3 条）。
+等扩展连上、真填一个表单之后再按 `probe` 的同一范式补，并同步更新
+`test_protocol_exposes_only_name_and_probe`（那条断言是**变更检测器**，
+它红是应该的，红的时候请走 ADR-008 的边界核对，别直接放宽它）。
+
+**验收物**：`.workbuddy/publish-acceptance/`（不进 git）——
+`probe_opencli_io.py`（逐项证伪三条误判）、`probe_opencli_timeline.py`（首字节 vs 退出的时间轴）、
+`probe_real_provider.py`（真 Provider 探真工具，9.3s 得到 `BROWSER_CONNECT`）。

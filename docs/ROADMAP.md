@@ -686,6 +686,39 @@ S7 的第一步不是接 OpenCLI，而是**先把契约定下来**（照 S2 定 
 同 `scripts/check_mcp_surface.py` 的 E 检查项一个原则 ——
 **安全保证要么是可执行的，要么就是没有。**
 
+**已推进（2026-09-13 · 第八批）：装上真工具之后，三条假设被真机推翻**
+
+装了 `@jackwener/opencli`（v1.8.7，ADR-012 记的 1.8.8 在 npm 上不存在），
+然后**三处「照假设写」当场失效** —— 而它们在 22 条单测下全绿：
+
+| # | 上一版的假设 | 真机事实 | 修法 |
+|---|---|---|---|
+| 1 | 退出码按 `sysexits.h` 表达可操作状态 | `doctor` 在「扩展未连接」时照样 `exit 0`；`auth status` 报 `status="error"` 也 `exit 0` | 判据换成 `auth status --site <s> --format json` 的**结构化输出**；`classify_exit` 收窄成「非 0 才算明确失败，`0` 返回 `None`」 |
+| 2 | 用裸名 `opencli` 去 spawn | Windows 上 npm 全局命令是 `.cmd`，`CreateProcess` 只补 `.exe` → `[WinError 2]` | `_resolve_argv()`：`.cmd/.bat` 走 `cmd /c <path>` |
+| 3 | 超时 25s 足够 | 它自己的浏览器连接超时默认 **45s**，扩展没连时 **t+46.1s 才写第一个字节** | 主动把 `OPENCLI_BROWSER_CONNECT_TIMEOUT` 压到 8s（实测全程 **9.3s**），自己的保险丝留 2× 余量 |
+
+⛔ **我在这条路上判错过一次，过程比结论更值得记。** 现象是「Python 侧读不到
+stdout、进程不退出」，我先给出了一套很顺的解释（输出完不退出 + stdout 非 tty
+全缓冲 + 重定向到文件也拿不到），并据此把「轮询到完整 JSON 就 kill」当成主要机制。
+对照实验逐条证伪：`--version` 经**同一个管道** 0.6s 拿到 6 字节且正常退出；
+重定向到文件同样为空，但原因是**它那时还没写**。
+⇒ 真因只是**慢**，而我的 25s 上限在它写第一个字节之前就动了刀。
+**教训：给外部工具的等待上限必须大于它自己的上限**，否则你测到的是自己的耐心。
+三个探针留在 `.workbuddy/publish-acceptance/`（不进 git），可复跑。
+
+**验收（真机）**：`OpenCliPublishProvider().probe()` → **9.3s** 返回
+`unavailable` / `douyin 状态 error：BROWSER_CONNECT: Browser Bridge extension not
+connected` / hint 指向装扩展，`exit_code=0`（真实退出码，不是我们造成的）。
+真机还暴露一个「报错写错方向」：站点名对不上时 hint 在教用户 `npm i -g`
+重装一个已经装好的东西 —— 已拆成独立的 `_UNKNOWN_SITE_HINT`。
+
+**`fill` 刻意仍未落地**：已抓到它的真实形状（`opencli browser <session> fill
+[options] [targetOrText] [text]` → `{filled, verified, text, actual}`），但那只
+来自 `--help`，**没在真机上填过一次**（扩展没装，跑不通）。照它写死签名，后来者
+会照着一个未验证的契约去实现 —— 而这一轮刚为「照假设写」付过学费。
+等扩展连上、真填一次再补，并同步更新 `test_protocol_exposes_only_name_and_probe`
+（那条断言是变更检测器，它红是应该的）。
+
 两条刻意的取舍：
 
 - **`fill` 这一轮不定**：契约照**已核实的事实**写，不照想象写。`probe` 的形状来自

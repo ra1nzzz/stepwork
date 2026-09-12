@@ -16,6 +16,20 @@ ADR-012 把 OpenCLI 定为底座候选，但它只是**候选** —— 重依赖
 各家 ``draft`` 命令的**实际**选项，没在真机上核实过就不写死 —— 签名一旦定错，
 比没有签名更坏：后来者会照着一个错的契约去实现。真机验过再按同一范式补。
 
+⚠️ **2026-09-13 真机修正（装完 opencli 1.8.7 之后）**：本模块原稿称
+「``probe`` 的形状来自 ADR-012 已核实的 ``opencli doctor`` 子命令、以及它按
+``sysexits.h`` 语义返回退出码」，**只对了一半**：
+
+- ``doctor`` 子命令确实存在 ✅
+- 但它**根本不设置退出码** —— ``opencli/dist/src/doctor.js`` 里没有
+  ``process.exit``；实测「扩展未连接」时它打印 ``[FAIL] Connectivity:``
+  却仍然 ``exit 0``。所以「外部工具用退出码表达可操作状态」**不能当 READY 的判据**，
+  否则会把「桥断了」报成「可以填充」—— 三态设计最怕的假阳性。
+- 可编程的入口是 ``opencli auth status --site <site> --format json``：结构化、
+  退出码同样恒 ``0``、且直接回答「能不能填」所需的**登录态**（那才是 fill 的前提）。
+
+新判据见 :mod:`worker.runtime.providers.publish.opencli`。
+
 若将来要为「填充完停在哪」加能力，注意 ADR-008 的边界（见下）。
 """
 
@@ -43,9 +57,10 @@ class AvailabilityState(StrEnum):
 
 #: ``sysexits.h`` 退出码（借鉴 OpenCLI 的**语义**，ADR-012；只借鉴不引代码）。
 #:
-#: 外部工具用**退出码**表达「可操作状态」，比解析 stderr 文本可靠得多 ——
-#: 文本会翻译、会随版本改措辞，退出码是它的对外接口。这里只登记我们真的会
-#: 分支的几个，其余一律落 ``UNAVAILABLE``（不认识的就当不可用，不猜）。
+#: ⚠️ 「退出码表达可操作状态」这条**只对部分子命令成立**（2026-09-13 真机证伪：
+#: ``opencli doctor`` 恒返回 ``0``，连「扩展未连接」也不例外）。故语义收窄为
+#: **非 0 一定不可用，``0`` 不证明可用** —— 要判 READY 必须另有判据。
+#: 见 :func:`classify_exit`。
 EX_OK: Final = 0
 #: 查得到，但结果为空
 EX_NOINPUT: Final = 66
@@ -59,18 +74,27 @@ EX_NOPERM: Final = 77
 EX_CONFIG: Final = 78
 
 
-def classify_exit(code: int | None) -> AvailabilityState:
-    """把外部工具的退出码翻译成三态。
+def classify_exit(code: int | None) -> AvailabilityState | None:
+    """把外部工具的退出码翻译成三态；**``None`` 表示「退出码说不清」**。
 
-    ``66``（结果为空）算 ``READY``：**桥是通的**，只是这次没东西可报。
-    把它当不可用会让人去修一个没坏的桥 —— 这是最容易犯的一类误判。
+    调用方拿到 ``None`` 必须**另找判据**，绝不能在它上面默认成 ``READY``。
 
-    ``None``（进程被超时杀掉、拿不到退出码）算 ``UNAVAILABLE``：不确定可用
-    就当不可用。宁可让用户多看一眼，也不假装能填 —— 假装的代价是用户以为
-    排上了、实际什么都没发生。
+    语义（2026-09-13 真机修正后收窄）：
+
+    - ``None``（超时被杀 / 起不来）→ ``UNAVAILABLE``：拿不到结论就当不可用
+    - ``0`` → ``None``：**``0`` 什么都不证明**。``opencli doctor`` 在桥断开时
+      照样返回 ``0``，把它当 ``READY`` 会把「不可用」报成「可以填充」
+    - ``77``（``EX_NOPERM``）→ ``NEED_LOGIN``
+    - 其它非 ``0`` → ``UNAVAILABLE``（不认识的就当不可用，不猜）
+
+    本函数原先把 ``0`` / ``66`` 判成 ``READY``，理由是「退出码比解析文本可靠」
+    —— 这条在真机上不成立：**那个工具的退出码根本没在表达状态**。
+    「可操作状态走退出码」是好设计，但它得先真的实现，不能照文档假设。
     """
-    if code in (EX_OK, EX_NOINPUT):
-        return AvailabilityState.READY
+    if code is None:
+        return AvailabilityState.UNAVAILABLE
+    if code == EX_OK:
+        return None
     if code == EX_NOPERM:
         return AvailabilityState.NEED_LOGIN
     return AvailabilityState.UNAVAILABLE

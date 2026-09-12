@@ -4,17 +4,22 @@
 
 1. **三态只有三个**（``ready`` / ``unavailable`` / ``need_login``）——
    多出来的中间态正是静默降级藏身的地方；
-2. **退出码 → 三态的映射**，尤其 ``66``（结果为空）算 ``READY``：把它当
-   不可用会让人去修一个没坏的桥；
+2. **退出码只表达「明确的失败」**，``0`` 什么都不证明 —— 真机上 ``opencli
+   doctor`` 在桥断开时照样 ``exit 0``，所以 ``READY`` 必须另有判据（解析
+   ``auth status --format json``）；把 ``0`` 当 ``READY`` 会把「不可用」
+   报成「可填充」（假阳性比漏报更坏）；
 3. **协议里没有 ``publish``**（ADR-008 的结构性保证）—— 这条断言是
    **变更检测器**，不是现状描述：有人日后给协议加动作时它当场红；
-4. **真 subprocess 的纪律**：能拿到退出码与输出、超时**强杀不挂起**、
-   没装时走返回值而不是异常。
+4. **真 subprocess 的纪律**：能拿到退出码与输出、超时**强杀不挂起**（且强杀时
+   已读到的输出不丢）、没装时走返回值而不是异常、以及**我们给的超时真的到了
+   子进程手里**（不是只构造了个 env 字典）。
 """
 
 from __future__ import annotations
 
+import os
 import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -38,7 +43,10 @@ from worker.runtime.providers.publish.base import (
     PublishProvider,
     classify_exit,
 )
-from worker.runtime.providers.publish.opencli import OpenCliPublishProvider
+from worker.runtime.providers.publish.opencli import (
+    OpenCliPublishProvider,
+    classify_auth_payload,
+)
 from worker.runtime.providers.resolve import resolve_publish_provider
 from worker.runtime.results.models import ProbePublishProviderDetail
 
@@ -96,14 +104,23 @@ class _StubProvider:
 # ---------------------------------------------------------------------------
 
 
-def test_classify_exit_maps_sysexits_to_three_states() -> None:
-    """``sysexits.h`` → 三态。``66`` 是这套映射里唯一反直觉的一条。"""
-    assert classify_exit(EX_OK) is AvailabilityState.READY
-    # 66 = 查得到但结果为空：桥是通的，只是这次没东西可报
-    assert classify_exit(EX_NOINPUT) is AvailabilityState.READY
+def test_classify_exit_only_reports_explicit_failures() -> None:
+    """退出码**只用来表达明确的失败**；``0`` 什么都不证明。
+
+    2026-09-13 真机修正：``opencli doctor`` 在「扩展未连接」时照样 ``exit 0``
+    （``dist/src/doctor.js`` 里没有 ``process.exit``）—— 所以把 ``0`` 当
+    ``READY`` 会把「桥断了」报成「可以填充」。**假阳性比漏报更坏**：用户以为
+    排上了，实际什么都没发生。
+
+    这里刻意断言 ``classify_exit(0) is None`` 而**不是** ``is UNAVAILABLE``：
+    ``None`` 的语义是「退出码说不清，请另找判据」，逼调用方去看输出；
+    若在这里直接回落成 UNAVAILABLE，那「其实可用」也会被误报，一样是错的。
+    """
+    assert classify_exit(EX_OK) is None
     # 77 = 权限不足：装好了、桥也通，只差登录 —— 用户做一步就能好
     assert classify_exit(EX_NOPERM) is AvailabilityState.NEED_LOGIN
-    for code in (EX_UNAVAILABLE, EX_TEMPFAIL, EX_CONFIG, 1, 2, 127):
+    # 其余一律保守：不认识的就当不可用，不猜（66「结果为空」不再当作 READY）
+    for code in (EX_NOINPUT, EX_UNAVAILABLE, EX_TEMPFAIL, EX_CONFIG, 1, 2, 127):
         assert classify_exit(code) is AvailabilityState.UNAVAILABLE, code
 
 
@@ -213,30 +230,285 @@ async def test_probe_reports_unavailable_when_binary_missing() -> None:
 async def test_probe_really_spawns_and_reads_exit_code() -> None:
     """真跑一个可执行文件，真的拿到退出码与输出。
 
-    用 ``sys.executable`` 当 binary：``python doctor`` 必然报「打不开 doctor」
-    并以非零码退出 —— 语义上等价于「装了但 doctor 失败」。关键是它证明代码
-    真的走到了 subprocess，而不是返回一个写死的常量。
+    用 ``sys.executable`` 当 binary：``python auth status --site …`` 必然报
+    「打不开 auth」并以非零码退出。关键是它证明代码真的走到了 subprocess，
+    而不是返回一个写死的常量 —— 顺带证明 **argv 用的是完整路径**：真机上这里
+    曾因「``which`` 明明找到了 ``opencli.CMD``、代码却仍用裸名去 spawn」而在
+    Windows 上必然 ``FileNotFoundError``（见 ``opencli._resolve_argv``）。
     """
     provider = OpenCliPublishProvider(binary=sys.executable)
     availability = await provider.probe()
     assert availability.state is AvailabilityState.UNAVAILABLE
     assert availability.exit_code is not None
     assert availability.exit_code != 0
-    # 输出带回来了（stderr 优先）—— 只报退出码等于让人猜
-    assert "doctor" in availability.detail
+    # stdout / stderr 都带回来了 —— 只报退出码等于让人猜
+    assert "auth status" in availability.detail
 
 
-async def test_probe_timeout_kills_instead_of_hanging() -> None:
-    """超时**强杀**并如实说「没有返回」，绝不挂着等。
+def _fake_opencli(tmp_path: Path, *, stdout: str, code: int) -> str:
+    """造一个「打印一行并以指定码退出」的假 opencli，返回其路径。
 
-    0.001s 必然超时。若实现忘了 kill，这个测试会**挂住**而不是失败 ——
-    那正是要防的形态：UI 一直转圈，且看不出卡在哪一步。
+    每平台一份壳：``cmd`` 的 ``echo`` 原样输出，而 POSIX 的 ``echo`` 会吞掉
+    双引号 → 必须用 ``printf '%s\\n' '…'``，否则 JSON 到手就坏了。
     """
-    provider = OpenCliPublishProvider(binary=sys.executable, timeout_sec=0.001)
+    if os.name == "nt":
+        script = tmp_path / "fake-opencli.cmd"
+        script.write_text(
+            f"@echo off\necho {stdout}\nexit /b {code}\n", encoding="ascii"
+        )
+    else:
+        script = tmp_path / "fake-opencli"
+        script.write_text(
+            f"#!/bin/sh\nprintf '%s\\n' '{stdout}'\nexit {code}\n", encoding="utf-8"
+        )
+        script.chmod(0o755)
+    return str(script)
+
+
+def _fake_opencli_echoing_env(tmp_path: Path, var_name: str) -> str:
+    """造一个把指定环境变量的**实际取值**回显进 JSON 的假 opencli。
+
+    POSIX 的 ``printf`` 用单引号包 JSON、再为变量单独开一段引号 ——
+    ``echo`` 会吞掉双引号，而少了引号就不是 JSON 了。
+    """
+    if os.name == "nt":
+        script = tmp_path / "fake-opencli-env.cmd"
+        script.write_text(
+            "@echo off\n"
+            f'echo [{{"site":"douyin","status":"logged-in","identity":"%{var_name}%"}}]\n'
+            "exit /b 0\n",
+            encoding="ascii",
+        )
+    else:
+        script = tmp_path / "fake-opencli-env"
+        body = (
+            "printf '%s\\n' "
+            "'[{\"site\":\"douyin\",\"status\":\"logged-in\",\"identity\":\"'"
+            f"\"${var_name}\""
+            "'\"}]'\n"
+        )
+        script.write_text(f"#!/bin/sh\n{body}exit 0\n", encoding="utf-8")
+        script.chmod(0o755)
+    return str(script)
+
+
+def test_auth_payload_maps_three_states() -> None:
+    """判据层是纯函数。``status`` 取值域来自 ``auth status --help`` 的 ``--only``。"""
+    assert classify_auth_payload(
+        [{"site": "douyin", "status": "logged-in", "identity": "tester"}], "douyin"
+    ) == (AvailabilityState.READY, "douyin 已登录（tester）")
+    assert classify_auth_payload(
+        [{"site": "douyin", "status": "not-logged-in"}], "douyin"
+    ) == (AvailabilityState.NEED_LOGIN, "douyin 未登录")
+
+
+def test_auth_payload_shapes_it_does_not_know_return_none() -> None:
+    """**不认识的形状一律不猜** —— 猜错方向比不报还费时间。"""
+    assert (
+        classify_auth_payload([{"site": "weibo", "status": "logged-in"}], "douyin")
+        is None
+    )
+    assert classify_auth_payload([{"site": "douyin", "status": "?"}], "douyin") is None
+    assert classify_auth_payload({"detail": "nope"}, "douyin") is None
+    assert classify_auth_payload("plain text", "douyin") is None
+
+
+async def test_probe_reads_real_three_states_from_stdout(tmp_path: Path) -> None:
+    """端到端：假 opencli 打印真契约 JSON，三条分支逐条走通。
+
+    ``NEED_LOGIN`` 此前只有「注入 stub」这一条路径覆盖，而 stub 绕过了真正的
+    解析 —— 等于三态里有一条长期无人看守。这里用真 subprocess + 真 JSON 钉住。
+    """
+    cases = [
+        (
+            '[{"site":"douyin","status":"logged-in","identity":"tester"}]',
+            AvailabilityState.READY,
+        ),
+        ('[{"site":"douyin","status":"not-logged-in"}]', AvailabilityState.NEED_LOGIN),
+        (
+            '[{"site":"douyin","status":"error","error":"BROWSER_CONNECT: x"}]',
+            AvailabilityState.UNAVAILABLE,
+        ),
+    ]
+    for stdout, expected in cases:
+        provider = OpenCliPublishProvider(
+            binary=_fake_opencli(tmp_path, stdout=stdout, code=0)
+        )
+        availability = await provider.probe()
+        assert availability.state is expected, stdout
+
+
+async def test_exit_zero_alone_is_never_ready(tmp_path: Path) -> None:
+    """**假阳性回归**：退出码 ``0`` + 非 JSON 输出 → ``UNAVAILABLE``，不是 ``READY``。
+
+    这正是真机上的形态：``opencli doctor`` 在桥断开时照样 ``exit 0``。旧实现
+    只看退出码，会把「不可用」报成「可以填充」—— 而假阳性比漏报更坏。
+    """
+    provider = OpenCliPublishProvider(
+        binary=_fake_opencli(tmp_path, stdout="not json at all", code=0)
+    )
     availability = await provider.probe()
     assert availability.state is AvailabilityState.UNAVAILABLE
+    assert "可解析的 JSON" in availability.detail
+
+
+async def test_unparseable_output_with_nonzero_exit_is_unavailable(
+    tmp_path: Path,
+) -> None:
+    """输出不可解析 + 非 ``0`` 退出 → ``UNAVAILABLE``，并带上退出码。
+
+    优先级要记住：**输出是主判据，退出码只作兜底**。真机上 ``auth status``
+    在桥断开时既会输出完整 JSON、又返回 ``0`` —— 所以退出码在两条路上都
+    判不出可用性（``0`` 不敢当 READY，非 0 又几乎见不到）。
+    """
+    provider = OpenCliPublishProvider(
+        binary=_fake_opencli(tmp_path, stdout="boom", code=3)
+    )
+    availability = await provider.probe()
+    assert availability.state is AvailabilityState.UNAVAILABLE
+    assert availability.exit_code == 3
+
+
+def test_child_env_bounds_the_connect_timeout() -> None:
+    """``_child_env`` 把 ``OPENCLI_BROWSER_CONNECT_TIMEOUT`` 收紧到我们的值。
+
+    为什么非要做这件事：它自己的默认是 **45s**（``browser/config.js``），
+    扩展没连时 ``auth status`` 就要等满这 45s 才写第一个字节 —— 实测 t+46.1s。
+    对 GUI 来说这跟卡死没区别，而「扩展没连」恰恰是最常见的状态。
+    """
+    from worker.runtime.providers.publish.opencli import _child_env  # noqa: PLC0415
+
+    assert _child_env(8)["OPENCLI_BROWSER_CONNECT_TIMEOUT"] == "8"
+
+
+def test_child_env_respects_a_value_the_user_already_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """用户自己导出过就不覆盖 —— 与 ``STEPWORK_OPENCLI_BIN`` 一个规矩。
+
+    覆盖用户的显式设置，会让「我明明调过这个变量却没生效」变成一次纯浪费的
+    排查。
+    """
+    from worker.runtime.providers.publish.opencli import _child_env  # noqa: PLC0415
+
+    monkeypatch.setenv("OPENCLI_BROWSER_CONNECT_TIMEOUT", "30")
+    assert _child_env(8)["OPENCLI_BROWSER_CONNECT_TIMEOUT"] == "30"
+
+
+async def test_the_child_really_receives_the_bounded_timeout(tmp_path: Path) -> None:
+    """端到端：假 opencli 把该变量的**实际取值**回显进 JSON。
+
+    只测 ``_child_env`` 的返回值不够 —— 那证明的是「我们构造了一个 env 字典」，
+    不是「子进程收到了它」。中间隔着 ``create_subprocess_exec(env=...)`` 这一步，
+    而这一步恰恰是会写错的地方（忘了传 / 传成了位置参数）。
+    """
+    provider = OpenCliPublishProvider(
+        binary=_fake_opencli_echoing_env(
+            tmp_path, "OPENCLI_BROWSER_CONNECT_TIMEOUT"
+        ),
+        connect_timeout_sec=8,
+    )
+    availability = await provider.probe()
+    assert availability.state is AvailabilityState.READY
+    # identity 里回显的就是子进程看到的那个值
+    assert "（8）" in availability.detail
+
+
+async def test_unknown_site_does_not_get_the_install_hint(tmp_path: Path) -> None:
+    """站点名对不上时，hint **不能**是「去装它」。
+
+    真机验收当场暴露的：``--site not-a-real-site`` 那一轮返回的 hint 在教用户
+    ``npm i -g`` —— 可工具明明装着（我们刚跑的就是它）。**报错写错方向，比不报
+    还费时间**：用户会去重装一个已经装好的东西，然后在原地打转。
+    """
+    provider = OpenCliPublishProvider(
+        binary=_fake_opencli(
+            tmp_path,
+            stdout='[{"site":"weibo","status":"logged-in"}]',
+            code=0,
+        ),
+        site="douyin",
+    )
+    availability = await provider.probe()
+    assert availability.state is AvailabilityState.UNAVAILABLE
+    assert "npm i -g" not in availability.hint
+    assert "站点" in availability.detail
+    # 反过来也要钉住：真·没装的场景**必须**给安装命令（否则用户不知道装什么）
+    missing = await OpenCliPublishProvider(binary=_ABSENT_BIN).probe()
+    assert "npm i -g @jackwener/opencli" in missing.hint
+
+
+async def test_probe_reports_the_child_own_exit_code(tmp_path: Path) -> None:
+    """它写完 JSON 就退出时，``exit_code`` 必须是**它自己的**退出码。
+
+    回归价值：曾经的实现只在「因为我们观察到进程退出才收工」时才记退出码，
+    而轮询常常先看到完整 JSON —— 于是这条最常见路径上 ``exit_code`` 恒为
+    ``None``，而 ``None`` 的文档含义是「超时被杀 / 没装」。**一个我们自己造成
+    的假象，比没有这个字段更坏**：它会让排查的人去查不存在的超时。
+    """
+    provider = OpenCliPublishProvider(
+        binary=_fake_opencli(
+            tmp_path,
+            stdout='[{"site":"douyin","status":"logged-in"}]',
+            code=0,
+        )
+    )
+    availability = await provider.probe()
+    assert availability.state is AvailabilityState.READY
+    assert availability.exit_code == 0
+
+
+async def test_run_kills_a_hung_child_and_keeps_what_it_already_said() -> None:
+    """真·挂住的子进程：到上限**强杀**，且**已读到的输出不丢**。
+
+    这是选择 ``pump`` 而不是 ``communicate()`` 的全部理由：``communicate()``
+    在超时被取消时把已读内容一起丢掉，排查时手上就只剩一句「超时」。这里让
+    子进程先吐一行再睡 30s，断言那行还在。
+    """
+    provider = OpenCliPublishProvider(binary=sys.executable, timeout_sec=0.5)
+    started = time.monotonic()
+    code, out, _ = await provider._run(  # noqa: SLF001
+        "-c", "import time; print('half a word', flush=True); time.sleep(30)"
+    )
+    elapsed = time.monotonic() - started
+    assert code is None, "被强杀时拿不到自然退出码"
+    assert "half a word" in out, "kill 之前读到的输出必须留下"
+    assert elapsed < 10, f"必须真杀，不能挂着等：{elapsed:.1f}s"
+
+
+def _fake_opencli_that_never_ends(tmp_path: Path) -> str:
+    """造一个**永不结束**的假 opencli（验证保险丝真的会熔断）。
+
+    Windows 上刻意用 ``cmd`` 自己的 ``goto`` 死循环，而不是 ``ping -n 30``：
+    ``ping`` 是孙进程，杀掉 ``cmd.exe`` 之后它会变成孤儿再活 30s；``goto``
+    循环就是被 kill 的那个进程本身，测试不留尾巴。
+    """
+    if os.name == "nt":
+        script = tmp_path / "fake-opencli-hang.cmd"
+        script.write_text("@echo off\n:loop\ngoto loop\n", encoding="ascii")
+    else:
+        script = tmp_path / "fake-opencli-hang"
+        script.write_text("#!/bin/sh\nsleep 30\n", encoding="utf-8")
+        script.chmod(0o755)
+    return str(script)
+
+
+async def test_probe_timeout_kills_instead_of_hanging(tmp_path: Path) -> None:
+    """到上限时**强杀**并如实说「没能产出」，绝不挂着等。
+
+    用一个真会挂住的假 opencli。若实现忘了 kill，这个测试会**挂住**而不是
+    失败 —— 那正是要防的形态：UI 一直转圈，且看不出卡在哪一步。
+    """
+    provider = OpenCliPublishProvider(
+        binary=_fake_opencli_that_never_ends(tmp_path), timeout_sec=0.5
+    )
+    started = time.monotonic()
+    availability = await provider.probe()
+    elapsed = time.monotonic() - started
+    assert availability.state is AvailabilityState.UNAVAILABLE
     assert availability.exit_code is None
-    assert "没有返回" in availability.detail
+    assert "没能在" in availability.detail
+    assert elapsed < 10, f"必须真杀，不能挂着等：{elapsed:.1f}s"
 
 
 # ---------------------------------------------------------------------------
