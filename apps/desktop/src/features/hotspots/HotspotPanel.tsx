@@ -230,9 +230,12 @@ export function HotspotPanel() {
             <p className="mono" style={{ fontSize: 11 }}>
               stepwork-cli mcp add --command "python -m stepwork_hotspot_mcp.server"
             </p>
-            {sourceInfo?.marker && (
-              <p className="empty-sub">登记命令里要含：{sourceInfo.marker}</p>
-            )}
+            {/* 这里曾有一句「登记命令里要含：{sourceInfo.marker}」，但它**永远不会渲染** ——
+                本块由 `sourcesError` 进入，而设置 `sourcesError` 的那个 catch 顺手把
+                `sourceInfo` 置成了 null（为了让下面那排按钮不出现）。条件恒假。
+                删掉不亏：marker 是常量 `stepwork-hotspot-mcp`，而后端失败时的 hint
+                （`hotspot/mcp.py` 的 NOT_FOUND 分支）**已经把「登记命令要含它」写在
+                错误文本里**，那条会经 `describeCommandError` 原样显示在下面。 */}
             <p className="error-text">{sourcesError}</p>
           </div>
         )}
