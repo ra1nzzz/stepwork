@@ -366,7 +366,8 @@ CLI 侧同样验过（`hotspots convert --hotspot-id … --reason … --breakdow
 - [x] MCP 工具清单与命令总线自动同步 —— 落地为 `scripts/check_mcp_surface.py`（进 CI），
       8 项检查全绿、6 条护栏做过负向验证。比原计划的「扩展 `gen_result_types.py` 机制」
       更进一步：那份机制管的是**生成物同步**，这里管的是**跨对象自洽**（详见下方第五批）
-- [ ] 至少 1 个真实外部 Agent 端到端调用成功（非 fake）
+- [x] 至少 1 个真实外部 Agent 端到端调用成功（非 fake）—— `mcp/tests/test_mcp_e2e.py`
+      进 CI；真机探针两个 `STEPWORK_HOME` 对照跑（详见下方第六批）
 
 > **为什么拆成两条**：「能不能做到」和「好不好用」是两个问题。达标判据是前者
 > （GUI 能做的 CLI 必须有办法做到），但把两者混成一个数字，会被读成「已经做完了」。
@@ -558,6 +559,47 @@ bus 的 `_ROUTES` / `_AGENT_ALLOWED_COMMANDS` / `_AGENT_SOURCES` / `_AGENT_ACTOR
 坏了要说人话」—— traceback 会被读成「脚本自己坏了」，而且不告诉你要改哪个对象。
 改为逐对象解析、一次列全所有坏掉的对象。六条护栏（A / B / C / E / F / G）逐一验证
 会响且点名正确，收尾复跑确认 `mcp/server.py` 已还原。
+
+**已推进（2026-09-12 · 第六批）：真实外部 Agent 端到端 —— S6 收口**
+
+S6 验收清单最后一条。此前「出站」那条已真机验过（STEPWORK 当 client 连热点 MCP
+Server，13 个源）；这条是**入站**：外部 Agent 当 client，连 STEPWORK 的 `mcp/server.py`。
+
+落地为 `mcp/tests/test_mcp_e2e.py`（进 CI）。「非 fake」逐条可核对，一层替身都没有：
+
+| 环节 | 真实的东西 |
+|---|---|
+| 客户端 | `worker/runtime/agents/mcp_client.py` 的 `McpStdioClient`（生产代码） |
+| 传输 | stdio + 行分隔 JSON-RPC 2.0，**真子进程**（不是 in-process 直调） |
+| 服务端 | `python -m mcp.server`（生产代码） |
+| 后端 | 真实 SQLite + 真实 migration + 真实 dispatch → 真实 handler |
+| 数据 | 由**父进程**写入、由**子进程**读回 |
+
+**「非 fake」需要一个可证伪的判据**，否则「端到端通过」只是自我声明。本轮的判据是
+**同码对照** —— 同一条命令、同一份代码，只换 `STEPWORK_HOME`：
+
+```
+有种子数据的 home → list_projects 返回 1 个项目（标题/版本/全文逐字段一致）
+空 home           → 同一条命令返回 []
+```
+
+两次结果不同 ⇒ 数据来自**子进程自己打开的那个库**。若两端共用任何 in-process 对象，
+两次必然返回同一个结果，这个对照会当场拆穿。真机探针
+（`.workbuddy/mcp-acceptance/probe_inbound_e2e.py`，报告同目录）12 条判据全绿，
+含「服务端子进程 PID ≠ 父进程 PID」与「`update_config` 被拒 `unknown tool`」。
+
+> 与 `worker/tests/fakes/` 的分工要写清楚：那些替身用来**隔离**某一层（不装 AI
+> provider 也能测 handler），是必要的；本条验收要证明的是**各层接起来真的通**，
+> 所以一层替身都不许有。同理，`test_mcp.py` 里 monkeypatch `run_command` 的隔离
+> 测法在本文件是**故意不用**的 —— 它证明信封构造，不证明后端接得通。
+
+**顺带补掉 lint / type 的覆盖盲区**：CI 原先 ruff 与 mypy **都**带
+`working-directory: worker`，于是 `scripts/`（两道门禁本体）、`cli/`（CLI 入口）、
+`mcp/`（MCP 服务端）**全在覆盖之外 —— 都是生产代码却没人看**。改为从仓库根
+`ruff check .`（根目录只有一份 pyproject.toml，规则与在 `worker/` 内跑一致），并新增
+`mypy cli mcp scripts`。mypy 目标写**显式目录**而非 `.`：mypy 不读 `.gitignore`，
+`.` 会把本地 `.workbuddy/` 验收探针也拉进来，而那些文件 CI 里根本不存在 →
+「本地红、CI 绿」是最难查的一类不一致。
 
 **依赖**：S2
 

@@ -117,15 +117,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
+      # 从**仓库根**跑：原先带 working-directory: worker，于是 scripts/（两道门禁
+      # 本体）、cli/（CLI 入口）、mcp/（MCP 服务端）全在 lint 覆盖之外 —— 都是生产
+      # 代码却没人看。根目录只有一份 pyproject.toml，规则与在 worker/ 内跑完全一致。
+      # ruff 默认 respect-gitignore，故 .workbuddy/ 下的验收探针不会被扫到。
       - name: Ruff lint
-        working-directory: worker
         run: ruff check .
-
-      # 上一步带 working-directory: worker，覆盖不到 scripts/ —— 而两道门禁脚本
-      # （check_ui_parity / check_mcp_surface）自己就住在那里。放门禁的代码没人看
-      # 很别扭，补这一步（实测本来就干净，零成本）。
-      - name: Ruff lint (scripts)
-        run: ruff check scripts/
 
       - name: 响应契约生成物同步检查
         run: python scripts/gen_result_types.py --check
@@ -143,6 +140,13 @@ jobs:
       - name: Type check (mypy)
         working-directory: worker
         run: mypy .
+
+      # 与 ruff 同理：cli / mcp / scripts 不在 worker 的工作目录内，此前不被任何
+      # mypy 步骤覆盖。目标写**显式目录**而不是 `.`：mypy 不读 .gitignore，`.` 会把
+      # 本地的 .workbuddy/ 验收探针也拉进来 —— 那些文件 CI 里根本不存在，
+      # 于是「本地红、CI 绿」，最难查的一类不一致。
+      - name: Type check (mypy: cli/mcp/scripts)
+        run: mypy cli mcp scripts
 
       # perf 标记的性能基线测试默认不进 CI（docs/PERF_BASELINE.md）
       - name: Pytest (worker)
