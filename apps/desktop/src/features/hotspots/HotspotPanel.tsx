@@ -228,7 +228,12 @@ export function HotspotPanel() {
               热点走独立的 stdio MCP Server（P2）。先登记它，再回到本页：
             </p>
             <p className="mono" style={{ fontSize: 11 }}>
-              stepwork-cli mcp add --command "python -m stepwork_hotspot_mcp.server"
+              stepwork-cli mcp add --command '"/绝对路径/python" -m
+              stepwork_hotspot_mcp.server'
+            </p>
+            <p className="empty-sub">
+              要用绝对路径（形如 C:/Python312/python.exe）：登记命令不经过 shell，
+              裸 python 找不到时会直接报「无法启动 MCP Server」—— 真机踩到过。
             </p>
             {/* 这里曾有一句「登记命令里要含：{sourceInfo.marker}」，但它**永远不会渲染** ——
                 本块由 `sourcesError` 进入，而设置 `sourcesError` 的那个 catch 顺手把
