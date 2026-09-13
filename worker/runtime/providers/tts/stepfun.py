@@ -17,6 +17,10 @@
    ``speed`` 参数（实测同 ``speed=1.25`` 下能差 1.4 倍），整片节奏忽快忽慢。
    故生成后按 **字/秒** 用 ``atempo`` 归一化（不变调）。
 3. **网络不稳**：``api.stepfun.com`` 偶发 SSL / 超时，请求必须带重试。
+4. **模型有权限表**：PLAN 端点只认 ``stepaudio-2.5-tts``。配成别的 TTS 模型名
+   （``step-tts-2`` / ``step-tts-mini``）拿到的是 **404 + ``model_invalid``**
+   —— 不是 403。只按状态码翻成「端点不存在」会把人引去查路径，而端点是对的
+   （2026-09-13 真机实测），故错误映射要先认 body 里的 ``model_invalid``。
 
 输出是 **mp3**（不是 WAV），时长探测因此依赖 ffmpeg —— 调用方
 （``SynthesizeScenes``）已有 ffprobe 兜底，见其 ``_measure_duration``。
@@ -33,8 +37,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-import httpx
-
+from worker.runtime.net import make_async_client
 from worker.runtime.providers.tts.base import TTSError
 
 logger = logging.getLogger("worker.runtime.providers.tts.stepfun")
@@ -191,7 +194,7 @@ class StepFunTTSProvider:
 
     async def _post(self, body: dict[str, Any]) -> bytes:
         """带重试地取回音频裸字节；失败抛 :class:`TTSError`（带 body 片段）。"""
-        client = self._client or httpx.AsyncClient()
+        client = self._client or make_async_client()
         status = 0
         snippet = ""
         try:
@@ -231,7 +234,7 @@ class StepFunTTSProvider:
                 await client.aclose()
 
         if status >= 400:
-            raise TTSError(_error_message(status, _body_snippet(resp)))
+            raise TTSError(_error_message(status, _body_snippet(resp), self.model))
         data = resp.content
         if not data:
             raise TTSError(f"stepfun TTS 返回空音频（HTTP {status}）")
@@ -347,13 +350,25 @@ def _body_snippet(resp: Any, limit: int = 300) -> str:
     return (raw or "").strip()[:limit]
 
 
-def _error_message(status: int, snippet: str) -> str:
-    """把状态码翻成人能行动的提示；body 片段永远带上。"""
+def _error_message(status: int, snippet: str, model: str = "") -> str:
+    """把状态码翻成人能行动的提示；body 片段永远带上。
+
+    优先认 ``model_invalid``：模型不被 PLAN 端点接受时，StepFun 返回的是
+    **404 + ``model_invalid``**（不是 403）。只按状态码翻会把排查方向引到
+    端点路径上，而端点是对的、换个模型就好。
+    """
+    if "model_invalid" in snippet:
+        got = f"，当前配的是 {model}" if model else ""
+        return (
+            f"stepfun TTS HTTP {status}（模型不可用{got}：该 key 在 PLAN 端点"
+            f"没有这个模型 —— 复刻音色只能用 {_DEFAULT_MODEL}，"
+            f"`step-tts-2` / `step-tts-mini` 等模型名在此端点无权）：{snippet}"
+        )
     hint = {
         401: "密钥无效",
         403: "密钥无权访问该端点（复刻音色需 /step_plan/ 路径）",
         402: "余额不足 / 配额用尽",
-        404: "端点不存在（复刻音色走 /step_plan/v1/audio/speech）",
+        404: "端点或模型不存在（复刻音色走 /step_plan/v1/audio/speech）",
         429: "触发限流",
     }.get(status, "")
     tail = f"：{snippet}" if snippet else ""

@@ -95,6 +95,22 @@ def _run(raw: dict[str, Any], deps: Deps) -> dict[str, Any]:
     return asyncio.run(dispatch(raw, deps))
 
 
+def _no_proxy_get(url: str, **kwargs: Any) -> httpx.Response:
+    """打向本机 Server 的 GET：**不继承系统代理**。
+
+    真机踩到（2026-09-13）：注册表里的「系统代理」在代理软件关掉后仍残留，
+    于是一个 ``http://127.0.0.1:<port>`` 的请求被送进死端口 → ``_wait_ready``
+    5s 超时 → 本文件 12 条红，看起来像「Server 起不来」（其实 Server 好着，
+    是测试自己的请求走错了路）。本文件的请求全部指向本机，没有一处该走代理。
+    """
+    return httpx.get(url, trust_env=False, **kwargs)
+
+
+def _no_proxy_post(url: str, **kwargs: Any) -> httpx.Response:
+    """打向本机 Server 的 POST：同样不继承系统代理（理由见上）。"""
+    return httpx.post(url, trust_env=False, **kwargs)
+
+
 def _wait_ready(card_url: str, timeout: float = 5.0) -> None:
     """等 Server 真的能应答再断言。
 
@@ -107,7 +123,7 @@ def _wait_ready(card_url: str, timeout: float = 5.0) -> None:
     last: Exception | None = None
     while time.monotonic() < deadline:
         try:
-            httpx.get(card_url, timeout=2).raise_for_status()
+            _no_proxy_get(card_url, timeout=2).raise_for_status()
             return
         except Exception as e:  # noqa: BLE001 - 就绪前的失败是预期的
             last = e
@@ -208,7 +224,7 @@ def test_server_serves_card_without_auth(tmp_path: Path) -> None:
         assert res["ok"] is True, res
         url = res["detail"]["card_url"]
         _wait_ready(url)
-        card = httpx.get(url, timeout=10).json()
+        card = _no_proxy_get(url, timeout=10).json()
         assert card["name"] == "STEPWORK"
         assert len(card["skills"]) == 6
     finally:
@@ -223,7 +239,9 @@ def test_server_rejects_unauthenticated_post(tmp_path: Path) -> None:
         res = _run(_env("StartA2aServer"), deps)
         url = res["detail"]["url"]
         _wait_ready(res["detail"]["card_url"])
-        r = httpx.post(url, json={"jsonrpc": "2.0", "id": 1, "method": "message/send"}, timeout=10)
+        r = _no_proxy_post(
+            url, json={"jsonrpc": "2.0", "id": 1, "method": "message/send"}, timeout=10
+        )
         assert r.status_code == 401
     finally:
         conn.close()
@@ -237,7 +255,7 @@ def test_server_rejects_unknown_skill(tmp_path: Path) -> None:
         res = _run(_env("StartA2aServer"), deps)
         url, token = res["detail"]["url"], res["detail"]["token"]
         _wait_ready(res["detail"]["card_url"])
-        r = httpx.post(
+        r = _no_proxy_post(
             url,
             json={
                 "jsonrpc": "2.0",
@@ -265,7 +283,7 @@ def test_server_rejects_unknown_method(tmp_path: Path) -> None:
         res = _run(_env("StartA2aServer"), deps)
         url, token = res["detail"]["url"], res["detail"]["token"]
         _wait_ready(res["detail"]["card_url"])
-        r = httpx.post(
+        r = _no_proxy_post(
             url,
             json={"jsonrpc": "2.0", "id": 1, "method": "tasks/cancel", "params": {}},
             headers={"Authorization": f"Bearer {token}"},
@@ -289,7 +307,7 @@ def test_server_routes_skill_through_command_bus(tmp_path: Path) -> None:
         res = _run(_env("StartA2aServer"), deps)
         url, token = res["detail"]["url"], res["detail"]["token"]
         _wait_ready(res["detail"]["card_url"])
-        r = httpx.post(
+        r = _no_proxy_post(
             url,
             json={
                 "jsonrpc": "2.0",
@@ -566,7 +584,7 @@ def test_stop_releases_thread_connections(tmp_path: Path) -> None:
         started = _run(_env("StartA2aServer"), deps)["detail"]
         _wait_ready(started["card_url"])
         # 打一次能力面，逼 Server 线程建出线程级连接
-        httpx.post(
+        _no_proxy_post(
             started["url"],
             json={
                 "jsonrpc": "2.0",
@@ -615,7 +633,7 @@ def test_unauthorized_post_with_body_gets_clean_401(tmp_path: Path) -> None:
                 }
             },
         }
-        r = httpx.post(started["url"], json=big, timeout=15)
+        r = _no_proxy_post(started["url"], json=big, timeout=15)
         assert r.status_code == 401
         assert r.json()["error"]["message"] == "unauthorized"
     finally:

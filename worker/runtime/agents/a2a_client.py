@@ -20,6 +20,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 
 from worker.runtime.agents.a2a_card import CARD_PATH
+from worker.runtime.net import make_async_client
 
 #: 单次请求超时（秒）
 DEFAULT_TIMEOUT = 20.0
@@ -67,7 +68,9 @@ async def _post_json(
     url: str, body: dict[str, Any], timeout: float, token: str | None = None
 ) -> dict[str, Any]:
     try:
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+        async with make_async_client(
+            timeout=timeout, follow_redirects=False
+        ) as client:
             resp = await client.post(url, json=body, headers=_auth_headers(token))
     except httpx.TimeoutException as e:
         raise A2aClientError("A2A_TIMEOUT", f"远端 Agent 在 {timeout:g}s 内无响应") from e
@@ -108,7 +111,9 @@ async def fetch_agent_card(
     root = normalize_base_url(base_url)
     url = urljoin(f"{root}/", CARD_PATH.lstrip("/"))
     try:
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+        async with make_async_client(
+            timeout=timeout, follow_redirects=False
+        ) as client:
             resp = await client.get(url, headers=_auth_headers(token))
     except httpx.TimeoutException as e:
         raise A2aClientError("A2A_TIMEOUT", f"拉取 Agent Card 超时（{timeout:g}s）") from e

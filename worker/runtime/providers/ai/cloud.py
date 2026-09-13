@@ -17,6 +17,7 @@ from typing import Any
 
 import httpx
 
+from worker.runtime.net import make_async_client
 from worker.runtime.providers.ai.base import parse_json_response
 
 
@@ -51,7 +52,7 @@ class CloudAIProvider:
         if self._client is not None:
             yield self._client
             return
-        async with httpx.AsyncClient(timeout=120.0) as c:
+        async with make_async_client(timeout=120.0) as c:
             yield c
 
     async def complete(

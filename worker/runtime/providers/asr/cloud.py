@@ -17,6 +17,7 @@ from typing import Any
 
 import httpx
 
+from worker.runtime.net import make_async_client
 from worker.runtime.providers.asr.base import Transcript, TranscriptSegment
 
 
@@ -47,7 +48,7 @@ class CloudASRProvider:
         if self._client is not None:
             yield self._client
             return
-        async with httpx.AsyncClient(timeout=60.0) as c:
+        async with make_async_client(timeout=60.0) as c:
             yield c
 
     async def transcribe(

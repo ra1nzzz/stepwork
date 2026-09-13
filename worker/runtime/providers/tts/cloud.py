@@ -13,7 +13,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-import httpx
+from worker.runtime.net import make_async_client
 
 
 def _write_bytes(path: Path, data: bytes) -> None:
@@ -55,7 +55,7 @@ class CloudTTSProvider:
         await asyncio.to_thread(_ensure_dir, out_dir)
         digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
         path = Path(out_dir) / f"tts_{digest}.wav"
-        client = self._client or httpx.AsyncClient()
+        client = self._client or make_async_client()
         async with client as c:
             resp = await c.post(
                 self.base_url,

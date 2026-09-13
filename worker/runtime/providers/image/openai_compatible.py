@@ -32,8 +32,7 @@ import tempfile
 from typing import Any
 from urllib.parse import urlparse
 
-import httpx
-
+from worker.runtime.net import make_async_client
 from worker.runtime.providers.image.base import ImageProviderError
 
 #: 生图比聊天慢得多（CogView hd 约 20s），留足余量
@@ -189,7 +188,7 @@ class OpenAICompatibleImageProvider:
             "Content-Type": "application/json",
         }
 
-        client = self._client or httpx.AsyncClient()
+        client = self._client or make_async_client()
         async with client as c:
             resp = await c.post(url, headers=headers, json=body, timeout=self.timeout)
             if resp.status_code >= 400:

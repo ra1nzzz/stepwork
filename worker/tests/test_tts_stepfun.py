@@ -7,8 +7,9 @@
    报错，只会得到一段「读什么都一样」的默认音 —— 最难查的那类 bug；
 2. **命中错误缓存必须炸**：不同文本得到同一段音频（MD5 相同）= 接口返回了
    固定错误句，静默渲进成片是灾难。判据用 MD5 而非字节数（CBR 会撞车误报）；
-3. **错误信息带 body 片段 + 状态码提示**：402 是余额、404 是端点路径写错，
-   只报 HTTP 状态码等于让人猜；
+3. **错误信息带 body 片段 + 状态码提示**：402 是余额、404 可能是端点写错，
+   也可能是**模型在 PLAN 端点无权**（body 带 ``model_invalid``）—— 后者得先
+   认出来，否则会把排查方向引到路径上，只报 HTTP 状态码等于让人猜；
 4. **幂等与归一化**：同（音色, 指令, 语速, 文本）复用文件不重复计费；
    语速被 ``instruction`` 带跑时按 字/秒 用 atempo 拉回（不变调）。
 
@@ -204,6 +205,29 @@ async def test_http_errors_carry_hint_and_body(
     assert str(status) in msg
     assert hint in msg
     assert "boom" in msg
+
+
+_MODEL_INVALID_BODY = (
+    '{"error":{"message":"The model \\"step-tts-2\\" does not exist or you do not '
+    'have access to it.","type":"model_invalid","code":"model_invalid"}}'
+)
+
+
+async def test_model_invalid_is_named_as_model_problem(tmp_path: Path) -> None:
+    """模型不被 PLAN 端点接受时必须是「模型不可用」，不能报成「端点不存在」。
+
+    真机实测（2026-09-13）：``step-tts-2`` 返回 **404 + model_invalid**。
+    若只按状态码翻，用户会去查 ``/step_plan/`` 路径 —— 而路径是对的。
+    """
+    client = _FakeClient([_FakeResponse(status_code=404, text=_MODEL_INVALID_BODY)])
+    p = _provider(client, max_attempts=1, model="step-tts-2")
+    with pytest.raises(TTSError) as ei:
+        await p.synthesize("一句话。", {"out_dir": str(tmp_path)})
+    msg = str(ei.value)
+    assert "模型不可用" in msg
+    assert "step-tts-2" in msg, "要报出**当前配错的那个**模型名，否则不知道改什么"
+    assert "stepaudio-2.5-tts" in msg, "要报出正确的模型名"
+    assert "端点不存在" not in msg, "端点是对的，不能把人引去查路径"
 
 
 async def test_empty_audio_raises(tmp_path: Path) -> None:

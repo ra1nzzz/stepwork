@@ -25,6 +25,7 @@ from urllib.parse import urlparse
 import httpx
 
 from worker.runtime.commands.bus import DispatchError
+from worker.runtime.net import make_async_client
 
 DEFAULT_MAX_DOWNLOAD_BYTES: int = 2 * 1024 * 1024 * 1024
 """下载大小上限缺省值（2 GiB）。"""
@@ -161,7 +162,7 @@ async def download_url(
     dest = _prepare_dest(dest_dir)
 
     own_client = client is None
-    http = client or httpx.AsyncClient(
+    http = client or make_async_client(
         follow_redirects=True, timeout=httpx.Timeout(30.0)
     )
     tmp_path: Path | None = None
