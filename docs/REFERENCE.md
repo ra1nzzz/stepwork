@@ -159,6 +159,7 @@
 | 阿里巴巴普惠体 2.0（`resources/fonts/alibaba-puhuiti/`） | 字体（厂商自有免费商用授权） | 直接（仓库内原样捆绑 + 附授权 PDF） | **S3 风格层 `@font-face`** | 55/65/85 三字重 GB18030；`illustration` 视觉稿字体栈首选。授权条款**禁止**未经授权再上传/转发字体文件、禁止修改反编译 —— 捆绑用于自身出片渲染属嵌入式使用 |
 | 得意黑 Smiley Sans（`resources/fonts/smiley-sans/`） | 字体（**OFL-1.1**） | 直接 | **S3 风格层 `@font-face`** | GitHub `atelier-anchor/smiley-sans` v2.0.1；动感斜切，综艺/短标题/金句大字 |
 | 霞鹜文楷 LXGW WenKai v1.522（`resources/fonts/lxgw-wenkai/`） | 字体（**OFL-1.1**） | 直接（**原样捆绑** + 附授权原文） | **S3 风格层 `@font-face`**；A 版 `ink_text` 字体栈首选 | 25.5 MB Regular；OFL 附加许可允许**子集化改版沿用保留字体名但仅限 web font 交付**，故仓库只捆原样 TTF（子集化前须重读该条） |
+| PyInstaller（**GPL-2.0-or-later WITH Bootloader-exception**） | 开源（打包工具） | 构建期依赖（`.[package]`），**产物不受 GPL 传染** | `packaging/stepwork-worker.spec`；`scripts/build_worker_sidecar.ps1` | bootloader exception 明确「用它打包的商业/其他许可程序可自由分发」，故 AGPL 主仓 + 单文件侧车无冲突。**非运行期依赖**：不进 `dependencies`，CI 不跑打包 |
 
 > ⚠️ **ffmpeg 授权**：STEPWORK 为 AGPL-3.0，与 GPL 兼容；若未来改双许可闭源，需确认 ffmpeg 构建版本（LGPL vs GPL）的链接方式。己见 `LICENSE_AUDIT.md`（已归档，待更新）。
 

@@ -26,7 +26,7 @@ _REPO = Path(__file__).resolve().parents[1]
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
-from worker.runtime.bootstrap import MIGRATIONS_DIR  # noqa: E402
+from worker.runtime.bootstrap import migrations_dir  # noqa: E402
 from worker.runtime.commands.bus import dispatch  # noqa: E402
 from worker.runtime.db.connection import connect  # noqa: E402
 from worker.runtime.db.migrations import run_migrations  # noqa: E402
@@ -39,7 +39,7 @@ _WS = "ws-creator-styles"
 
 async def _run(db_path: str) -> None:
     conn = connect(db_path)
-    run_migrations(conn, MIGRATIONS_DIR)
+    run_migrations(conn, migrations_dir())
     repos = Repos(conn)
     deps = Deps(repos=repos)
     deps.repos.workspaces.ensure(_WS)

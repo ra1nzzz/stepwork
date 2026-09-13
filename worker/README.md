@@ -51,6 +51,33 @@ python -m venv .venv
 .venv/Scripts/mypy worker/runtime
 ```
 
+## 打包（单文件侧车，Tauri `externalBin` 的目标）
+
+```powershell
+# 在仓库根目录。产物 dist/worker-sidecar/stepwork-worker.exe
+# 并自动投递为 apps/desktop/src-tauri/binaries/stepwork-worker-<triple>.exe
+pwsh scripts\build_worker_sidecar.ps1
+
+# 验收（冻结态资源自检 + 真实 JSON-RPC 链路）
+python .workbuddy\packaging-acceptance\accept_sidecar.py
+
+# 排障：在冻结进程里看随包资源找没找到
+dist\worker-sidecar\stepwork-worker.exe --selfcheck
+```
+
+打包配置是**签入仓库**的 `packaging/stepwork-worker.spec`：
+
+- `datas` 由 `worker.runtime.assets.bundled_datas()` 生成，与运行期
+  `repo_path()` 的读取点**同源** —— 漏打资源是静默的（字体丢了只是字形变回
+  系统字体），所以清单不能靠人工核对。
+- `hiddenimports` 用 `collect_submodules("worker")` 整包收：`bus.py` 用
+  `importlib.import_module(module_path)` 路由，模块名来自 `_ROUTES` **字典**
+  而非 import 语句，静态分析看不见。
+- 可选引擎默认排除，用 `STEPWORK_BUNDLE_RENDER` / `_ASR` / `_TTS` 单独开。
+  关掉时对应 provider 返 `None` → `UNAVAILABLE`（**不会**静默换 ffmpeg 渲出
+  另一条片子）。playwright 的浏览器二进制 pip 装不了，开了也仍需
+  `playwright install chromium`。
+
 ## 协议方法（W1 最小集）
 
 | Method | Params | Result | 类型 |

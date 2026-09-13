@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from worker.runtime.bootstrap import MIGRATIONS_DIR
+from worker.runtime.bootstrap import migrations_dir
 from worker.runtime.commands.bus import dispatch
 from worker.runtime.db.connection import in_memory
 from worker.runtime.db.migrations import run_migrations
@@ -47,7 +47,7 @@ def _env(command_type: str, payload: dict[str, Any], project_id: str) -> Command
 
 async def test_render_end_to_end() -> None:
     conn = in_memory()
-    run_migrations(conn, MIGRATIONS_DIR)
+    run_migrations(conn, migrations_dir())
     repos = Repos(conn)
     ws = repos.workspaces.insert(Workspace(name="ws", root_path="/tmp/ws"))
     prj_id = repos.projects.insert(
@@ -117,7 +117,7 @@ def test_truncate_meta_json_valid_and_bounded() -> None:
 async def test_render_reports_tts_invocation_cost() -> None:
     """PRD-REN-002：旁白合成的来源与预计费用必须可见（此前恒为 None）。"""
     conn = in_memory()
-    run_migrations(conn, MIGRATIONS_DIR)
+    run_migrations(conn, migrations_dir())
     repos = Repos(conn)
     ws = repos.workspaces.insert(Workspace(name="ws", root_path="/tmp/ws"))
     prj_id = repos.projects.insert(ContentProject(workspace_id=ws, title="p"))
@@ -183,7 +183,7 @@ def _seed_script_version(conn: Any) -> str:
 def test_video_scenes_roundtrip_and_unique_seq() -> None:
     """S2 地基：分幕事实表可写可读，且同版本 seq 唯一（并发写不互相覆盖）。"""
     conn = in_memory()
-    run_migrations(conn, MIGRATIONS_DIR)
+    run_migrations(conn, migrations_dir())
     version_id = _seed_script_version(conn)
     conn.execute(
         "INSERT INTO video_scenes "
@@ -210,7 +210,7 @@ async def test_render_source_forwards_per_request_renderer(monkeypatch: Any) -> 
     import worker.runtime.handlers.render_source as rs
 
     conn = in_memory()
-    run_migrations(conn, MIGRATIONS_DIR)
+    run_migrations(conn, migrations_dir())
     repos = Repos(conn)
     ws = repos.workspaces.insert(Workspace(name="ws", root_path="/tmp/ws"))
     prj_id = repos.projects.insert(ContentProject(workspace_id=ws, title="p"))
@@ -250,7 +250,7 @@ async def test_render_source_forwards_per_request_renderer(monkeypatch: Any) -> 
 async def test_render_user_audio_has_no_tts_invocation() -> None:
     """用户录音路径不调 TTS，不应产生 TTS 费用记录（PRD-REN-003）。"""
     conn = in_memory()
-    run_migrations(conn, MIGRATIONS_DIR)
+    run_migrations(conn, migrations_dir())
     repos = Repos(conn)
     ws = repos.workspaces.insert(Workspace(name="ws", root_path="/tmp/ws"))
     prj_id = repos.projects.insert(ContentProject(workspace_id=ws, title="p"))

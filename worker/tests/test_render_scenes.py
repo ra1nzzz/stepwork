@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from worker.runtime.bootstrap import MIGRATIONS_DIR
+from worker.runtime.bootstrap import migrations_dir
 from worker.runtime.commands.bus import dispatch
 from worker.runtime.db.connection import in_memory
 from worker.runtime.db.migrations import run_migrations
@@ -70,7 +70,7 @@ class _CapturingRenderer:
 
 def _deps(renderer: Any) -> Deps:
     c = in_memory()
-    run_migrations(c, MIGRATIONS_DIR)
+    run_migrations(c, migrations_dir())
     return Deps(repos=Repos(c), renderer=renderer)
 
 

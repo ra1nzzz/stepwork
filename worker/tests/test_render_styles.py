@@ -141,6 +141,81 @@ def test_every_style_prefers_a_bundled_family() -> None:
         )
 
 
+def test_font_face_format_follows_suffix(tmp_path: Path, monkeypatch: Any) -> None:
+    """``@font-face`` 的 ``format()`` 按后缀推断，不再写死 ``truetype``。
+
+    ``.otf`` / ``.woff2`` 带错误格式提示时浏览器**可能拒载** —— 而「转 woff2
+    压体积」正是将来绕不开的一步（25 MB 中文字体），所以必须有断言钉住。
+    """
+    from worker.runtime.render import styles as styles_mod
+
+    fonts = tmp_path / "fonts"
+    fonts.mkdir()
+    for name in ("a.ttf", "b.otf", "c.woff2"):
+        (fonts / name).write_bytes(b"not-a-real-font")
+    monkeypatch.setattr(styles_mod, "_FONTS_DIR", fonts)
+    monkeypatch.setenv("STEPWORK_LOCAL_FONTS", str(tmp_path / "none"))
+
+    css = styles_mod.font_face_css()
+    assert "format('truetype')" in css
+    assert "format('opentype')" in css
+    assert "format('woff2')" in css
+    assert css.count("src:") == 3
+
+
+def test_font_scanner_and_format_map_share_one_whitelist(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """扫描白名单与 ``format()`` 映射是**同一份**（加后缀即同时可扫 + 可标格式）。
+
+    两处各写一份时的两种坏法：① 扫到了但格式标注仍是 truetype（静默拒载）；
+    ② 映射加了新格式却扫不到文件。这条断言把耦合钉住 —— 往映射里加一项，
+    扫描与格式标注必须**同时**生效。
+    """
+    from worker.runtime.render import styles as styles_mod
+
+    fonts = tmp_path / "fonts"
+    fonts.mkdir()
+    (fonts / "x.woff").write_bytes(b"x")
+    monkeypatch.setattr(styles_mod, "_FONTS_DIR", fonts)
+    monkeypatch.setenv("STEPWORK_LOCAL_FONTS", str(tmp_path / "none"))
+
+    # 未登记的后缀：不扫（也不生成 @font-face）
+    assert styles_mod.bundled_fonts() == []
+    assert styles_mod.font_face_css() == ""
+
+    # 登记即生效：既能扫到，格式也按映射标注
+    monkeypatch.setitem(styles_mod._FONT_FORMAT_BY_SUFFIX, ".woff", "woff")
+    assert len(styles_mod.bundled_fonts()) == 1
+    assert "format('woff')" in styles_mod.font_face_css()
+
+
+def test_fonts_dir_follows_repo_root(tmp_path: Path, monkeypatch: Any) -> None:
+    """字体目录挂在**共享的仓库根**下（冻结时即 ``sys._MEIPASS``）。
+
+    侧车打包成单文件 exe 后 ``styles.py`` 的 ``__file__`` 落在临时解包目录，
+    原来那条 ``parents[3]`` 会指向不存在的位置 → 字体**静默扫不到**，渲染
+    悄悄退回系统字体（无任何报错）。这里钉住「字体根 = 仓库根 / resources/fonts」，
+    并验证资源根改指解包目录时字体能被扫到。
+    """
+    from worker.runtime.assets import repo_path as shared_repo_path
+    from worker.runtime.render import styles as styles_mod
+
+    monkeypatch.delattr(sys, "_MEIPASS", raising=False)
+    assert styles_mod._FONTS_DIR == shared_repo_path("resources", "fonts")
+
+    # 冻结形态：资源根 = 解包目录，把字体放在 <root>/resources/fonts 下应能被扫到
+    (tmp_path / "resources" / "fonts").mkdir(parents=True)
+    (tmp_path / "resources" / "fonts" / "Bundled.ttf").write_bytes(b"x")
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+    monkeypatch.setattr(
+        styles_mod, "_FONTS_DIR", shared_repo_path("resources", "fonts")
+    )
+    monkeypatch.setenv("STEPWORK_LOCAL_FONTS", str(tmp_path / "none"))
+    names = {Path(str(f["path"])).name for f in styles_mod.bundled_fonts()}
+    assert names == {"Bundled.ttf"}
+
+
 def test_local_fonts_dir_is_scanned_and_repo_wins_dups(
     tmp_path: Path, monkeypatch: Any
 ) -> None:

@@ -40,6 +40,13 @@ tts = [
 render = [
   "playwright>=1.40",  # Chromium 逐帧截图 → ffmpeg 管道直连
 ]
+# 侧车打包（scripts/build_worker_sidecar.ps1 → packaging/stepwork-worker.spec）。
+# PyInstaller 只是**构建期**依赖：不进运行期 dependencies、也不进 dev——
+# CI 不跑打包（构建慢且吃浏览器/模型），打包正确性由
+# worker/tests/test_assets.py 的形状断言在普通 pytest 里守住。
+package = [
+  "pyinstaller>=6.0",
+]
 
 [project.scripts]
 stepwork-worker = "worker.runtime.__main__:main"

@@ -6,19 +6,26 @@ import struct
 import subprocess
 import sys
 import threading
+from pathlib import Path
 from typing import Any
 
 os.environ["STEPWORK_HOME"] = os.path.join(
     os.environ.get("TEMP", "/tmp"), "stepwork-test-sidecar"
 )
 
+_DEFAULT_EXE = (
+    Path(__file__).resolve().parents[1]
+    / "apps"
+    / "desktop"
+    / "src-tauri"
+    / "binaries"
+    / "stepwork-worker-x86_64-pc-windows-msvc.exe"
+)
+
 if len(sys.argv) > 1:
     cmd = sys.argv[1:]
 else:
-    cmd = [
-        r"d:\Code\STEPWORK\apps\desktop\src-tauri\binaries"
-        r"\stepwork-worker-x86_64-pc-windows-msvc.exe"
-    ]
+    cmd = [str(_DEFAULT_EXE)]
 
 proc = subprocess.Popen(
     cmd,

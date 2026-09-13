@@ -61,6 +61,9 @@ backups/
 
 # Tauri / Sidecar binaries
 apps/desktop/src-tauri/target/
+# 侧车 exe：由 scripts/build_worker_sidecar.ps1 从 packaging/stepwork-worker.spec
+# 现打（~80MB，内含 52MB 字体），是可再生产物，不进 git
+apps/desktop/src-tauri/binaries/
 worker/dist/
 worker/build/
 

@@ -16,7 +16,7 @@ import re
 import sys
 from typing import Any
 
-from worker.runtime.bootstrap import MIGRATIONS_DIR
+from worker.runtime.bootstrap import migrations_dir
 from worker.runtime.commands.bus import dispatch
 from worker.runtime.db.connection import in_memory
 from worker.runtime.db.migrations import run_migrations
@@ -116,7 +116,7 @@ def _env(command_type: str, payload: dict[str, Any], project_id: str) -> Command
 
 async def test_render_artifacts_srt_and_audio_kept() -> None:
     conn = in_memory()
-    run_migrations(conn, MIGRATIONS_DIR)
+    run_migrations(conn, migrations_dir())
     repos = Repos(conn)
     ws = repos.workspaces.insert(Workspace(name="ws", root_path="/tmp/ws"))
     prj_id = repos.projects.insert(ContentProject(workspace_id=ws, title="p"))
@@ -218,7 +218,7 @@ def test_build_srt_from_scenes_clamps_negative() -> None:
 async def test_render_srt_prefers_measured_scene_timeline() -> None:
     """有分幕时间轴时，渲染出的 SRT 必须用实测值，不是等比分配。"""
     conn = in_memory()
-    run_migrations(conn, MIGRATIONS_DIR)
+    run_migrations(conn, migrations_dir())
     repos = Repos(conn)
     ws = repos.workspaces.insert(Workspace(name="ws", root_path="/tmp/ws"))
     prj_id = repos.projects.insert(ContentProject(workspace_id=ws, title="p"))

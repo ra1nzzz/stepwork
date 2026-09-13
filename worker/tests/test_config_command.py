@@ -15,7 +15,7 @@ import json
 import os
 from typing import Any
 
-from worker.runtime.bootstrap import MIGRATIONS_DIR
+from worker.runtime.bootstrap import migrations_dir
 from worker.runtime.db.connection import in_memory
 from worker.runtime.db.migrations import run_migrations
 from worker.runtime.handlers import commands
@@ -35,7 +35,7 @@ from worker.runtime.state import WorkerState
 def _state() -> WorkerState:
     s = WorkerState()
     conn = in_memory()
-    run_migrations(conn, MIGRATIONS_DIR)
+    run_migrations(conn, migrations_dir())
     s.db_conn = conn
     return s
 

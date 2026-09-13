@@ -40,7 +40,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import urlparse
 
-from worker.runtime.bootstrap import MIGRATIONS_DIR
+from worker.runtime.bootstrap import migrations_dir
 from worker.runtime.db.migrations import run_migrations
 from worker.runtime.handlers import commands
 from worker.runtime.state import WorkerState
@@ -77,7 +77,7 @@ try:
     _conn.execute("PRAGMA journal_mode=WAL")
     _conn.execute("PRAGMA foreign_keys=ON")
     _conn.row_factory = sqlite3.Row
-    run_migrations(_conn, MIGRATIONS_DIR)
+    run_migrations(_conn, migrations_dir())
     STATE.db_conn = _conn
     STATE.db_path = _DB_PATH
 except Exception as exc:  # pragma: no cover - 启动期依赖缺失时给出清晰报错

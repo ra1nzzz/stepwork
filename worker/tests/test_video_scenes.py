@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from worker.runtime.bootstrap import MIGRATIONS_DIR
+from worker.runtime.bootstrap import migrations_dir
 from worker.runtime.commands.bus import dispatch
 from worker.runtime.db.connection import in_memory
 from worker.runtime.db.migrations import run_migrations
@@ -47,7 +47,7 @@ def _env(
 
 def _seed() -> tuple[Any, Deps, str, str]:
     conn = in_memory()
-    run_migrations(conn, MIGRATIONS_DIR)
+    run_migrations(conn, migrations_dir())
     repos = Repos(conn)
     ws = repos.workspaces.insert(Workspace(name="ws", root_path="/tmp/ws"))
     prj_id = repos.projects.insert(ContentProject(workspace_id=ws, title="p"))
@@ -265,7 +265,7 @@ async def test_agent_can_list_but_not_write() -> None:
 def test_unique_seq_index_exists() -> None:
     """UNIQUE(version_id, seq)：并发写幕不该互相覆盖成两条同序号记录。"""
     conn = in_memory()
-    run_migrations(conn, MIGRATIONS_DIR)
+    run_migrations(conn, migrations_dir())
     rows = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='index' "
         "AND name='idx_video_scenes_version_seq'"

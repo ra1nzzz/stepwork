@@ -31,6 +31,8 @@ import tempfile
 from pathlib import Path
 from typing import NamedTuple
 
+from worker.runtime.assets import repo_path
+
 #: 风格能力标签：``image`` = 需要每幕配图
 CAP_IMAGE = "image"
 
@@ -39,7 +41,21 @@ _CACHE_DIR = os.path.join(tempfile.gettempdir(), "stepwork_styles")
 
 #: 仓库打包字体根目录（resources/fonts，见其 README 的打包规则）。
 #: 只放**允许再分发**的字体（OFL / 明确可随包发布），会随仓库公开。
-_FONTS_DIR = Path(__file__).resolve().parents[3] / "resources" / "fonts"
+#: 走 ``repo_path`` 而非 ``parents[N]``：冻结成单文件 exe 后仓库根那条会指向
+#: 不存在的解包相对位置 → 字体**静默扫不到**，渲染悄悄退回系统字体。
+_FONTS_DIR = repo_path("resources", "fonts")
+
+#: 后缀 → ``@font-face src`` 的 ``format()`` 提示，同时也是**扫描白名单**
+#: （``bundled_fonts()`` 只认这里的后缀）。合成一份来源是刻意的：两处各写一份
+#: 时，往里加后缀会「扫到了但格式标注是错的」或者「映射加了却扫不到」，
+#: 而错误的格式提示会让浏览器**静默拒载**。
+#: 历史上这里写死过 ``truetype`` —— ``.otf`` / ``.woff2`` 全被标错，
+#: 而「转 woff2 压体积」正是中文全量字体绕不开的一步。
+_FONT_FORMAT_BY_SUFFIX: dict[str, str] = {
+    ".ttf": "truetype",
+    ".otf": "opentype",
+    ".woff2": "woff2",
+}
 
 
 def _local_fonts_dir() -> Path:
@@ -349,7 +365,7 @@ def bundled_fonts() -> list[dict[str, object]]:
         if not root.is_dir():
             continue
         for path in sorted(root.rglob("*")):
-            if path.suffix.lower() not in (".ttf", ".otf", ".woff2"):
+            if path.suffix.lower() not in _FONT_FORMAT_BY_SUFFIX:
                 continue
             if path.name in seen:  # 同名去重：仓库优先（先遍历仓库根）
                 continue
@@ -371,13 +387,21 @@ def font_face_css() -> str:
 
     视觉稿是 ``file://`` 页面，字体路径必须用绝对 ``file://`` URI，
     渲染器已带 ``--allow-file-access-from-files`` 才能加载。
+
+    ``format()`` 按后缀从 ``_FONT_FORMAT_BY_SUFFIX`` 取 —— 那份映射同时也是
+    ``bundled_fonts()`` 的扫描白名单，所以「扫得到的文件一定能标对格式」。
+    此前这里写死 ``truetype``，``.otf`` / ``.woff2`` 全被标错，浏览器会
+    据此**静默拒载** —— 而「转 woff2 压体积」正是中文全量字体绕不开的一步。
     """
     rules = []
     for font in bundled_fonts():
+        path = font["path"]
+        assert isinstance(path, Path)
+        fmt = _FONT_FORMAT_BY_SUFFIX[path.suffix.lower()]
         rules.append(
             "@font-face {\n"
             f"  font-family: '{font['family']}';\n"
-            f"  src: url('{font['url']}') format('truetype');\n"
+            f"  src: url('{font['url']}') format('{fmt}');\n"
             f"  font-weight: {font['weight']};\n"
             "}"
         )

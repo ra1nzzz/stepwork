@@ -37,6 +37,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from worker.runtime.assets import repo_path
 from worker.runtime.models import RenderResult, RenderScene, RenderSpec
 from worker.runtime.render.ffmpeg_runner import (
     FFmpegFailed,
@@ -47,8 +48,9 @@ from worker.runtime.render.styles import style_document
 
 #: 内置 S1 探路文档（零外部依赖：无字体 / 无图片 / 无网络）。
 #: 未显式指定文档时用它，保证 provider 开箱即可跑通一次「真渲染」。
-DEFAULT_DOCUMENT = (
-    Path(__file__).resolve().parents[2] / "render" / "assets" / "s1_probe.html"
+#: 路径走 repo_path：冻结成单文件 exe 后仓库根 = PyInstaller 解包根。
+DEFAULT_DOCUMENT = repo_path(
+    "worker", "runtime", "render", "assets", "s1_probe.html"
 )
 
 _SAFE_ID = re.compile(r"[^A-Za-z0-9._-]")

@@ -10,17 +10,17 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
 
+from worker.runtime.assets import repo_path
 from worker.runtime.models import CommandEnvelope
 
 # 单一事实源：actor.type 枚举直接从仓库根 schemas/command-envelope.schema.json
 # 读取，避免与 types.ts / schema.json 三处手工维护产生漂移（R3 非阻项 #1）。
-# envelope.py 位于 worker/runtime/commands/，故 parents[3] 即仓库根。
-_SCHEMA_PATH = Path(__file__).resolve().parents[3] / "schemas" / "command-envelope.schema.json"
+# 路径走 repo_path：冻结成单文件 exe 后仓库根 = PyInstaller 解包根。
+_SCHEMA_PATH = repo_path("schemas", "command-envelope.schema.json")
 try:
     with _SCHEMA_PATH.open(encoding="utf-8") as _f:
         _SCHEMA = json.load(_f)

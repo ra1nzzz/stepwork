@@ -16,11 +16,21 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from worker.runtime.assets import repo_path
 from worker.runtime.db.connection import connect
 from worker.runtime.db.migrations import run_migrations
 from worker.runtime.state import WorkerState
 
-MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations"
+
+def migrations_dir() -> Path:
+    """迁移目录（``migrations/``）——**公开**：测试与 dev_bridge 也用它建库。
+
+    **每次调用重算**而不是模块级常量：冻结成单文件 exe 后仓库根变成
+    PyInstaller 的解包根（``sys._MEIPASS``），导入期算死会拿到不存在的路径 ——
+    而没有迁移 = 库建不起来 = 侧车启动即死，且没有任何兜底。
+    """
+    return repo_path("migrations")
+
 
 logger = logging.getLogger("worker.runtime")
 
@@ -115,7 +125,7 @@ def bootstrap_db(
 
     path = db_path or _resolve_db_path(backup=backup)
     connection = connect(path)
-    run_migrations(connection, MIGRATIONS_DIR)
+    run_migrations(connection, migrations_dir())
     if recover_jobs:
         # T5 启动恢复：先扫过期租约，再清孤儿 RUNNING/LEASED
         from worker.runtime.jobs.lease import sweep_expired

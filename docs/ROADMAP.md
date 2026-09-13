@@ -33,14 +33,22 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
 |---|---|
 | 阶段 | **S0–S6 ✅ 已闭合 · S7 进行中 · S8 未开始** |
 | 命令类型（契约） | 99 条（`schemas/command-envelope.schema.json` 的 `commandType.enum`） |
-| 门禁 | `ruff check .` 全仓 · `mypy --strict`（worker / cli+mcp+scripts）· `pytest -m "not perf"` → **975 passed / 1 skipped** |
+| 门禁 | `ruff check .` 全仓 · `mypy --strict`（worker / cli+mcp+scripts）· `pytest -m "not perf"` → **985 passed / 1 skipped** |
 | 能力对等（P4） | CLI 可达性缺口 **0**、一等公民缺口 **0** —— `scripts/check_ui_parity.py` |
 | MCP 工具面 | 与命令总线一致 —— `scripts/check_mcp_surface.py`（A–H 全绿）；入站真机链路 `mcp/tests/test_mcp_e2e.py` |
+| 桌面端打包 | 侧车 exe ✅ 可产出并真机验收（69.55 MB，`--selfcheck` + JSON-RPC 双链路全过）；**NSIS 安装包未端到端跑过** |
 | Ontology 侧 stepwork 映射 | ❌ **不存在**（需补 `mappings/stepwork.yaml` 等三份） |
 
 **在办：S7 发布引擎。** 接口层（`providers/publish/` 协议 + 三态）与前端入口已落地，
 剩余验收是「至少 1 个平台打通 fill + 存草稿闭环」与「`platform_variants` /
 `publish_jobs` 接通」；`publisher-engine/` 仍是 5 个 `.gitkeep`（实现层未开工）。
+
+**桌面端打包（2026-09-13 推进）。** `packaging/stepwork-worker.spec` +
+`scripts/build_worker_sidecar.ps1` 已能把 worker 打成单文件侧车并投递到
+`apps/desktop/src-tauri/binaries/`（Tauri `externalBin` 要的 target-triple 文件名），
+验收脚本 `.workbuddy/packaging-acceptance/accept_sidecar.py` 全绿。**未做的下一步**：
+`cargo tauri build` 出 NSIS 安装包并装到干净机器上跑一次 —— sidecar 有了不等于
+安装包能用（图标 / WebView2 bootstrapper / 安装路径下的 `STEPWORK_HOME` 都还没验）。
 
 ---
 
