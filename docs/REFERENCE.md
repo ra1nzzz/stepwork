@@ -156,6 +156,8 @@
 | `fakes/fake_ffmpeg_pipe.py`（仓库内） | 自研 | 直接 | 测试 | fake ffmpeg 读 stdin 数 JPEG SOI 写 JSON 报告；`STEPWORK_FAKE_FFMPEG_SLEEP=1` 睡 30s 给取消测试证明 terminate 真生效 |
 | **OpenCLI** `jackwener/opencli`（v1.8.8，**Apache-2.0**，Node ≥ 20.18.1） | 开源 CLI（第三方） | ✅ **消费，不内嵌** → ADR-012 | **S7 发布引擎**（fill/draft 路径）；S5 记为备选 | 复用本机 Chrome 登录态，100+ 站点确定性命令（`douyin` 含 `draft`/`drafts`、`xiaohongshu`、`weibo`、`bilibili`、`weixin create-draft`…），亦可经 CDP 驱动 Electron 应用。**许可证干净**（Apache→AGPL 兼容）。⛔ V0.x **禁用其 `publish` 命令**（ADR-008 只允许 FILL_AND_PREVIEW）。重依赖：Node + Chrome 扩展 + 常驻 daemon（`127.0.0.1:19825`）→ 列可选依赖、显式报错。反向：`opencli external register stepwork --binary stepwork-cli` 即可双向互操作 |
 | ffmpeg / ffprobe | 开源（GPL/LGPL，按构建） | 直接（外部二进制） | 渲染/合成 / 时长探测 | 参数必须用 argv list，不拼 shell；WinGet 装的常不在 PATH，本仓库用 `STEPWORK_FFMPEG_BIN` 显式指定 |
+| 阿里巴巴普惠体 2.0（`resources/fonts/alibaba-puhuiti/`） | 字体（厂商自有免费商用授权） | 直接（仓库内原样捆绑 + 附授权 PDF） | **S3 风格层 `@font-face`** | 55/65/85 三字重 GB18030；`illustration` 视觉稿字体栈首选。授权条款**禁止**未经授权再上传/转发字体文件、禁止修改反编译 —— 捆绑用于自身出片渲染属嵌入式使用 |
+| 得意黑 Smiley Sans（`resources/fonts/smiley-sans/`） | 字体（**OFL-1.1**） | 直接 | **S3 风格层 `@font-face`** | GitHub `atelier-anchor/smiley-sans` v2.0.1；动感斜切，综艺/短标题/金句大字。⚠️ **A 版（`ink_text`）楷体尚未打包**，`_PAPER_CSS` 仍回落系统楷体栈 |
 
 > ⚠️ **ffmpeg 授权**：STEPWORK 为 AGPL-3.0，与 GPL 兼容；若未来改双许可闭源，需确认 ffmpeg 构建版本（LGPL vs GPL）的链接方式。己见 `LICENSE_AUDIT.md`（已归档，待更新）。
 

@@ -1,6 +1,6 @@
 # ROADMAP — 北极星、在办任务与规划模块
 
-> **Status:** Active · **Date:** 2026-09-08
+> **Status:** Active · **Date:** 2026-09-13
 > **本文件职责**：记录产品北极星目标、正在执行的任务、规划中的功能或模块。
 > **已完成项**请移入 [`COMPLETED.md`](./COMPLETED.md)；**引用来源**请记入 [`REFERENCE.md`](./REFERENCE.md)。
 > **旧 ROADMAP** 见 `archive/legacy/ROADMAP.md`（版本路径叙事，已废止）。
@@ -26,14 +26,21 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
 
 ## 2. 当前状态
 
+> 快照 2026-09-13。**本节只放摘要**；逐项勾选与「已推进」记录以各阶段小节为准，
+> 已完成项归 [`COMPLETED.md`](./COMPLETED.md)。
+
 | 项 | 状态 |
 |---|---|
-| 文档体系重定位 | ✅ 已完成（本文件 + REPOSITIONING/COMPLETED/REFERENCE） |
-| 旧文档归档 | ✅ 已完成（22 份 → `archive/legacy/`） |
-| 代码改动 | ⏸ **未开始**（现有功能保持可运行） |
+| 阶段 | **S0–S6 ✅ 已闭合 · S7 进行中 · S8 未开始**（S3 尚余 1 项遗留：A 版楷体未打包，见该节） |
+| 命令类型（契约） | 99 条（`schemas/command-envelope.schema.json` 的 `commandType.enum`） |
+| 门禁 | `ruff check .` 全仓 · `mypy --strict`（worker / cli+mcp+scripts）· `pytest -m "not perf"` → **974 passed / 1 skipped** |
+| 能力对等（P4） | CLI 可达性缺口 **0**、一等公民缺口 **0** —— `scripts/check_ui_parity.py` |
+| MCP 工具面 | 与命令总线一致 —— `scripts/check_mcp_surface.py`（A–H 全绿）；入站真机链路 `mcp/tests/test_mcp_e2e.py` |
 | Ontology 侧 stepwork 映射 | ❌ **不存在**（需补 `mappings/stepwork.yaml` 等三份） |
 
-**下一步待启动：S1（Playwright 渲染器探路）**
+**在办：S7 发布引擎。** 接口层（`providers/publish/` 协议 + 三态）与前端入口已落地，
+剩余验收是「至少 1 个平台打通 fill + 存草稿闭环」与「`platform_variants` /
+`publish_jobs` 接通」；`publisher-engine/` 仍是 5 个 `.gitkeep`（实现层未开工）。
 
 ---
 
@@ -101,8 +108,9 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
 生图密钥，尚未跑过真实生图 → 渲染成片（待选厂商 + 配密钥后补验收）。
 
 **S3 / 收尾待办**（见 [`COMPLETED.md` §5](./COMPLETED.md#5-文档治理)）：
-- 前端分幕 UI（P4 缺口，S6 补）；
-  `RenderSpec.style_id`/`art_style`/`image_set_id` 真正接入渲染（S3 风格层）
+- 前端分幕 UI（P4 缺口，S6 补）
+- `RenderSpec.style_id` 已于 2026-09-13 真机验收闭环（见 S3 节）；
+  `art_style` / `image_set_id` 仍未接入渲染路径（`image_set_id` 尚无表承载）
 
 **验收（S2）**
 - [x] 字幕与配音对齐（按实测时间轴）
@@ -111,7 +119,7 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
 
 ---
 
-### S3 · 风格层：风格可选 + 降级 🔜 进行中
+### S3 · 风格层：风格可选 + 降级 ✅ 已完成（遗留 1 项：A 版楷体未打包）
 
 **目标**：版式风格与美术风格正交可选；A 版作为 B 版的降级路径。
 
@@ -131,24 +139,37 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
       `style_id=None`（不假装用了插画）
 - [x] `ListRenderTemplates` 返回 `styles` 清单（能力 + needsImage，前端下拉用）
 
-**待办（2026-09-09 裁决）**
+**待办 / 裁决记录（2026-09-09 起）**
 - **`base.html.j2` 不引入 jinja2（YAGNI 裁决）**：现方案「python 常量拼接」已达成
   「骨架单源 + 每风格只覆写画面函数」的目标（shared scaffold + `window._paint`），
   且零新依赖。第三风格出现后若资产组织真的难维护，再抽模板引擎，不提前上框架
-- **字体打包（进行中，2026-09-10）**：`resources/fonts/` 已建；`styles.py`
+- **字体打包（已落地，2026-09-10 起）**：`resources/fonts/` 已建；`styles.py`
   `font_face_css()` 自动扫描注入 `@font-face`（加字体不用改代码，file:// 绝对
-  URI，渲染器已带 allow-file-access）。**已打包：阿里巴巴普惠体 2.0**（55/65/85
-  三字重 + 授权 PDF）。待补：阿里妈妈方圆体 VF / 钉钉进步体 / 沐瑶软笔手写体
-  （官方渠道手动下载丢进子目录即可）；优设字由棒棒体 / 懒设计字由公益体
-  **不打包**（字由客户端专属、禁止转发，许可不允许仓库再分发）
+  URI，渲染器已带 allow-file-access）。**已打包 2 款**：阿里巴巴普惠体 2.0
+  （55/65/85 三字重 + 授权 PDF，illustration 正文/字幕条）与得意黑 SmileySans
+  （OFL-1.1，标题金句）。⚠️ **A 版（`ink_text`）仍未闭环**：
+  `styles.py::_PAPER_CSS` 首选系统楷体栈（`"Kaiti SC" / "STKaiti" / "KaiTi"`），
+  `_FONT_META` 未登记楷体族 —— 纸墨文字版出片仍随渲染机/观看机的系统楷体而异，
+  正是 `resources/fonts/README.md` 开篇声明要消除的那类差异。补楷体需选一款
+  允许再分发的开源楷体（如霞鹜文楷 LXGW WenKai），**属渲染视觉变更，待裁决**
+- 待补（已点名但源/许可待处理）：阿里妈妈方圆体 VF / 钉钉进步体 /
+  沐瑶软笔手写体（官方渠道手动下载丢进子目录即可）；优设字由棒棒体 /
+  懒设计字由公益体 **不打包**（字由客户端专属、禁止转发，许可不允许再分发）
 - `image_set_id` 承载配图产物集 id（尚未有表，随厂商选型落）
 
 **验收**
 - [x] 同一份 `scenes.json` 能出 A/B 两种片（style_id 切换 → 内置稿切换；
       scenes 注入不变，A 无图、B 有图）
-- [ ] 强制生图失败时自动回落 A 版并出片成功（降级逻辑已就绪，等真实浏览器
-      出片用例/厂商接入后闭环验收）
-- [ ] 字体打包进 `resources/fonts/`（不依赖系统楷体）
+- [x] **强制生图失败时自动回落 A 版并出片成功**（真机 2026-09-13）：
+      显式要 `illustration` 但两幕无 `image_uri` → `CreateRenderJob` 返回
+      `styleId=ink_text` / `degradedFrom=illustration` /
+      `degradedReason="style 'illustration' requires an image per scene, but
+      2 scene(s) lack image_uri (run IllustrateScenes); rendered with fallback
+      style 'ink_text'"`；成片 **h264 1080×1920 30fps 5.112s + aac**（0.36 MB）。
+      复现脚本 `.workbuddy/s3-acceptance/s3_degrade.py`，日志 `s3_run1.log`
+- [ ] **字体打包进 `resources/fonts/`（不依赖系统楷体）**：**partial** ——
+      黑体族（阿里普惠体 / 得意黑）已打包并自动注入；**楷体族仍未打包**，
+      A 版 `_PAPER_CSS` 仍回落系统楷体栈 → 本判据未达成。待裁决（见上「字体打包」条）
 
 **依赖**：S2
 

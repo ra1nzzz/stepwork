@@ -106,6 +106,6 @@ settings_page_plan.md  README.md（旧）
 | 真实代码在哪 | `COMPLETED.md` §1 + `REPOSITIONING.md` §6 |
 | 哪些是假实现 | `COMPLETED.md` §3 ⛔ |
 | 哪些目录是空的 | `COMPLETED.md` §4 |
-| 现在该做什么 | `ROADMAP.md` §3（S1） |
+| 现在该做什么 | `ROADMAP.md` §2「当前状态」+ §3（路线） |
 | 能复用什么 | `REFERENCE.md` §2–3 |
 | 有什么外部风险 | `REFERENCE.md` §4（StepFun 生图 2026-10-10 下线） |

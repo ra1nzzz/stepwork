@@ -200,6 +200,10 @@ plugins/{official,registry}
 | 2026-09-10 | **S5 热点筛选与推荐机制落地**（弈韬：「产品本身是 Agent，需要有热点筛选和推荐机制」）：新增 `worker/runtime/hotspot/`（`mcp.py` 对接 / `rank.py` **纯函数**打分 / `models.py` 事实形状）+ `migrations/0014`（`hotspot_items` + `hotspot_feedback`）+ 4 个命令（`ListHotspotSources` / `DiscoverHotspots` / `RecommendHotspots` / `RecordHotspotFeedback`）+ CLI `hotspots` 子命令 + 结果契约。五维加权打分（品牌契合 0.30 / 时效 0.30 / **源内分位**热度 0.20 / 新颖度 0.10 / 反馈 0.10），禁用表达是**乘性**惩罚。理由由 AI 写、失败降级规则模板且 `reasonSource` 如实标 `rule`。反馈闭环可改变下一轮排序。发现与推荐**分成两个命令**：发现取事实（换源不影响下游），推荐下判断（吃画像/历史/反馈），合一个就没法「换个角度重推」而不重抓全网 |
 | 2026-09-10 | **热点 → 选题打通（方案 A，弈韬裁决）**：新增 `ConvertHotspotToTopic` + `hotspot/brief.py`（**纯函数**拼装）+ `HotspotRepo.get` / `ContentVersionRepo.find_by_hash`。热点是**外部未核实**内容（PRD-AGT-003），不能直接产出选题 —— 中间落一份「选题简报」`content_versions(content_type='hotspot_brief')`，`producer` 带 `trustLevel=external-unverified` + `reviewState=pending_review`（**复用** `agents/channel.py` 的同一套常量，UI 一套逻辑筛出全部待复核产物）+ `sourceUrl`/`hotspotId`/`batchId`。免责头写在**正文里**（下游读的就是 content 文本，写别处躲不开）。理由与打分分解**由调用方回传、命令不重算不猜**，没带就如实写 `reason_source="none"`（**绝不编一句听起来合理的理由**）。同输入按内容哈希复用（Agent 重试不刷版本），理由变了则是新版本。转换**不调 AI 故不建 job**（同 `ImportSource` 本地文件路径）。确认后交给**既有** `GenerateTopic`——那条链路**零改动**。真机验收（40 条真实热点）PASS，报告 `.workbuddy/hotspot-acceptance/convert-report.md` |
 | 2026-09-10 | **修既有缺陷：MCP 错误丢 stderr**（真机验收撞到）。`hotspot/mcp.py` 把 `McpClientError` 拍平成 `str(e)`，丢掉 `detail.stderr`，于是包没装时报「Server 在响应前退出」——真正原因（`ModuleNotFoundError`）就在 stderr 里。通用路径 `handlers/mcp_client.py` 早有 `_with_diagnostic`（还带 §11.3 密钥掩码），只是热点这条路没用。**上移**为 `agents/mcp_client.describe_error()`（与 `McpClientError` 同层，避免 domain→handler 倒挂），两处共用，不再有第 3 份拷贝 |
+| 2026-09-13 | **修全线缺陷：Windows 注册表残留代理打死所有出站请求**。`httpx` 默认 `trust_env=True` → `urllib.request.getproxies()` 读 `HKCU\...\Internet Settings`；用户关掉代理后 `ProxyEnable=1` / `ProxyServer=127.0.0.1:7897` **不会自动清** → AI / TTS / ASR / 图像 / 下载**全线 `ConnectError`**（判据：**curl 能通但 Python 不通**）。新增 `worker/runtime/net.py::make_async_client()`：代理照继承，但 **TCP 0.25s 探测不通就当没配**（`trust_env=False`），**不一刀切**（会把真靠代理访问海外的用户打回不可用）；8 处客户端构造点全改走它，另加**结构性护栏测试**（全仓除 `net.py` 外禁止裸 `httpx.Client(` / `AsyncClient(`）。12 条新测试；`agent_created` skill `windows-stale-proxy-http` 已沉淀 |
+| 2026-09-13 | **StepFun TTS 端到端打通**（S2 配音段收口）：`setx` 落 5 个用户级 env（`STEPWORK_TTS_PROVIDER` / `_API_KEY` / `_VOICE` / `_MODEL` + `STEPWORK_FFMPEG_BIN`）；探针两条不同文案各出 mp3（36.0 KB / 41.8 KB，**MD5 互异**，7.41 / 6.75 字/秒）；`SynthesizeScenes` 三幕出片 + 7.08 s 整轨。**该 key 在 PLAN 端点只有 `stepaudio-2.5-tts` 有权**，错模型返 `404 + body.type="model_invalid"`（**不是 403**）→ `_error_message` 先认 `model_invalid` 再谈状态码。报告 `.workbuddy/tts-acceptance/` |
+| 2026-09-13 | **S3 状态更新为「✅ 已完成（遗留 1 项）」+ 真机验收闭环**：显式要 `illustration` 但两幕无 `image_uri` → `CreateRenderJob` 返回 `styleId=ink_text` / `degradedFrom=illustration` / `degradedReason` 指名缺失原因（不静默）；成片 h264 1080×1920 30fps 5.112 s + aac。复现脚本 `.workbuddy/s3-acceptance/s3_degrade.py`（日志 `s3_run1.log`）。**仍余**：A 版 `_PAPER_CSS` 仍回落系统楷体栈（楷体未打包，待裁决） |
+| 2026-09-13 | **文档对齐现状**（本次）：`ROADMAP.md` 头部日期 + `## 2. 当前状态` 改为快照表、删「下一步待启动：S1」、S3 标题改 ✅ 并按真机依据勾验收框；`COMPLETED.md` §5 登录 2026-09-13 三事并更新 S2/S3 遗留清单 |
 
 **S2 剩余遗留项（2026-09-09 更新）**
 
@@ -209,7 +213,9 @@ plugins/{official,registry}
 4. **抽帧目检撞切句瞬间取空字幕** → `video_scenes.born_at_sec` 已由**渲染步骤**
    回填（第 14 条，S2 打通渲染即回填）—— 抽帧目检据此前移取样点，
    不再依赖 `__getSentBorn`
-5. **`RenderSpec.style_id` / `art_style` / `image_set_id` 仍未被 Renderer 消费** —— S3 模板层按能力声明（`{image}` / `{}`）选型时接通
+5. ✅ **`RenderSpec.style_id` 已由 Renderer 消费**（S3，2026-09-13 真机验收：
+   内置 A/B 视觉稿按能力声明选型，「缺配图 → 降级 A 版」全链闭环）；
+   `art_style` / `image_set_id` 仍未接入渲染路径（`image_set_id` 尚无表承载）
 6. **生图 Provider 选型未定**：StepFun 生图 2026-10-10 下线，`REFERENCE.md §6` 标「未定」（通义万相 / CogView-4 / 硅基流动 / 本地 SDXL 待实测）。**image provider 接口已先落地**（`ImageProvider` 协议），厂商适配器后补
 7. ✅ **TTS Provider（stepfun 复刻音色）已落地**（2026-09-09）：
    `providers/tts/stepfun.py` + `resolve_tts(kind=stepfun)` +
@@ -261,7 +267,9 @@ plugins/{official,registry}
     配音（实测时间轴）→逐幕配图（接口就绪）→按幕渲染，字幕按实测时间轴。
     分幕不再是孤岛，每一段都有「生产端」调用方（无死挂点）
 
-**S2 收尾 / S3 待办**（见 `ROADMAP.md`）：前端仍无分幕 UI（P4 缺口，S6 补）；
-`RenderSpec.style_id`/`art_style`/`image_set_id` 真正接入渲染（S3 风格层）；
+**S2 收尾 / S3 遗留**（见 `ROADMAP.md` §S3）：前端仍无分幕 UI（P4 缺口，S6 补）；
+`RenderSpec.style_id` 已接入渲染并**真机验收**（2026-09-13，含「缺配图 → 降级 A 版」
+链路），`art_style` / `image_set_id` 仍未接入渲染路径；
 `drawtext` 版 FFmpegRenderer 仍吃整段文本（保持原样）；
-**插画版真实出片验收**（适配器就绪但本机无生图密钥，待选厂商 + 配密钥）
+**插画版真实生图出片验收**（适配器就绪但本机无生图密钥，待选厂商 + 配密钥）；
+**A 版楷体未打包**（`_PAPER_CSS` 仍回落系统楷体栈，属渲染视觉变更，待裁决）
