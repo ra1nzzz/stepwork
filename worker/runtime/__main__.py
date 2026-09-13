@@ -72,6 +72,67 @@ JSONRPC_UNAUTHORIZED: int = -32001
 _SESSION_TOKEN_KEY: str = "_session_token"
 """请求 params 中携带 session token 的保留字段名。"""
 
+_STDIO_HINT = """\
+提示：本进程是 **stdio 侧车**，不是交互式 CLI。
+
+它用 4 字节大端长度前缀 + UTF-8 JSON 的 JSON-RPC 2.0 帧说话，设计上由父进程
+（Tauri 桌面端）以管道方式启动并喂帧。你手动跑起来时看到的 runtime.ready 与
+每 5 秒一条的 runtime.heartbeat，就是它在**等一个永远不会来的帧**。
+
+想确认它是否正常：
+    stepwork-worker.exe --selfcheck                    # 冻结进程内核对随包资源（JSON）
+    python scripts/test_sidecar.py "<这个 exe 的路径>"   # 手工发帧冒烟：ready → health → shutdown
+
+（本提示只写 stderr，且仅在 stdin 是终端时出现 —— 不影响 stdout 上的帧协议。）"""
+
+
+def _is_console_handle(stream: Any) -> bool:
+    """``stream`` 的句柄是不是**真控制台**（而不是 NUL 之类的字符设备）。
+
+    ``isatty()`` 单独用不够：Windows 上 CRT 的 ``_isatty`` 只问「是不是字符
+    设备」，而 ``NUL`` **正是**字符设备 —— 于是 ``< NUL`` /
+    ``subprocess.DEVNULL`` / Rust 的 ``Stdio::null()`` 都被判成「人在终端前」
+    （实测 3.12.4：DEVNULL → ``True``，PIPE → ``False``）。用 ``GetConsoleMode``
+    收窄：它只对真控制台句柄成功。
+
+    非 Windows 直接 ``True``（那儿的 ``isatty()`` 已经够准）；拿不到
+    ``fileno`` 的替身也 ``True`` —— 它们已经过了 ``isatty()`` 那道闸，这里
+    只负责再收窄 Windows 的误判。
+    """
+    if sys.platform != "win32":
+        return True
+    try:
+        import ctypes
+        import msvcrt
+
+        handle = msvcrt.get_osfhandle(stream.fileno())
+    except (AttributeError, OSError, ValueError):
+        return True
+    mode = ctypes.c_uint32()
+    return bool(ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
+
+
+def console_hint(stdin: Any = None) -> str | None:
+    """``stdin`` 是人手终端（而非父进程管道）时返回提示文案，否则 ``None``。
+
+    Args:
+        stdin: 待探测的流；缺省取 ``sys.stdin``（**调用时**取，便于测试替换）。
+
+    Returns:
+        提示文案（人坐在终端前，协议上永远等不到帧）；**管道 / 文件 / NUL
+        重定向 / 测试替身**一律 ``None`` —— 那些场景下帧会来（或根本没人看），
+        不该插话。
+    """
+    stream = sys.stdin if stdin is None else stdin
+    try:
+        interactive = bool(stream.isatty())
+    except (AttributeError, ValueError):
+        # 没有 isatty（测试里的 SimpleNamespace 等替身）→ 视为非终端，不插话
+        return None
+    if not interactive:
+        return None
+    return _STDIO_HINT if _is_console_handle(stream) else None
+
 
 def _stdin_binary() -> BufferedReader:
     """返回 stdin 的二进制缓冲对象。
@@ -239,6 +300,12 @@ async def amain() -> int:
         进程退出码（0 表示正常）。
     """
     configure_logging()
+
+    # 手动跑（stdin 是终端）时给一句解释：否则只会看到 ready + 每 5s 心跳，
+    # 看上去像「卡住了」。写到 stderr —— stdout 是帧协议通道，绝不能碰。
+    hint = console_hint()
+    if hint is not None:
+        print(hint, file=sys.stderr, flush=True)
 
     monotonic_start = time.monotonic()
     state = WorkerState(monotonic_start=monotonic_start)

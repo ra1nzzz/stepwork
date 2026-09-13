@@ -78,6 +78,18 @@ dist\worker-sidecar\stepwork-worker.exe --selfcheck
   另一条片子）。playwright 的浏览器二进制 pip 装不了，开了也仍需
   `playwright install chromium`。
 
+### 手动跑起来「像卡住」是正常的
+
+在终端里直接跑这个 exe，只会看到一条 `runtime.ready` 和此后每 5 秒一条
+`runtime.heartbeat`，然后就没有下文了 —— 这不是挂了。它是 **stdio 侧车**，
+设计上由父进程（Tauri 桌面端）用管道启动并喂帧；人在终端里跑，它等的是一个
+**永远不会来的帧**。
+
+检测到 `stdin` 是终端时，它会往 **stderr** 写一句同样的说明（探针是
+`runtime.console_hint()`，`worker/tests/test_console_hint.py` 钉住两条红线：
+管道场景一个字都不写、提示绝不落进 stdout）。stdout 只走帧 —— 帧是长度前缀的，
+混进任意一个非帧字节都会让父进程的解析器读到半截，且**无法自愈**。
+
 ## 协议方法（W1 最小集）
 
 | Method | Params | Result | 类型 |

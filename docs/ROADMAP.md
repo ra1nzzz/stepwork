@@ -33,10 +33,10 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
 |---|---|
 | 阶段 | **S0–S6 ✅ 已闭合 · S7 进行中 · S8 未开始** |
 | 命令类型（契约） | 99 条（`schemas/command-envelope.schema.json` 的 `commandType.enum`） |
-| 门禁 | `ruff check .` 全仓 · `mypy --strict`（worker / cli+mcp+scripts）· `pytest -m "not perf"` → **985 passed / 1 skipped** |
+| 门禁 | `ruff check .` 全仓 · `mypy --strict`（worker / cli+mcp+scripts）· `pytest -m "not perf"` → **990 passed / 1 skipped** |
 | 能力对等（P4） | CLI 可达性缺口 **0**、一等公民缺口 **0** —— `scripts/check_ui_parity.py` |
 | MCP 工具面 | 与命令总线一致 —— `scripts/check_mcp_surface.py`（A–H 全绿）；入站真机链路 `mcp/tests/test_mcp_e2e.py` |
-| 桌面端打包 | 侧车 exe ✅ 可产出并真机验收（69.55 MB，`--selfcheck` + JSON-RPC 双链路全过）；**NSIS 安装包未端到端跑过** |
+| 桌面端打包 | 侧车 exe ✅ 可产出并真机验收（69.6 MB，`--selfcheck` + JSON-RPC + 真控制台提示三链路全过）；**NSIS 安装包未端到端跑过**；⚠️ 冻结态首字节 ~5 s（`startup_ms` 不含解包，见 §2） |
 | Ontology 侧 stepwork 映射 | ❌ **不存在**（需补 `mappings/stepwork.yaml` 等三份） |
 
 **在办：S7 发布引擎。** 接口层（`providers/publish/` 协议 + 三态）与前端入口已落地，
@@ -46,9 +46,17 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
 **桌面端打包（2026-09-13 推进）。** `packaging/stepwork-worker.spec` +
 `scripts/build_worker_sidecar.ps1` 已能把 worker 打成单文件侧车并投递到
 `apps/desktop/src-tauri/binaries/`（Tauri `externalBin` 要的 target-triple 文件名），
-验收脚本 `.workbuddy/packaging-acceptance/accept_sidecar.py` 全绿。**未做的下一步**：
+验收脚本 `.workbuddy/packaging-acceptance/accept_sidecar.py` + 真控制台探针
+`probe_console_hint.py` 全绿。**未做的下一步**：
 `cargo tauri build` 出 NSIS 安装包并装到干净机器上跑一次 —— sidecar 有了不等于
 安装包能用（图标 / WebView2 bootstrapper / 安装路径下的 `STEPWORK_HOME` 都还没验）。
+
+⚠️ **`startup_ms` 不是用户感知的启动延迟**（2026-09-13 实测）：它由
+`worker/runtime/__main__.py` 从 Python 侧 `time.monotonic()` 起算，
+**不含 PyInstaller 引导器把 70 MB 解包到临时目录的那段**。真机首字节实测
+**+4.97 s**（源码模式 0.7 s，冻结态被解包吃满）。仪表读数好看（`startup_ms=140`）
+不等于用户等得短 —— 若桌面端启动体感不可接受，备选是 `--onedir`（解包一次、后续快）
+或把侧车随安装包以目录形式分发。**在那之前别拿 `startup_ms` 当启动性能的证据。**
 
 ---
 
