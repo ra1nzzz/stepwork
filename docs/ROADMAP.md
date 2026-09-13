@@ -31,9 +31,9 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
 
 | 项 | 状态 |
 |---|---|
-| 阶段 | **S0–S6 ✅ 已闭合 · S7 进行中 · S8 未开始**（S3 尚余 1 项遗留：A 版楷体未打包，见该节） |
+| 阶段 | **S0–S6 ✅ 已闭合 · S7 进行中 · S8 未开始** |
 | 命令类型（契约） | 99 条（`schemas/command-envelope.schema.json` 的 `commandType.enum`） |
-| 门禁 | `ruff check .` 全仓 · `mypy --strict`（worker / cli+mcp+scripts）· `pytest -m "not perf"` → **974 passed / 1 skipped** |
+| 门禁 | `ruff check .` 全仓 · `mypy --strict`（worker / cli+mcp+scripts）· `pytest -m "not perf"` → **975 passed / 1 skipped** |
 | 能力对等（P4） | CLI 可达性缺口 **0**、一等公民缺口 **0** —— `scripts/check_ui_parity.py` |
 | MCP 工具面 | 与命令总线一致 —— `scripts/check_mcp_surface.py`（A–H 全绿）；入站真机链路 `mcp/tests/test_mcp_e2e.py` |
 | Ontology 侧 stepwork 映射 | ❌ **不存在**（需补 `mappings/stepwork.yaml` 等三份） |
@@ -119,7 +119,7 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
 
 ---
 
-### S3 · 风格层：风格可选 + 降级 ✅ 已完成（遗留 1 项：A 版楷体未打包）
+### S3 · 风格层：风格可选 + 降级 ✅ 已完成（2026-09-13 全部闭合）
 
 **目标**：版式风格与美术风格正交可选；A 版作为 B 版的降级路径。
 
@@ -143,15 +143,19 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
 - **`base.html.j2` 不引入 jinja2（YAGNI 裁决）**：现方案「python 常量拼接」已达成
   「骨架单源 + 每风格只覆写画面函数」的目标（shared scaffold + `window._paint`），
   且零新依赖。第三风格出现后若资产组织真的难维护，再抽模板引擎，不提前上框架
-- **字体打包（已落地，2026-09-10 起）**：`resources/fonts/` 已建；`styles.py`
-  `font_face_css()` 自动扫描注入 `@font-face`（加字体不用改代码，file:// 绝对
-  URI，渲染器已带 allow-file-access）。**已打包 2 款**：阿里巴巴普惠体 2.0
-  （55/65/85 三字重 + 授权 PDF，illustration 正文/字幕条）与得意黑 SmileySans
-  （OFL-1.1，标题金句）。⚠️ **A 版（`ink_text`）仍未闭环**：
-  `styles.py::_PAPER_CSS` 首选系统楷体栈（`"Kaiti SC" / "STKaiti" / "KaiTi"`），
-  `_FONT_META` 未登记楷体族 —— 纸墨文字版出片仍随渲染机/观看机的系统楷体而异，
-  正是 `resources/fonts/README.md` 开篇声明要消除的那类差异。补楷体需选一款
-  允许再分发的开源楷体（如霞鹜文楷 LXGW WenKai），**属渲染视觉变更，待裁决**
+- **字体打包（已落地，2026-09-10 起；2026-09-13 补齐楷体）**：`resources/fonts/`
+  已建；`styles.py` `font_face_css()` 自动扫描注入 `@font-face`（加字体不用改代码，
+  file:// 绝对 URI，渲染器已带 allow-file-access）。**已打包 3 款**：
+  - **霞鹜文楷 LXGW WenKai v1.522 Regular**（OFL-1.1，25.5 MB）→ **A 版
+    `ink_text` 字体栈首选**。此前 A 版首选系统楷体，Windows 落到 `simkai.ttf`、
+    **没装楷体的机器一路掉到泛型 `serif`（宋体）**；现在系统楷体栈降为兜底
+  - **阿里巴巴普惠体 2.0**（55/65/85 三字重 + 授权 PDF）→ `illustration` 正文/字幕条
+  - **得意黑 SmileySans**（OFL-1.1）→ 标题金句
+  - 护栏：`test_render_styles.py::test_every_style_prefers_a_bundled_family`
+    断言「每个风格字体栈的首选家族必须来自已打包字体，且该家族真的有对应
+    `@font-face`」—— 名字写错会**静默回落系统字体**，没这条断言看不出来
+  - 单字重策略：A 版 `font-weight: 700` 由浏览器合成粗体（与系统楷体同）；
+    不额外进 Medium（再 +24 MB）
 - 待补（已点名但源/许可待处理）：阿里妈妈方圆体 VF / 钉钉进步体 /
   沐瑶软笔手写体（官方渠道手动下载丢进子目录即可）；优设字由棒棒体 /
   懒设计字由公益体 **不打包**（字由客户端专属、禁止转发，许可不允许再分发）
@@ -167,9 +171,14 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
       2 scene(s) lack image_uri (run IllustrateScenes); rendered with fallback
       style 'ink_text'"`；成片 **h264 1080×1920 30fps 5.112s + aac**（0.36 MB）。
       复现脚本 `.workbuddy/s3-acceptance/s3_degrade.py`，日志 `s3_run1.log`
-- [ ] **字体打包进 `resources/fonts/`（不依赖系统楷体）**：**partial** ——
-      黑体族（阿里普惠体 / 得意黑）已打包并自动注入；**楷体族仍未打包**，
-      A 版 `_PAPER_CSS` 仍回落系统楷体栈 → 本判据未达成。待裁决（见上「字体打包」条）
+- [x] **字体打包进 `resources/fonts/`（不依赖系统楷体）**（2026-09-13）：
+      进 **霞鹜文楷 LXGW WenKai v1.522**（OFL-1.1，25.5 MB，原样捆绑 + 授权原文），
+      `_FONT_META` 登记家族名，`_PAPER_CSS` 首选改为 `"LXGW WenKai"`（系统楷体栈降兜底），
+      `_STYLE_VERSION` bump 到 3 使旧稿缓存失效。
+      **CDP 实测**（同 t 同一份稿，`font_probe.py`）：换前 `#txt` 落地 `KaiTi`
+      （`isCustomFont=False`）→ 换后落地 `LXGW WenKai`（`isCustomFont=True`，
+      像素差 2.19%）；对照「无楷体机器」落地 `SimSun`（宋体，气质完全不同）
+      —— 这就是本次要消除的风险。预览 `preview/zoom_t*.png`（三方并排 ×2 放大）
 
 **依赖**：S2
 

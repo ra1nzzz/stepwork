@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,7 @@ from worker.runtime.render.styles import (
     DEFAULT_FALLBACK_STYLE,
     STYLES,
     build_style_document,
+    bundled_fonts,
     list_styles,
     resolve_style,
     style_document,
@@ -98,6 +100,45 @@ def test_bundled_fonts_injected_as_face() -> None:
     # 视觉稿已包含注入的 @font-face（不依赖任何系统字体即可渲染）
     html = style_document("illustration").read_text(encoding="utf-8")
     assert "@font-face" in html
+
+
+_FAMILY_RE = re.compile(r"font-family:\s*([^;]+);")
+
+
+def _css_first_family(css: str) -> str:
+    """取风格 CSS 里**第一条** font-family 声明的首选家族（去引号）。"""
+    m = _FAMILY_RE.search(css)
+    assert m is not None, "风格 CSS 没有 font-family 声明"
+    return m.group(1).split(",")[0].strip().strip("'\"")
+
+
+def test_every_style_prefers_a_bundled_family() -> None:
+    """结构性护栏：每个风格字体栈的**首选家族必须来自已打包字体**。
+
+    只在系统字体栈里选首发 → 出片字形随渲染机/观看机而异。A 版曾经如此：
+    首选 macOS 的 ``"Kaiti SC"``，Windows 落到 ``simkai.ttf``，而**没有楷体
+    家族的机器（不少 Linux / CI 容器）会一路掉到泛型 serif（宋体）** ——
+    气质完全不同，且没有任何报错。
+
+    第二条断言是本次真机踩出来的：首选家族必须**真的出现在 @font-face 里**。
+    家族名来自 ``_FONT_META``（改字体栈却没改它，或反过来）→ 那个名字没有
+    对应 ``@font-face`` → **静默回落系统字体**，光看代码完全看不出来。
+    """
+    from worker.runtime.render.styles import font_face_css
+
+    faces = font_face_css()
+    bundled = {str(f["family"]) for f in bundled_fonts()}
+    assert bundled, "resources/fonts 为空：风格层不应再依赖系统字体"
+    for style in STYLES.values():
+        family = _css_first_family(style.css)
+        assert family in bundled, (
+            f"风格 {style.id} 字体栈首选 {family!r} 不是已打包字体"
+            f"（已知：{sorted(bundled)}）"
+        )
+        assert f"font-family: '{family}';" in faces, (
+            f"风格 {style.id} 首选 {family!r} 没有对应 @font-face —— "
+            "会静默回落到系统字体"
+        )
 
 
 def test_local_fonts_dir_is_scanned_and_repo_wins_dups(

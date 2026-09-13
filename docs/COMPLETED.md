@@ -202,8 +202,10 @@ plugins/{official,registry}
 | 2026-09-10 | **修既有缺陷：MCP 错误丢 stderr**（真机验收撞到）。`hotspot/mcp.py` 把 `McpClientError` 拍平成 `str(e)`，丢掉 `detail.stderr`，于是包没装时报「Server 在响应前退出」——真正原因（`ModuleNotFoundError`）就在 stderr 里。通用路径 `handlers/mcp_client.py` 早有 `_with_diagnostic`（还带 §11.3 密钥掩码），只是热点这条路没用。**上移**为 `agents/mcp_client.describe_error()`（与 `McpClientError` 同层，避免 domain→handler 倒挂），两处共用，不再有第 3 份拷贝 |
 | 2026-09-13 | **修全线缺陷：Windows 注册表残留代理打死所有出站请求**。`httpx` 默认 `trust_env=True` → `urllib.request.getproxies()` 读 `HKCU\...\Internet Settings`；用户关掉代理后 `ProxyEnable=1` / `ProxyServer=127.0.0.1:7897` **不会自动清** → AI / TTS / ASR / 图像 / 下载**全线 `ConnectError`**（判据：**curl 能通但 Python 不通**）。新增 `worker/runtime/net.py::make_async_client()`：代理照继承，但 **TCP 0.25s 探测不通就当没配**（`trust_env=False`），**不一刀切**（会把真靠代理访问海外的用户打回不可用）；8 处客户端构造点全改走它，另加**结构性护栏测试**（全仓除 `net.py` 外禁止裸 `httpx.Client(` / `AsyncClient(`）。12 条新测试；`agent_created` skill `windows-stale-proxy-http` 已沉淀 |
 | 2026-09-13 | **StepFun TTS 端到端打通**（S2 配音段收口）：`setx` 落 5 个用户级 env（`STEPWORK_TTS_PROVIDER` / `_API_KEY` / `_VOICE` / `_MODEL` + `STEPWORK_FFMPEG_BIN`）；探针两条不同文案各出 mp3（36.0 KB / 41.8 KB，**MD5 互异**，7.41 / 6.75 字/秒）；`SynthesizeScenes` 三幕出片 + 7.08 s 整轨。**该 key 在 PLAN 端点只有 `stepaudio-2.5-tts` 有权**，错模型返 `404 + body.type="model_invalid"`（**不是 403**）→ `_error_message` 先认 `model_invalid` 再谈状态码。报告 `.workbuddy/tts-acceptance/` |
-| 2026-09-13 | **S3 状态更新为「✅ 已完成（遗留 1 项）」+ 真机验收闭环**：显式要 `illustration` 但两幕无 `image_uri` → `CreateRenderJob` 返回 `styleId=ink_text` / `degradedFrom=illustration` / `degradedReason` 指名缺失原因（不静默）；成片 h264 1080×1920 30fps 5.112 s + aac。复现脚本 `.workbuddy/s3-acceptance/s3_degrade.py`（日志 `s3_run1.log`）。**仍余**：A 版 `_PAPER_CSS` 仍回落系统楷体栈（楷体未打包，待裁决） |
+| 2026-09-13 | **S3 状态更新为「✅ 已完成（遗留 1 项）」+ 真机验收闭环**：显式要 `illustration` 但两幕无 `image_uri` → `CreateRenderJob` 返回 `styleId=ink_text` / `degradedFrom=illustration` / `degradedReason` 指名缺失原因（不静默）；成片 h264 1080×1920 30fps 5.112 s + aac。复现脚本 `.workbuddy/s3-acceptance/s3_degrade.py`（日志 `s3_run1.log`）。**当时仍余**：A 版 `_PAPER_CSS` 回落系统楷体栈（→ **同日晚些已闭合，见下一行**） |
 | 2026-09-13 | **文档对齐现状**（本次）：`ROADMAP.md` 头部日期 + `## 2. 当前状态` 改为快照表、删「下一步待启动：S1」、S3 标题改 ✅ 并按真机依据勾验收框；`COMPLETED.md` §5 登录 2026-09-13 三事并更新 S2/S3 遗留清单 |
+| 2026-09-13 | **S3 最后一项遗留闭合：A 版楷体打包**（弈韬裁决）。进 **霞鹜文楷 LXGW WenKai v1.522 Regular**（OFL-1.1，**25.5 MB**，md5 `b653fcc2…`，**原样捆绑** + `LICENSE-OFL.txt`）→ `resources/fonts/lxgw-wenkai/`；`_FONT_META` 登记 `("LXGW WenKai", 400)`；`_PAPER_CSS` 字体栈首选改 `"LXGW WenKai"`（系统楷体栈降兜底）；`_STYLE_VERSION` 2→3 令旧稿缓存失效。动因：A 版是 `illustration` 的默认降级落点，此前首选系统楷体 —— Windows 落到 `simkai.ttf`，**没装楷体的机器（不少 Linux / CI 容器）一路掉到泛型 `serif` → 宋体**。判据不靠肉眼：用 CDP `CSS.getPlatformFontsForNode` 实测换前 `KaiTi`(`isCustomFont=False`) / 换后 `LXGW WenKai`(`True`) / 无楷体机器 `SimSun`（`document.fonts.check` 与「量文字宽度」两条常用判据**双双失效**，详见 `resources/fonts/README.md` 与 pitfalls）。新增**结构性护栏** `test_render_styles.py::test_every_style_prefers_a_bundled_family`（首选家族必须在已打包集合内**且**有对应 `@font-face`），三组负向验证逐条点名命中 |
+| 2026-09-13 | **顺带记录一处未修的既有缺陷**：`styles.py::font_face_css()` 的 `format()` 写死 `'truetype'`（`.otf` 应为 `opentype`、`.woff2` 应为 `woff2`）。当前仓库只有 ttf 故未暴露；**若日后走「TTF 转 woff2 压体积」必须先修这里** |
 
 **S2 剩余遗留项（2026-09-09 更新）**
 
@@ -271,5 +273,5 @@ plugins/{official,registry}
 `RenderSpec.style_id` 已接入渲染并**真机验收**（2026-09-13，含「缺配图 → 降级 A 版」
 链路），`art_style` / `image_set_id` 仍未接入渲染路径；
 `drawtext` 版 FFmpegRenderer 仍吃整段文本（保持原样）；
-**插画版真实生图出片验收**（适配器就绪但本机无生图密钥，待选厂商 + 配密钥）；
-**A 版楷体未打包**（`_PAPER_CSS` 仍回落系统楷体栈，属渲染视觉变更，待裁决）
+**插画版真实生图出片验收**（适配器就绪但本机无生图密钥，待选厂商 + 配密钥）。
+S3 的字体项已于 2026-09-13 闭合（霞鹜文楷进 `resources/fonts/`，A 版不再依赖系统楷体）

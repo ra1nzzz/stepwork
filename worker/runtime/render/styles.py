@@ -56,11 +56,14 @@ def _local_fonts_dir() -> Path:
 
 #: 已知字体的家族名登记（文件名无法推断时才需要）。键 = 文件名；值 =
 #: (css family, weight)。同族不同字重以 weight 区分，@font-face 按需取用。
+#: 注意：家族名必须与下面各风格 CSS 里写的名字**逐字一致** —— 写错不会有任何
+#: 报错，只会静默回落到系统字体（`_PAPER_CSS` 就踩过这个坑）。
 _FONT_META: dict[str, tuple[str, int]] = {
     "AlibabaPuHuiTi-2-55-Regular.ttf": ("Alibaba PuHuiTi", 400),
     "AlibabaPuHuiTi-2-65-Medium.ttf": ("Alibaba PuHuiTi", 500),
     "AlibabaPuHuiTi-2-85-Bold.ttf": ("Alibaba PuHuiTi", 700),
     "SmileySans-Oblique.ttf": ("Smiley Sans", 400),
+    "LXGWWenKai-Regular.ttf": ("LXGW WenKai", 400),
 }
 
 
@@ -95,7 +98,11 @@ body {
     radial-gradient(1200px 1200px at 50% 42%, rgba(120,100,70,.10), rgba(0,0,0,0) 70%),
     #f2ecdd;
   color: #26221a;
-  font-family: "Kaiti SC", "STKaiti", "KaiTi", "Noto Serif CJK SC", serif;
+  /* 打包楷体优先（resources/fonts/lxgw-wenkai，@font-face 注入）—— A 版是降级
+     落点，字形必须跨机器确定；下面的系统楷体栈只是「字体目录被清空」时的兜底，
+     且在没有楷体家族的机器上会一路掉到 serif（宋体），气质完全不同 */
+  font-family: "LXGW WenKai", "Kaiti SC", "STKaiti", "KaiTi",
+    "Noto Serif CJK SC", serif;
   position: relative;
 }
 /* 纸纹（细噪点，零外部资源） */
@@ -281,7 +288,7 @@ STYLES: dict[str, StyleDef] = {
 DEFAULT_FALLBACK_STYLE = "ink_text"
 
 #: 风格版本戳 —— 改 CSS/JS/字体注入后 bump，缓存文件名随之变化，避免旧文件复活
-_STYLE_VERSION = "2"
+_STYLE_VERSION = "3"
 
 
 # --------------------------------------------------------------------------
