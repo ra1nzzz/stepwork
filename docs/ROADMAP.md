@@ -36,20 +36,32 @@ AGPL 保持 · 热点走独立 MCP Server · Agent 原生双向 · GUI/CLI 一�
 | 门禁 | `ruff check .` 全仓 · `mypy --strict`（worker / cli+mcp+scripts）· `pytest -m "not perf"` → **990 passed / 1 skipped** |
 | 能力对等（P4） | CLI 可达性缺口 **0**、一等公民缺口 **0** —— `scripts/check_ui_parity.py` |
 | MCP 工具面 | 与命令总线一致 —— `scripts/check_mcp_surface.py`（A–H 全绿）；入站真机链路 `mcp/tests/test_mcp_e2e.py` |
-| 桌面端打包 | 侧车 exe ✅ 可产出并真机验收（69.6 MB，`--selfcheck` + JSON-RPC + 真控制台提示三链路全过）；**NSIS 安装包未端到端跑过**；⚠️ 冻结态首字节 ~5 s（`startup_ms` 不含解包，见 §2） |
+| 桌面端打包 | ✅ 全套链路已跑通：侧车 69.6 MB → NSIS 安装包 73.3 MB（内含侧车 + WebView2 引导器，7-Zip 逐条核对）；**尚未安装本机实跑**（`STEPWORK_HOME` 落点 / 父子进程真链路 / UI 都未验）；⚠️ 冻结态首字节 ~5 s（`startup_ms` 不含解包，见 §2） |
 | Ontology 侧 stepwork 映射 | ❌ **不存在**（需补 `mappings/stepwork.yaml` 等三份） |
 
 **在办：S7 发布引擎。** 接口层（`providers/publish/` 协议 + 三态）与前端入口已落地，
 剩余验收是「至少 1 个平台打通 fill + 存草稿闭环」与「`platform_variants` /
 `publish_jobs` 接通」；`publisher-engine/` 仍是 5 个 `.gitkeep`（实现层未开工）。
 
-**桌面端打包（2026-09-13 推进）。** `packaging/stepwork-worker.spec` +
-`scripts/build_worker_sidecar.ps1` 已能把 worker 打成单文件侧车并投递到
-`apps/desktop/src-tauri/binaries/`（Tauri `externalBin` 要的 target-triple 文件名），
-验收脚本 `.workbuddy/packaging-acceptance/accept_sidecar.py` + 真控制台探针
-`probe_console_hint.py` 全绿。**未做的下一步**：
-`cargo tauri build` 出 NSIS 安装包并装到干净机器上跑一次 —— sidecar 有了不等于
-安装包能用（图标 / WebView2 bootstrapper / 安装路径下的 `STEPWORK_HOME` 都还没验）。
+**桌面端打包（2026-09-14 打通）。** 完整链路已跑通一次：
+`scripts/build_worker_sidecar.ps1` 打侧车 → 投递到 `src-tauri/binaries/`
+（Tauri `externalBin` 要的 target-triple 文件名）→ `apps/desktop` 下
+`npx tauri build`（**CLI 在 `node_modules` 里，不用另装 `cargo-tauri`**）→
+NSIS 安装包。**产出与结构核对**：
+
+| 产物 | 体积 | 说明 |
+|---|---|---|
+| `target/release/bundle/nsis/STEPWORK_0.1.0_x64-setup.exe` | 73.3 MB | 安装包（**PE-32**，NSIS 引导桩是 32 位，正常）|
+| `target/release/stepwork-desktop.exe` | 6.7 MB | 应用本体（PE-64）|
+| 包内 `stepwork-worker.exe` | 69.6 MB | 侧车，`Modified=19:49:44` 与 `dist/` 原件同秒 |
+| 包内 `$TEMP/MicrosoftEdgeWebview2Setup.exe` | 1.7 MB | `embedBootstrapper` 生效，离线装机能起 UI |
+
+核对方式不是看体积推断：用 **7-Zip 列 NSIS 归档**逐条看（`stepwork-worker.exe`
+因 `Method=LZMA:23` 实心块、`Size` 列为空 —— 字符串搜 / 看总体积都不可靠）。
+
+**仍未做的下一步**：**装到本机实际跑一次** —— 安装包出了 ≠ 能用：应用路径下的
+`STEPWORK_HOME` 落点、侧车被父进程拉起后的真链路、UI 是否起得来，都还没验。
+侧车单体系验收（`accept_sidecar.py` + `probe_console_hint.py`）与整机联调是两回事。
 
 ⚠️ **`startup_ms` 不是用户感知的启动延迟**（2026-09-13 实测）：它由
 `worker/runtime/__main__.py` 从 Python 侧 `time.monotonic()` 起算，
