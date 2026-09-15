@@ -299,7 +299,7 @@ def test_recommend_uses_ai_reason_when_available(tmp_path: Path) -> None:
         ai = FakeAI()
         res = _run(
             _env("RecommendHotspots", {"limit": 4, "reasonTopN": 4}),
-            Deps(repos=repos, ai=ai),
+            Deps(repos=repos, ai=ai),  # type: ignore[arg-type]
         )
         assert res["ok"] is True, res
         assert res["detail"]["reason_source"] == "ai"
@@ -318,7 +318,7 @@ def test_recommend_degrades_when_ai_fails(tmp_path: Path) -> None:
         _add_connection(conn, _write_server(tmp_path))
         _discovered(conn, repos)
         res = _run(
-            _env("RecommendHotspots"), Deps(repos=repos, ai=FakeAI(fail=True))
+            _env("RecommendHotspots"), Deps(repos=repos, ai=FakeAI(fail=True))  # type: ignore[arg-type]
         )
         assert res["ok"] is True, res
         assert res["detail"]["reason_source"] == "rule"
@@ -675,7 +675,7 @@ def test_convert_feeds_generate_topic_unchanged(tmp_path: Path) -> None:
         ai = FakeTopicAI()
         topic = _run(
             _env("GenerateTopic", {"source_version_id": cv_id, "count": 3}),
-            Deps(repos=repos, ai=ai),
+            Deps(repos=repos, ai=ai),  # type: ignore[arg-type]
         )
         assert topic["ok"] is True, topic
         assert topic["detail"]["angle_count"] == 1

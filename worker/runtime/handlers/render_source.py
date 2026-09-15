@@ -274,6 +274,16 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
                 audio_uri = str(spec.user_audio_uri)
             else:
                 # Tranche 2：TTS 音频作为 artifact 保留（不再删除）
+                # deps.tts 可能是 None（resolve_tts 未配置），此前直接 await
+                # 会 AttributeError → bus 兜底转 internal:；显式 UNAVAILABLE
+                # 让调用方看到是"配置缺失"而不是 worker 崩了。
+                if deps.tts is None:
+                    raise DispatchError(
+                        "UNAVAILABLE",
+                        "TTS provider not configured (set STEPWORK_TTS_PROVIDER "
+                        "=<edge|cloud|local|stepfun> + credentials, or use "
+                        "tts_engine=user_audio)",
+                    )
                 audio_uri = await deps.tts.synthesize(
                     src.content, {"out_dir": tts_out_dir}
                 )

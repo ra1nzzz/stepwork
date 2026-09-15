@@ -32,7 +32,7 @@ class _FakeAI:
 def _deps() -> Deps:
     c = in_memory()
     run_migrations(c, _MIG_DIR)
-    return Deps(repos=Repos(c), ai=_FakeAI())
+    return Deps(repos=Repos(c), ai=_FakeAI())  # type: ignore[arg-type]
 
 
 def _env(command_type: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -185,7 +185,7 @@ async def test_topic_angles_carry_audience_stance_risks() -> None:
     c = in_memory()
     run_migrations(c, _MIG_DIR)
     ai = _RichAI()
-    deps = Deps(repos=Repos(c), ai=ai)
+    deps = Deps(repos=Repos(c), ai=ai)  # type: ignore[arg-type]
     cv = _seed_source(deps)
 
     res = await dispatch(
@@ -213,7 +213,7 @@ async def test_topic_angles_carry_audience_stance_risks() -> None:
 async def test_topic_count_must_be_between_3_and_5() -> None:
     c = in_memory()
     run_migrations(c, _MIG_DIR)
-    deps = Deps(repos=Repos(c), ai=_RichAI())
+    deps = Deps(repos=Repos(c), ai=_RichAI())  # type: ignore[arg-type]
     cv = _seed_source(deps)
 
     for bad in (1, 2, 6, 100):

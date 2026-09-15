@@ -185,7 +185,7 @@ async def test_template_default_aspect_applies_when_not_specified() -> None:
     模板的 default_aspect 形同虚设。
     """
     deps, prj, cv = _deps()
-    runner = deps.renderer.runner
+    runner = deps.renderer.runner  # type: ignore[union-attr]
 
     res = await dispatch(
         _env({"source_version_id": cv, "template": "landscape-caption-v1"}, prj), deps
@@ -197,7 +197,7 @@ async def test_template_default_aspect_applies_when_not_specified() -> None:
 async def test_explicit_aspect_overrides_template_default() -> None:
     """显式 aspect 优先于模板默认（用户明确选择不被覆盖）。"""
     deps, prj, cv = _deps()
-    runner = deps.renderer.runner
+    runner = deps.renderer.runner  # type: ignore[union-attr]
 
     res = await dispatch(
         _env(
@@ -217,7 +217,7 @@ async def test_explicit_aspect_overrides_template_default() -> None:
 async def test_vertical_template_still_defaults_to_9_16() -> None:
     """竖屏模板的默认画幅仍是 9:16（不得回归）。"""
     deps, prj, cv = _deps()
-    runner = deps.renderer.runner
+    runner = deps.renderer.runner  # type: ignore[union-attr]
     res = await dispatch(
         _env({"source_version_id": cv, "template": "vertical-caption-v1"}, prj), deps
     )

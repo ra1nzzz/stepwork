@@ -353,7 +353,7 @@ async def test_illustration_degrades_when_scenes_missing_images() -> None:
     assert out["ok"] is True, out
     # 渲染器收到的是 ink_text（降级生效），且被标记
     renderer = deps.renderer
-    assert renderer.spec.style_id == "ink_text"
+    assert renderer.spec.style_id == "ink_text"  # type: ignore[union-attr]
     assert out["detail"]["styleId"] == "ink_text"
     assert out["detail"]["degradedFrom"] == "illustration"
     assert "lack image_uri" in out["detail"]["degradedReason"]
@@ -394,7 +394,7 @@ async def test_illustration_renders_as_is_when_all_images_present() -> None:
         deps,
     )
     assert out["ok"] is True, out
-    assert deps.renderer.spec.style_id == "illustration"
+    assert deps.renderer.spec.style_id == "illustration"  # type: ignore[union-attr]
     assert out["detail"]["degradedFrom"] is None
     assert out["detail"]["degradedReason"] is None
 
@@ -414,7 +414,7 @@ async def test_ink_text_never_degrades_and_records_no_degradation() -> None:
         deps,
     )
     assert out["ok"] is True, out
-    assert deps.renderer.spec.style_id == "ink_text"
+    assert deps.renderer.spec.style_id == "ink_text"  # type: ignore[union-attr]
     assert out["detail"]["degradedFrom"] is None
 
 
@@ -438,7 +438,7 @@ async def test_custom_fallback_style_honored() -> None:
     )
     assert out["ok"] is True, out
     assert out["detail"]["degradedFrom"] == "illustration"
-    assert deps.renderer.spec.style_id == "ink_text"
+    assert deps.renderer.spec.style_id == "ink_text"  # type: ignore[union-attr]
 
 
 async def test_image_fallback_that_also_needs_image_is_rejected() -> None:

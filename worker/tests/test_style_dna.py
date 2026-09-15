@@ -229,7 +229,7 @@ async def test_generate_script_retries_on_banned_then_succeeds() -> None:
     )
     assert res["ok"] is True, res
     # 两次 AI 调用：第一次违规被拦，第二次干净放行
-    assert deps.ai.calls == 2
+    assert deps.ai.calls == 2  # type: ignore[union-attr]
     assert res["detail"]["bannedRetried"] is True
     # 落库内容必须是干净的那版 —— 不是首版违规文本
     cv = deps.repos.content_versions.get(res["artifact_ids"][0])
@@ -279,5 +279,5 @@ async def test_generate_script_without_profile_never_checks() -> None:
         deps,
     )
     assert res["ok"] is True, res
-    assert deps.ai.calls == 1
+    assert deps.ai.calls == 1  # type: ignore[union-attr]
     assert res["detail"]["bannedRetried"] is False
