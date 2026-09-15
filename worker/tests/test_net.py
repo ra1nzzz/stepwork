@@ -9,6 +9,7 @@ Clash 之后仍然留着，``httpx`` 默认 ``trust_env=True`` 会把每个出�
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,20 @@ import pytest
 from worker.runtime import net
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture(autouse=True)
+def _reset_probe_cache() -> Iterator[None]:
+    """每个用例前后清 net 的代理探测 TTL 缓存。
+
+    P1-E 加了共享 client 后，:func:`proxy_is_dead` 也带上了 5 分钟 TTL 缓存，
+    避免每条请求都探一次注册表 —— 但对本文件的测试而言，缓存会跨用例污染：
+    ``test_no_proxy_configured`` 缓存 False 之后，紧接的
+    ``test_dead_proxy_is_detected`` 拿不到真实探测结果。autouse 归零即可。
+    """
+    net.reset_proxy_probe_cache()
+    yield
+    net.reset_proxy_probe_cache()
 
 
 def _proxies(monkeypatch: pytest.MonkeyPatch, mapping: dict[str, str]) -> None:

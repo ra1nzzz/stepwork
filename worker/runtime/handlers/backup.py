@@ -24,13 +24,14 @@
 
 from __future__ import annotations
 
-import os
+import asyncio
 import re
 import shutil
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
+from worker.runtime.cleanup import resolve_stepwork_home
 from worker.runtime.commands.bus import DispatchError
 from worker.runtime.db.connection import connect
 from worker.runtime.db.repos import Repos
@@ -48,11 +49,6 @@ _DB_FILENAME: str = "stepwork.db"
 # / 是路径分隔符必须替换；. 在文件名中无害，保留可读性
 _LABEL_SAFE_RE: re.Pattern[str] = re.compile(r"[^a-zA-Z0-9_.-]")
 
-
-def _resolve_stepwork_home() -> Path:
-    """解析 ``$STEPWORK_HOME``，缺省回退到 ``~/STEPWORK``（与 bootstrap.py 一致）。"""
-    home = os.environ.get("STEPWORK_HOME") or str(Path.home() / "STEPWORK")
-    return Path(home)
 
 
 def _sanitize_label(label: str) -> str:
@@ -111,20 +107,31 @@ def _cleanup_wal_sidecars(db_path: Path) -> None:
             sidecar.unlink()
 
 
+def _do_backup_copy(db_path: Path, backup_path: Path) -> int:
+    """sync helper：复制 .db 快照并返回落地文件大小（放线程池里跑）。
+
+    ``shutil.copy2`` 与 ``stat`` 都是**同步阻塞 IO** —— 生产 DB 可达 GB 级
+    （素材表 + 渲染产物索引），整段拷贝跑在事件循环里会冻结心跳 / CancelJob /
+    并发命令。文件级 copy 只能进 ``asyncio.to_thread``。
+    """
+    shutil.copy2(db_path, backup_path)
+    return backup_path.stat().st_size
+
+
 async def _handle_backup(env: CommandEnvelope, deps: Deps) -> CommandResult:
     """处理 ``BackupWorkspace``：复制 stepwork.db 到 backups/ 目录。"""
     payload = env.payload or {}
     label = payload.get("label")
 
-    home = _resolve_stepwork_home()
+    home = resolve_stepwork_home()
     db_path = home / _DB_FILENAME
-    if not db_path.exists():
+    if not await asyncio.to_thread(db_path.exists):
         raise DispatchError(
             "NOT_FOUND", f"stepwork.db not found at {db_path}"
         )
 
     backups_dir = home / _BACKUPS_DIR
-    backups_dir.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(backups_dir.mkdir, parents=True, exist_ok=True)
 
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     if label:
@@ -137,8 +144,7 @@ async def _handle_backup(env: CommandEnvelope, deps: Deps) -> CommandResult:
     # WAL 模式下，先 checkpoint 把 WAL 数据刷到主 DB 文件，确保 shutil.copy2
     # 拿到的是完整快照（否则只拷主 .db 文件会丢失尚未 checkpoint 的事务）
     deps.repos.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    shutil.copy2(db_path, backup_path)
-    size_bytes = backup_path.stat().st_size
+    size_bytes = await asyncio.to_thread(_do_backup_copy, db_path, backup_path)
     created_at = datetime.now(UTC).isoformat()
 
     return CommandResult(
@@ -160,16 +166,17 @@ async def _handle_restore(env: CommandEnvelope, deps: Deps) -> CommandResult:
     if not backup_path_str:
         raise DispatchError("INVALID_ARGUMENT", "missing backupPath")
 
-    home = _resolve_stepwork_home()
+    home = resolve_stepwork_home()
     backup_path = _validate_backup_path(str(backup_path_str), home)
 
     db_path = home / _DB_FILENAME
     # 关闭旧连接（避免 Windows 上文件锁冲突；最后一连接关闭时 SQLite 自动 checkpoint）
     deps.repos.conn.close()
-    # 清理可能残留的 WAL/SHM sidecar 文件（避免与新复制的 DB 冲突）
-    _cleanup_wal_sidecars(db_path)
-    # 复制备份文件到 stepwork.db（覆盖）
-    shutil.copy2(backup_path, db_path)
+    # 清理残留 WAL/SHM sidecar + 整库复制 + stat —— 三条**同步阻塞 IO**，
+    # DB 大时能跑几十秒，直接放事件循环里 = 心跳停 / CancelJob 排队 /
+    # 并发命令全被卡住。丢线程池。
+    await asyncio.to_thread(_cleanup_wal_sidecars, db_path)
+    size_bytes = await asyncio.to_thread(_do_backup_copy, backup_path, db_path)
     # 重新打开连接并 rebind 到 Repos（含所有子 repo）
     new_conn = connect(str(db_path))
     _rebind_conn(deps.repos, new_conn)
@@ -178,7 +185,6 @@ async def _handle_restore(env: CommandEnvelope, deps: Deps) -> CommandResult:
     if deps.worker_state is not None:
         deps.worker_state.db_conn = new_conn
 
-    size_bytes = db_path.stat().st_size
     return CommandResult(
         ok=True,
         commandId=env.commandId,

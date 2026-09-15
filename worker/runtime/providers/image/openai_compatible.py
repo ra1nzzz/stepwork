@@ -32,7 +32,7 @@ import tempfile
 from typing import Any
 from urllib.parse import urlparse
 
-from worker.runtime.net import make_async_client
+from worker.runtime.net import shared_async_client
 from worker.runtime.providers.image.base import ImageProviderError
 
 #: 生图比聊天慢得多（CogView hd 约 20s），留足余量
@@ -188,39 +188,40 @@ class OpenAICompatibleImageProvider:
             "Content-Type": "application/json",
         }
 
-        client = self._client or make_async_client()
-        async with client as c:
-            resp = await c.post(url, headers=headers, json=body, timeout=self.timeout)
-            if resp.status_code >= 400:
+        client = self._client or await shared_async_client()
+        # **借用**不 aclose —— 旧写法 ``async with client`` 在注入共享 client 时
+        # 会把外部 client 关掉，后续请求全报 client closed（P1 语义 bug）。
+        resp = await client.post(url, headers=headers, json=body, timeout=self.timeout)
+        if resp.status_code >= 400:
+            raise ImageProviderError(
+                f"HTTP {resp.status_code} from {url}: {resp.text[:300]}"
+            )
+        try:
+            payload = resp.json()
+        except ValueError:
+            raise ImageProviderError(
+                f"non-JSON response from {url}: {resp.text[:300]}"
+            ) from None
+        b64, image_url = _first_image(payload)
+        if b64 is not None:
+            data = await asyncio.to_thread(
+                base64.b64decode, _strip_data_uri(b64)
+            )
+            ext = "png"
+        elif image_url:
+            img = await client.get(image_url, timeout=self.timeout)
+            if img.status_code >= 400:
                 raise ImageProviderError(
-                    f"HTTP {resp.status_code} from {url}: {resp.text[:300]}"
+                    f"HTTP {img.status_code} downloading image "
+                    f"{image_url}: {img.text[:200]}"
                 )
-            try:
-                payload = resp.json()
-            except ValueError:
-                raise ImageProviderError(
-                    f"non-JSON response from {url}: {resp.text[:300]}"
-                ) from None
-            b64, image_url = _first_image(payload)
-            if b64 is not None:
-                data = await asyncio.to_thread(
-                    base64.b64decode, _strip_data_uri(b64)
-                )
-                ext = "png"
-            elif image_url:
-                img = await c.get(image_url, timeout=self.timeout)
-                if img.status_code >= 400:
-                    raise ImageProviderError(
-                        f"HTTP {img.status_code} downloading image "
-                        f"{image_url}: {img.text[:200]}"
-                    )
-                data = img.content
-                ext = _ext_from(img.headers.get("content-type", ""), image_url)
-            else:
-                raise ImageProviderError(
-                    f"no image in response from {url}: "
-                    f"{str(payload)[:300]}"
-                )
+            data = img.content
+            ext = _ext_from(img.headers.get("content-type", ""), image_url)
+        else:
+            raise ImageProviderError(
+                f"no image in response from {url}: "
+                f"{str(payload)[:300]}"
+            )
 
         if not data:
             raise ImageProviderError(f"empty image bytes from {url}")

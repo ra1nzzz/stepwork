@@ -37,7 +37,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from worker.runtime.net import make_async_client
+from worker.runtime.net import shared_async_client
 from worker.runtime.providers.tts.base import TTSError
 
 logger = logging.getLogger("worker.runtime.providers.tts.stepfun")
@@ -194,44 +194,43 @@ class StepFunTTSProvider:
 
     async def _post(self, body: dict[str, Any]) -> bytes:
         """带重试地取回音频裸字节；失败抛 :class:`TTSError`（带 body 片段）。"""
-        client = self._client or make_async_client()
+        client = self._client or await shared_async_client()
         status = 0
         snippet = ""
-        try:
-            for attempt in range(1, self.max_attempts + 1):
-                try:
-                    resp = await client.post(
-                        self._url(),
-                        headers={
-                            "Authorization": f"Bearer {self.api_key}",
-                            "Content-Type": "application/json",
-                        },
-                        json=body,
-                        timeout=self.timeout,
-                    )
-                except Exception as e:  # noqa: BLE001 - 网络抖动要重试
-                    if attempt == self.max_attempts:
-                        raise TTSError(
-                            f"stepfun TTS 请求失败（{attempt}/{self.max_attempts}）："
-                            f"{type(e).__name__}: {e}"
-                        ) from None
-                    await asyncio.sleep(2 * attempt)
-                    continue
-                status = resp.status_code
-                if status < 500 or attempt == self.max_attempts:
-                    break
-                snippet = _body_snippet(resp)
-                logger.warning(
-                    "stepfun TTS HTTP %s，重试 %s/%s：%s",
-                    status,
-                    attempt,
-                    self.max_attempts,
-                    snippet,
+        for attempt in range(1, self.max_attempts + 1):
+            try:
+                resp = await client.post(
+                    self._url(),
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=body,
+                    timeout=self.timeout,
                 )
+            except Exception as e:  # noqa: BLE001 - 网络抖动要重试
+                if attempt == self.max_attempts:
+                    raise TTSError(
+                        f"stepfun TTS 请求失败（{attempt}/{self.max_attempts}）："
+                        f"{type(e).__name__}: {e}"
+                    ) from None
                 await asyncio.sleep(2 * attempt)
-        finally:
-            if self._client is None:
-                await client.aclose()
+                continue
+            status = resp.status_code
+            if status < 500 or attempt == self.max_attempts:
+                break
+            snippet = _body_snippet(resp)
+            logger.warning(
+                "stepfun TTS HTTP %s，重试 %s/%s：%s",
+                status,
+                attempt,
+                self.max_attempts,
+                snippet,
+            )
+            await asyncio.sleep(2 * attempt)
+        # 无论共享还是注入，provider **只借不关**：
+        # 共享实例由 net.aclose_shared_async_client 在关停期统一释放；
+        # 注入实例的所有权在调用方（测试里可能拿同一 client 发多次请求）。
 
         if status >= 400:
             raise TTSError(_error_message(status, _body_snippet(resp), self.model))

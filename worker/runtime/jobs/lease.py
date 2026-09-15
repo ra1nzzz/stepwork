@@ -61,6 +61,12 @@ def sweep_expired(conn: sqlite3.Connection, now: Optional[datetime] = None) -> l
 
     Returns:
         被置为过期的 job 列表。
+
+    一条 ``UPDATE ... WHERE id IN (?, ...)`` 完成全部迁移，取代此前
+    ``for j in jobs: conn.execute(UPDATE ...)`` 的 N+1 形态 —— 100 条过期
+    任务从 100 次 prepare + step 降到 1 次；仍走同一次事务与 commit。
+    SQLite 变量数量上限（``SQLITE_MAX_VARIABLE_NUMBER``，默认 999）分片：
+    每 500 条一批，留余量给 state / timestamp 参数。
     """
     now = now or datetime.now(UTC)
     rows = conn.execute(
@@ -69,11 +75,18 @@ def sweep_expired(conn: sqlite3.Connection, now: Optional[datetime] = None) -> l
         (JobState.LEASED.value, now.isoformat()),
     ).fetchall()
     jobs = [_row_to_job(r) for r in rows]
-    for j in jobs:
+    if not jobs:
+        return jobs
+    now_iso = now.isoformat()
+    ids = [j.id for j in jobs]
+    _BATCH = 500  # 999 - 若干，留余量
+    for i in range(0, len(ids), _BATCH):
+        chunk = ids[i : i + _BATCH]
+        placeholders = ",".join(["?"] * len(chunk))
         conn.execute(
-            "UPDATE jobs SET state=?, lease_owner=NULL, lease_expires_at=NULL, updated_at=? "
-            "WHERE id=?",
-            (JobState.EXPIRED.value, now.isoformat(), j.id),
+            f"UPDATE jobs SET state=?, lease_owner=NULL, lease_expires_at=NULL, "  # noqa: S608
+            f"updated_at=? WHERE id IN ({placeholders})",
+            (JobState.EXPIRED.value, now_iso, *chunk),
         )
     conn.commit()
     return jobs

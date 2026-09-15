@@ -14,21 +14,14 @@
 
 from __future__ import annotations
 
-import os
 import sqlite3
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
+from worker.runtime.cleanup import resolve_stepwork_home
 from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
 from worker.runtime.models import CommandEnvelope, CommandResult, Workspace
-
-
-def _resolve_stepwork_home() -> Path:
-    """解析 ``$STEPWORK_HOME``，缺省回退到 ``~/STEPWORK``（与 bootstrap.py 一致）。"""
-    home = os.environ.get("STEPWORK_HOME") or str(Path.home() / "STEPWORK")
-    return Path(home)
 
 
 def _row_to_dict(row: Any) -> dict[str, Any]:
@@ -58,7 +51,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         if not name or not isinstance(name, str):
             raise DispatchError("INVALID_ARGUMENT", "name required")
         ws = Workspace(name=name, root_path="")
-        ws.root_path = str(_resolve_stepwork_home() / "workspaces" / ws.id)
+        ws.root_path = str(resolve_stepwork_home() / "workspaces" / ws.id)
         try:
             deps.repos.workspaces.insert(ws)
         except sqlite3.IntegrityError:

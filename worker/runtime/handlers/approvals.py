@@ -242,7 +242,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             "WHERE id=?",
             (
                 new_status,
-                f"{actor.get('type', 'user')}:{actor.get('id', 'unknown')}",
+                f"{actor.get('type', 'unknown')}:{actor.get('id', 'unknown')}",
                 _now().isoformat(),
                 str(target_id),
             ),

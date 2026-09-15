@@ -25,14 +25,15 @@ zip 内容（每个一个 JSON 文件）：
 
 from __future__ import annotations
 
+import asyncio
 import json
-import os
 import uuid
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from worker.runtime.cleanup import resolve_stepwork_home
 from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
 from worker.runtime.models import CommandEnvelope, CommandResult
@@ -43,11 +44,6 @@ _EXPORTS_DIR: str = "exports"
 # bundle schema 版本（manifest.json 中声明）
 _SCHEMA_VERSION: str = "1"
 
-
-def _resolve_stepwork_home() -> Path:
-    """解析 ``$STEPWORK_HOME``，缺省回退到 ``~/STEPWORK``（与 bootstrap.py 一致）。"""
-    home = os.environ.get("STEPWORK_HOME") or str(Path.home() / "STEPWORK")
-    return Path(home)
 
 
 def _resolve_project_id(env: CommandEnvelope) -> str | None:
@@ -215,6 +211,58 @@ def _validate_bundle_names(zf: zipfile.ZipFile) -> None:
             )
 
 
+#: 媒体成员解包后的字节上限（zip bomb 防护）。桌面单机场景 2 GB 已经远超
+#: 真实素材；再大的应当走"分卷导出"而不是把整个 handler 撑爆内存。
+_MAX_MEDIA_MEMBER_BYTES: int = 2 * 1024 * 1024 * 1024
+
+
+def _read_bundle_json(
+    zf: zipfile.ZipFile, name: str, *, expect: type
+) -> Any:
+    """从 bundle 里读一个 JSON 成员并做**形状校验**。
+
+    此前直接 ``json.loads(zf.read("project.json"))``：
+    - ``project.json`` 缺 → KeyError 冒到最外层变成 500，用户看不出是包坏
+      了还是 worker 挂了（对比：``jobs.json`` 反而加了 ``if "jobs.json" in
+      zf.namelist()`` 的保护，两条路径不对称）；
+    - ``versions.json`` 是 JSON 但不是 list（比如 ``{"data": [...]}``）→ 下面
+      ``for v in versions`` 迭代出字符串键 → ``v["id"]`` 崩 TypeError；
+    - 元素不是 dict（``[1, 2, 3]``）→ 一样崩在 ``ver["id"]``。
+
+    统一转成 ``DispatchError("INVALID_ARGUMENT", ...)``：明确"这个包不合格"，
+    而不是 worker 内部炸。
+    """
+    if name not in zf.namelist():
+        raise DispatchError("INVALID_ARGUMENT", f"bundle missing {name}")
+    try:
+        raw = zf.read(name)
+    except (KeyError, zipfile.BadZipFile) as e:
+        raise DispatchError(
+            "INVALID_ARGUMENT", f"bundle member unreadable ({name}): {e}"
+        ) from None
+    try:
+        value = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        raise DispatchError(
+            "INVALID_ARGUMENT", f"bundle member not JSON ({name}): {e}"
+        ) from None
+    if not isinstance(value, expect):
+        raise DispatchError(
+            "INVALID_ARGUMENT",
+            f"bundle member {name} must be {expect.__name__}, "
+            f"got {type(value).__name__}",
+        )
+    if expect is list:
+        items: list[Any] = value  # type: ignore[assignment]
+        for i, item in enumerate(items):
+            if not isinstance(item, dict):
+                raise DispatchError(
+                    "INVALID_ARGUMENT",
+                    f"bundle {name}[{i}] must be object, got {type(item).__name__}",
+                )
+    return value
+
+
 def _asset_source_path(local_uri: str) -> Path | None:
     """把 asset 的 ``local_uri`` 解析为本机存在的文件路径；不存在返回 ``None``。"""
     if not local_uri:
@@ -240,6 +288,11 @@ def _restore_asset_file(
 
     安全：只用归档名的最后一段拼路径，绝不直接用归档路径落盘
     （``_validate_bundle_names`` 已挡 ``..``，这里再收一层）。
+
+    体积：解包前先看 ``info.file_size`` 是否超过
+    :data:`_MAX_MEDIA_MEMBER_BYTES`（zip bomb 防线），超了拒写；写入走
+    64 KB 分块 copy 而非 ``out.write(src.read())`` —— 后者会把整段媒体
+    一次性读进内存再落盘，GB 级假媒体直接把 handler 撑爆。
     """
     original = str(asset.get("local_uri") or "")
     arcname = asset.get("bundle_file")
@@ -249,18 +302,49 @@ def _restore_asset_file(
         info = zf.getinfo(arcname)
     except KeyError:
         return original
+    if info.file_size > _MAX_MEDIA_MEMBER_BYTES:
+        raise DispatchError(
+            "INVALID_ARGUMENT",
+            f"bundle media member too large ({info.file_size} bytes, "
+            f"limit {_MAX_MEDIA_MEMBER_BYTES}): {arcname}",
+        )
 
     suffix = Path(info.filename).suffix
-    dest_dir = _resolve_stepwork_home() / "assets" / new_project_id
+    dest_dir = resolve_stepwork_home() / "assets" / new_project_id
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"{new_asset_id}{suffix}"
     try:
         with zf.open(info) as src, open(dest, "wb") as out:
-            out.write(src.read())
+            while True:
+                chunk = src.read(65536)
+                if not chunk:
+                    break
+                out.write(chunk)
     except (OSError, zipfile.BadZipFile):
         # 落盘失败不阻塞导入：数据行仍恢复，只是素材文件缺失
         return original
     return str(dest)
+
+
+def _restore_asset_file_by_path(
+    bundle_path_str: str,
+    asset: dict[str, Any],
+    new_project_id: str,
+    new_asset_id: str,
+) -> str:
+    """:func:`_restore_asset_file` 的线程安全外壳。
+
+    ``asyncio.to_thread`` 里跑，主线程与 worker 线程不共享 :class:`ZipFile`
+    句柄（zipfile 非线程安全，句柄交叉容易出现隐性 offset 竞态）—— 每次调用
+    各自 ``with zipfile.ZipFile(...)`` 开、结束即关。
+    """
+    try:
+        with zipfile.ZipFile(bundle_path_str, "r") as zf:
+            return _restore_asset_file(zf, asset, new_project_id, new_asset_id)
+    except (OSError, zipfile.BadZipFile):
+        # bundle 中途被替换 / 权限变了 / 媒体已损坏：与原实现一致，
+        # 不阻塞导入，交给下面的 DB 事务恢复数据行。
+        return str(asset.get("local_uri") or "")
 
 
 def _new_id(prefix: str) -> str:
@@ -327,7 +411,7 @@ async def _handle_export(env: CommandEnvelope, deps: Deps) -> CommandResult:
         jobs = []
 
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    home = _resolve_stepwork_home()
+    home = resolve_stepwork_home()
     exports_dir = home / _EXPORTS_DIR
     exports_dir.mkdir(parents=True, exist_ok=True)
     bundle_path = exports_dir / f"project-{project_id}-{timestamp}.zip"
@@ -364,18 +448,23 @@ async def _handle_export(env: CommandEnvelope, deps: Deps) -> CommandResult:
             asset["bundle_file"] = arcname
             media_count += 1
 
-    with zipfile.ZipFile(bundle_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for name, obj in contents.items():
-            zf.writestr(name, json.dumps(obj, ensure_ascii=False, indent=2))
-        if include_assets:
-            for asset in assets:
-                # 独立命名，避免与上文构造 arcname 的 str 变量复用同名（mypy）
-                member = asset.get("bundle_file")
-                src = _asset_source_path(str(asset.get("local_uri") or ""))
-                if member and src is not None:
-                    zf.write(src, str(member))
+    def _write_bundle() -> int:
+        """同步执行：整段 zip 写入 + 素材 deflate 压缩，放线程池里跑。"""
+        with zipfile.ZipFile(bundle_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for name, obj in contents.items():
+                zf.writestr(name, json.dumps(obj, ensure_ascii=False, indent=2))
+            if include_assets:
+                for asset in assets:
+                    # 独立命名，避免与上文构造 arcname 的 str 变量复用同名（mypy）
+                    member = asset.get("bundle_file")
+                    src = _asset_source_path(str(asset.get("local_uri") or ""))
+                    if member and src is not None:
+                        zf.write(src, str(member))
+        return bundle_path.stat().st_size
 
-    size_bytes = bundle_path.stat().st_size
+    # 整段打包（含媒体 deflate 压缩 + 落盘）是同步阻塞 IO：一条几十秒的
+    # 素材在事件循环里直跑 = 心跳停 / CancelJob 排队 / 并发命令全被卡住。
+    size_bytes = await asyncio.to_thread(_write_bundle)
     return CommandResult(
         ok=True,
         commandId=env.commandId,
@@ -408,17 +497,14 @@ async def _handle_import(env: CommandEnvelope, deps: Deps) -> CommandResult:
 
     with zf:
         _validate_bundle_names(zf)
-        project_raw = zf.read("project.json")
-        versions_raw = zf.read("versions.json")
-        assets_raw = zf.read("assets.json")
-        jobs_raw = (
-            zf.read("jobs.json") if "jobs.json" in zf.namelist() else b"[]"
+        project_dict = _read_bundle_json(zf, "project.json", expect=dict)
+        versions = _read_bundle_json(zf, "versions.json", expect=list)
+        assets = _read_bundle_json(zf, "assets.json", expect=list)
+        jobs = (
+            _read_bundle_json(zf, "jobs.json", expect=list)
+            if "jobs.json" in zf.namelist()
+            else []
         )
-
-    project_dict: dict[str, Any] = json.loads(project_raw)
-    versions: list[dict[str, Any]] = json.loads(versions_raw)
-    assets: list[dict[str, Any]] = json.loads(assets_raw)
-    jobs: list[dict[str, Any]] = json.loads(jobs_raw)
 
     remap = bool(payload.get("remapId", True))
     id_map: dict[str, str] = {}
@@ -465,30 +551,52 @@ async def _handle_import(env: CommandEnvelope, deps: Deps) -> CommandResult:
     repos.workspaces.ensure(env.workspaceId)
     conn = repos.conn
 
-    # 插入 project（workspace_id 用 env.workspaceId）
-    conn.execute(
-        "INSERT INTO content_projects (id, workspace_id, title, status, "
-        "brand_profile_id, current_content_version_id, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (
+    # 先把媒体落盘这一步单独跑（bundle 无媒体时循环空转），
+    # 得到 new_aid → 本机 local_uri 的映射，留给下面 INSERT 用。
+    # **不共享 ZipFile 句柄跨线程**：zipfile 不是线程安全的，且主线程与
+    # 线程里交替 open/close 反而更容易出隐性 bug；直接把 bundle_path 交给
+    # 线程，各自开各自关。
+    asset_uris: dict[str, str] = {}
+    for asset in assets:
+        old_aid = str(asset["id"])
+        new_aid = id_map.get(old_aid, old_aid)
+        # GB 级媒体落盘走 to_thread —— 之前直接在 async handler 里 copy，
+        # 一条 3 分钟的片子能冻结心跳 / CancelJob 若干秒到若干分钟。
+        local_uri = await asyncio.to_thread(
+            _restore_asset_file_by_path,
+            str(bundle_path),
+            asset,
             new_project_id,
-            env.workspaceId,
-            new_title,
-            str(project_dict.get("status", "active")),
-            project_dict.get("brand_profile_id"),
-            new_current_cv,
-            str(project_dict.get("created_at")),
-            str(project_dict.get("updated_at")),
-        ),
-    )
+            new_aid,
+        )
+        asset_uris[new_aid] = local_uri
 
-    # 插入 assets（project_id 用新 project_id）。
-    # PRD-WS-004：媒体本体要在此刻落盘（新 id 到这一步才算出），而上面的
-    # `with zf` 已把 zip 关掉，故重开一次；bundle 无媒体时也无妨。
-    with zipfile.ZipFile(bundle_path, "r") as media_zf:
+    # **一个事务包全部 4 段 INSERT**：中途任何一步失败（FK / 类型 / 唯一约束）
+    # 都 rollback，绝不留下"project 已落、assets 落一半、versions 没来"的
+    # 半个项目 —— 那种状态下下一次 dispatch 的 commit 会把它一起提交进库。
+    # 与 :meth:`ContentVersionRepo.replace_for_version` 同一纪律，理由一致：
+    # 半新半旧比全旧更危险。
+    with conn:
+        # 插入 project（workspace_id 用 env.workspaceId）
+        conn.execute(
+            "INSERT INTO content_projects (id, workspace_id, title, status, "
+            "brand_profile_id, current_content_version_id, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                new_project_id,
+                env.workspaceId,
+                new_title,
+                str(project_dict.get("status", "active")),
+                project_dict.get("brand_profile_id"),
+                new_current_cv,
+                str(project_dict.get("created_at")),
+                str(project_dict.get("updated_at")),
+            ),
+        )
+
+        # 插入 assets：媒体已在上面 async 阶段落盘，这里只写落点 uri
         for asset in assets:
-            old_aid = str(asset["id"])
-            new_aid = id_map.get(old_aid, old_aid)
+            new_aid = id_map.get(str(asset["id"]), str(asset["id"]))
             conn.execute(
                 "INSERT INTO source_assets (id, project_id, kind, local_uri, "
                 "original_uri, content_hash, rights_declaration, metadata, created_at) "
@@ -497,10 +605,9 @@ async def _handle_import(env: CommandEnvelope, deps: Deps) -> CommandResult:
                     new_aid,
                     new_project_id,
                     str(asset["kind"]),
-                    # PRD-WS-004：bundle 带了媒体本体就落到本机 assets 目录并改写
-                    # local_uri；没带（旧 bundle / 导出时文件缺失）则沿用原值，
-                    # 保持向后兼容。
-                    _restore_asset_file(media_zf, asset, new_project_id, new_aid),
+                    # PRD-WS-004：bundle 带了媒体本体就用刚落地的路径；
+                    # 没带则沿用原值（旧 bundle / 导出时源文件已缺失）。
+                    asset_uris.get(new_aid, str(asset.get("local_uri") or "")),
                     asset.get("original_uri"),
                     str(asset["content_hash"]),
                     asset.get("rights_declaration"),
@@ -509,56 +616,54 @@ async def _handle_import(env: CommandEnvelope, deps: Deps) -> CommandResult:
                 ),
             )
 
-    # 插入 versions（拓扑序：parent 先于 child；parent_version_id 用 id_map 翻译）
-    for ver in _topo_sort_versions(versions):
-        old_vid = str(ver["id"])
-        new_vid = id_map.get(old_vid, old_vid)
-        new_parent = translate_ref(ver.get("parent_version_id"))
-        conn.execute(
-            "INSERT INTO content_versions (id, project_id, parent_version_id, "
-            "content_type, content, content_hash, producer, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                new_vid,
-                new_project_id,
-                new_parent,
-                str(ver["content_type"]),
-                str(ver["content"]),
-                str(ver["content_hash"]),
-                _json_col(ver.get("producer", {})),
-                str(ver.get("created_at")),
-            ),
-        )
+        # 插入 versions（拓扑序：parent 先于 child；parent_version_id 用 id_map 翻译）
+        for ver in _topo_sort_versions(versions):
+            old_vid = str(ver["id"])
+            new_vid = id_map.get(old_vid, old_vid)
+            new_parent = translate_ref(ver.get("parent_version_id"))
+            conn.execute(
+                "INSERT INTO content_versions (id, project_id, parent_version_id, "
+                "content_type, content, content_hash, producer, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    new_vid,
+                    new_project_id,
+                    new_parent,
+                    str(ver["content_type"]),
+                    str(ver["content"]),
+                    str(ver["content_hash"]),
+                    _json_col(ver.get("producer", {})),
+                    str(ver.get("created_at")),
+                ),
+            )
 
-    # 插入 jobs（payload 直接拷贝，不深挖 version_id 引用 —— W9 不深挖）
-    for job in jobs:
-        old_jid = str(job["id"])
-        new_jid = id_map.get(old_jid, old_jid)
-        conn.execute(
-            "INSERT INTO jobs (id, job_type, state, stage, payload, progress, "
-            "attempt_count, max_attempts, lease_owner, lease_expires_at, "
-            "heartbeat_at, error_code, result_artifact_ids, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                new_jid,
-                str(job["job_type"]),
-                str(job["state"]),
-                job.get("stage"),
-                _json_col(job.get("payload", {})),
-                float(job.get("progress", 0.0)),
-                int(job.get("attempt_count", 0)),
-                int(job.get("max_attempts", 3)),
-                job.get("lease_owner"),
-                job.get("lease_expires_at"),
-                job.get("heartbeat_at"),
-                job.get("error_code"),
-                _json_col(job.get("result_artifact_ids", [])),
-                str(job.get("created_at")),
-                str(job.get("updated_at")),
-            ),
-        )
-
-    conn.commit()
+        # 插入 jobs（payload 直接拷贝，不深挖 version_id 引用 —— W9 不深挖）
+        for job in jobs:
+            old_jid = str(job["id"])
+            new_jid = id_map.get(old_jid, old_jid)
+            conn.execute(
+                "INSERT INTO jobs (id, job_type, state, stage, payload, progress, "
+                "attempt_count, max_attempts, lease_owner, lease_expires_at, "
+                "heartbeat_at, error_code, result_artifact_ids, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    new_jid,
+                    str(job["job_type"]),
+                    str(job["state"]),
+                    job.get("stage"),
+                    _json_col(job.get("payload", {})),
+                    float(job.get("progress", 0.0)),
+                    int(job.get("attempt_count", 0)),
+                    int(job.get("max_attempts", 3)),
+                    job.get("lease_owner"),
+                    job.get("lease_expires_at"),
+                    job.get("heartbeat_at"),
+                    job.get("error_code"),
+                    _json_col(job.get("result_artifact_ids", [])),
+                    str(job.get("created_at")),
+                    str(job.get("updated_at")),
+                ),
+            )
 
     detail: dict[str, Any] = {
         "project_id": new_project_id,

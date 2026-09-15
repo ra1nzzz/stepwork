@@ -17,7 +17,7 @@ from typing import Any
 
 import httpx
 
-from worker.runtime.net import make_async_client
+from worker.runtime.net import shared_async_client
 from worker.runtime.providers.ai.base import parse_json_response
 
 
@@ -49,11 +49,13 @@ class CloudAIProvider:
 
     @asynccontextmanager
     async def _client_cm(self) -> AsyncIterator[httpx.AsyncClient]:
+        # 注入优先（测试可塞假 client）；否则取进程级共享实例。
+        # **共享实例的 aclose 由 net.aclose_shared_async_client 在关停期统一
+        # 负责**，provider 里 close 一次就会污染所有其它 provider 与后续请求。
         if self._client is not None:
             yield self._client
             return
-        async with make_async_client(timeout=120.0) as c:
-            yield c
+        yield await shared_async_client()
 
     async def complete(
         self, prompt: str, schema: dict[str, Any] | None = None
@@ -84,6 +86,7 @@ class CloudAIProvider:
                 f"{self.base_url}/chat/completions",
                 headers={"Authorization": f"Bearer {self.api_key}"},
                 json=body,
+                timeout=120.0,
             )
             resp.raise_for_status()
             data = resp.json()

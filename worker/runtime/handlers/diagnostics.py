@@ -22,7 +22,6 @@ W8 的 ``__main__._configure_logging`` 仅走 stderr，文件不存在时
 from __future__ import annotations
 
 import json
-import os
 import platform
 import sqlite3
 import zipfile
@@ -30,6 +29,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from worker.runtime.cleanup import resolve_stepwork_home
 from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
 from worker.runtime.handlers.config import _mask_secrets
@@ -47,11 +47,6 @@ _DEFAULT_MAX_LOG_LINES: int = 200
 # 活跃任务状态集合（用于 health 摘要的 active_jobs 计数）
 _ACTIVE_JOB_STATES: tuple[str, ...] = ("pending", "leased", "running")
 
-
-def _resolve_stepwork_home() -> Path:
-    """解析 ``$STEPWORK_HOME``，缺省回退到 ``~/STEPWORK``（与 bootstrap.py 一致）。"""
-    home = os.environ.get("STEPWORK_HOME") or str(Path.home() / "STEPWORK")
-    return Path(home)
 
 
 def _collect_health_summary(deps: Deps) -> dict[str, Any]:
@@ -186,7 +181,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     desensitize = bool(payload.get("desensitize", config_desensitize))
     max_log_lines = int(payload.get("maxLogLines", _DEFAULT_MAX_LOG_LINES))
 
-    home = _resolve_stepwork_home()
+    home = resolve_stepwork_home()
     log_path = home / _LOG_REL_PATH
 
     contents: dict[str, Any] = {

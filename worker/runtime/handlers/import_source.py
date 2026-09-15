@@ -119,6 +119,15 @@ async def _handle_url_import(
 
         local_path = result.local_path
         content_hash = p.get("content_hash")
+        # content_hash 必须是**非空字符串**：此前只判 truthy，dict / int /
+        # list 都能"看起来合法"落库；一旦误命中别的 asset 的 content_hash，
+        # 下面 dedup 分支就 ``os.remove(local_path)`` 把刚下载完的素材静默
+        # 删掉。调用方传错类型 → 拒，不给"凑合跑"的机会。
+        if content_hash is not None and not isinstance(content_hash, str):
+            raise DispatchError(
+                "INVALID_ARGUMENT",
+                f"content_hash must be str, got {type(content_hash).__name__}",
+            )
         if not content_hash and deps.ingest is not None:
             content_hash = deps.ingest.hash_file(local_path)
         if not content_hash:
@@ -196,17 +205,24 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         # cleanupMode=immediate：导入完成后即清残留中间文件（*.part）
         _, mode = resolve_cleanup_config(ws.settings)
         if mode == "immediate":
-            try:
-                for part in (assets_root() / project_id).glob("*.part"):
+            # 逐文件 try：一个 .part 被别的进程占住（Windows 常见）不该阻止
+            # 其余 .part 清理 —— 与 cleanup._sweep_files 同一纪律。
+            for part in (assets_root() / project_id).glob("*.part"):
+                try:
                     part.unlink()
-            except OSError:
-                pass
+                except OSError:
+                    continue
         return result
 
     if not local_uri:
         raise DispatchError("INVALID_ARGUMENT", "local_uri or url is required")
 
     content_hash = p.get("content_hash")
+    if content_hash is not None and not isinstance(content_hash, str):
+        raise DispatchError(
+            "INVALID_ARGUMENT",
+            f"content_hash must be str, got {type(content_hash).__name__}",
+        )
     if not content_hash and deps.ingest is not None:
         content_hash = deps.ingest.hash_file(local_uri)
     if not content_hash:

@@ -48,6 +48,12 @@ MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 #: stderr 回显长度上限（够定位问题，又不至于把整篇栈塞进错误消息）
 _STDERR_TAIL_CHARS = 500
 
+#: 后台 stderr 泵缓存的字节上限。远大于回显长度：``_STDERR_TAIL_CHARS``
+#: 只是**给用户看**的截断，泵缓存需要留下崩溃前更多上下文供 grep。
+#: 128 KB 够装典型 MCP Server 启动阶段的一整段栈，又不至于让长会话
+#: 无界吃内存。
+_STDERR_BUFFER_BYTES = 128 * 1024
+
 
 def describe_error(e: McpClientError) -> str:
     """错误消息 + 外部 Server 的 stderr 片段。
@@ -117,6 +123,11 @@ class McpStdioClient:
         self._timeout = timeout
         self._proc: asyncio.subprocess.Process | None = None
         self._next_id = 0
+        # 后台 stderr 泵：把子进程 stderr 持续读进有界环形缓冲，避免
+        # 「Server 写满管道 → 子进程 write() 阻塞 → 我们读 stdout 等响应
+        # 也阻塞」的互锁。环形缓冲只留最后 ~128KB（够诊断，不无界吃内存）。
+        self._stderr_buf: bytearray = bytearray()
+        self._stderr_task: asyncio.Task[None] | None = None
 
     async def __aenter__(self) -> McpStdioClient:
         try:
@@ -136,7 +147,29 @@ class McpStdioClient:
             raise McpClientError(
                 "MCP_CLIENT_SPAWN_FAILED", f"无法启动 MCP Server：{e}"
             ) from e
+        # 起后台泵（不 await）；spawn 前已经建好 stream 引用，读它会自然
+        # 在子进程关闭后拿到 EOF 退出。
+        if self._proc is not None and self._proc.stderr is not None:
+            self._stderr_task = asyncio.create_task(
+                self._pump_stderr(self._proc.stderr),
+                name=f"mcp-stderr-pump-{'-'.join(self._argv[:2])}",
+            )
         return self
+
+    async def _pump_stderr(self, stream: asyncio.StreamReader) -> None:
+        """把 stderr 持续读进环形缓冲，直到 EOF 或本 task 被 cancel。"""
+        try:
+            while True:
+                chunk = await stream.read(4096)
+                if not chunk:
+                    break
+                self._stderr_buf.extend(chunk)
+                if len(self._stderr_buf) > _STDERR_BUFFER_BYTES:
+                    # 只保留最后 _STDERR_BUFFER_BYTES 字节（丢弃最老段）
+                    overflow = len(self._stderr_buf) - _STDERR_BUFFER_BYTES
+                    del self._stderr_buf[:overflow]
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001 - 泵不参与业务失败
+            return
 
     async def __aexit__(self, *_exc: object) -> None:
         await self.close()
@@ -145,6 +178,17 @@ class McpStdioClient:
         """关闭子进程；先合上 stdin 让对方自然退出，超时再强杀。"""
         proc = self._proc
         self._proc = None
+        pump = self._stderr_task
+        self._stderr_task = None
+        if pump is not None and not pump.done():
+            pump.cancel()
+        # 泵随子进程 EOF 自然结束；cancel 后 await 一次把异常吞掉，
+        # 避免 "Task was destroyed but it is pending" 噪音。
+        if pump is not None:
+            try:
+                await pump
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
         if proc is None or proc.returncode is not None:
             return
         try:
@@ -170,15 +214,16 @@ class McpStdioClient:
                     logger.debug("mcp client transport already closed")
 
     async def _stderr_tail(self) -> str:
-        """读一段 stderr 作为诊断信息（Server 崩溃时最有用的线索）。"""
-        proc = self._proc
-        if proc is None or proc.stderr is None:
+        """取最近若干 KB 的 stderr 作为诊断（泵已把它缓存到环形缓冲）。
+
+        不再直接 ``proc.stderr.read`` —— 那样只有**在故障检测之后**才有机会
+        读一次，而真正的互锁恰恰发生在故障检测之前：子进程写满管道 → write()
+        阻塞 → 我们等 stdout 响应也阻塞 → 30s 超时 → 才走到这里读一次；此时
+        子进程还在阻塞写，读也读不到什么。改由后台泵在正常期间就把管道抽空。
+        """
+        if not self._stderr_buf:
             return ""
-        try:
-            data = await asyncio.wait_for(proc.stderr.read(4096), timeout=0.5)
-        except (TimeoutError, Exception):  # noqa: BLE001
-            return ""
-        return data.decode("utf-8", errors="replace").strip()
+        return bytes(self._stderr_buf).decode("utf-8", errors="replace").strip()
 
     async def _request(self, method: str, params: dict[str, Any]) -> Any:
         """发一条 JSON-RPC 请求并等待同 id 的响应。"""

@@ -13,7 +13,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from worker.runtime.net import make_async_client
+from worker.runtime.net import shared_async_client
 
 
 def _write_bytes(path: Path, data: bytes) -> None:
@@ -55,15 +55,16 @@ class CloudTTSProvider:
         await asyncio.to_thread(_ensure_dir, out_dir)
         digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
         path = Path(out_dir) / f"tts_{digest}.wav"
-        client = self._client or make_async_client()
-        async with client as c:
-            resp = await c.post(
-                self.base_url,
-                headers={"Authorization": f"Bearer {self.api_key}"},
-                json={"text": text, "model": self.model},
-                timeout=30,
-            )
-            resp.raise_for_status()
-            audio = resp.content
+        client = self._client or await shared_async_client()
+        # 借用语义：**不**用 ``async with client:`` 关掉注入 / 共享实例
+        # （旧写法第一次 synthesize 就把外部 client 关到不可用，后续全部报错）。
+        resp = await client.post(
+            self.base_url,
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            json={"text": text, "model": self.model},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        audio = resp.content
         await asyncio.to_thread(_write_bytes, path, audio)
         return "file://" + str(path)

@@ -6,11 +6,12 @@ v1.1 Patch-A3：``runtime.ready`` 携带 ``protocol_version`` 与 ``capabilities
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from worker.runtime import __version__
+from worker.runtime import __version__, net
 from worker.runtime.state import WorkerState
 
 
@@ -75,5 +76,11 @@ async def handle_shutdown(
     del state  # W1 不修改状态
 
     parsed = ShutdownParams.model_validate(params or {})
+    # 关停 Provider 共用的 httpx.AsyncClient —— 由 net.shared_async_client 持有，
+    # Provider 只借不关；这里不 aclose 的话进程退出前 event loop 关得早，httpx
+    # 会打一堆「Task was destroyed but pending」噪音，Windows 上还可能挂住 socket
+    # 句柄。异常吞掉不阻塞 shutdown 主流程。
+    with contextlib.suppress(Exception):
+        await net.aclose_shared_async_client()
     shutdown_event.set()
     return {"bye": True, "graceful": parsed.graceful}

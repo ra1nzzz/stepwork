@@ -17,7 +17,7 @@ from typing import Any
 
 import httpx
 
-from worker.runtime.net import make_async_client
+from worker.runtime.net import shared_async_client
 from worker.runtime.providers.asr.base import Transcript, TranscriptSegment
 
 
@@ -48,8 +48,7 @@ class CloudASRProvider:
         if self._client is not None:
             yield self._client
             return
-        async with make_async_client(timeout=60.0) as c:
-            yield c
+        yield await shared_async_client()
 
     async def transcribe(
         self, media_uri: str, opts: dict[str, Any] | None = None
@@ -64,6 +63,7 @@ class CloudASRProvider:
                 f"{self.base_url}/transcribe",
                 headers={"Authorization": f"Bearer {self.api_key}"},
                 json={"media_uri": media_uri, "opts": opts},
+                timeout=60.0,
             )
             resp.raise_for_status()
             data = resp.json()
