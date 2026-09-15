@@ -24,6 +24,13 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path), timeout=30)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    # WAL 模式官方推荐 synchronous=NORMAL：每次 commit 不再 fsync，
+    # fsync 交给 checkpoint（每 ~1000 页 / 关停）。进程崩溃最多回退
+    # 到最后一次 checkpoint 之前，**库文件不会损坏**。本项目每条命令
+    # 除业务写外还会 INSERT 一行 command_metrics 并 commit（observability
+    # 的代价），FULL 下等于每次动作至少 2 次 fsync，SSD 上也明显；NORMAL
+    # 是"本地创作工作台 + 桌面崩溃可接受"这类语义的正解。
+    conn.execute("PRAGMA synchronous=NORMAL")
     conn.row_factory = sqlite3.Row
     return conn
 

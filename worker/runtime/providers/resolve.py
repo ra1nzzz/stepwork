@@ -85,6 +85,10 @@ def apply_override(workspace_id: str, secrets: dict[str, Any]) -> None:
     仅用 secrets 中**实际提供**的 section 覆盖旧值；空 dict 的 section
     保持不变。每个 section 内，仅用「非空且非掩码占位符」的值覆盖旧值，
     空串 / ``"••••"`` 保留已存的真实密钥。
+
+    覆盖层一旦变化，**必须**作废 :func:`get_provider_bundle` 的缓存 ——
+    否则下一次命令仍拿旧的 Provider 实例（apiKey 换了却还打老 endpoint、
+    Whisper model size 改了却不重载），前端保存设置看起来生效实际无变化。
     """
     with CONFIG_LOCK:
         current = CONFIG_OVERRIDES.get(workspace_id, {})
@@ -102,6 +106,7 @@ def apply_override(workspace_id: str, secrets: dict[str, Any]) -> None:
                 new_section[key] = value
             merged[section] = new_section
         CONFIG_OVERRIDES[workspace_id] = merged
+    _invalidate_provider_cache()
 
 
 def read_override(workspace_id: str) -> dict[str, Any]:
@@ -547,3 +552,54 @@ def resolve_publish_provider() -> PublishProvider | None:
     if kind == "opencli":
         return OpenCliPublishProvider(binary=_env("STEPWORK_OPENCLI_BIN") or "opencli")
     return None
+
+
+# ---------------------------------------------------------------------------
+# Provider 缓存层
+#
+# 六件套（asr/ai/tts/image/renderer/scene_detector）此前每条命令都重建：
+#
+# - Whisper 模型只在 ``WhisperASRProvider._model`` 内部缓存，实例一换就
+#   重新 ``WhisperModel(...)`` —— ``small`` 也要几秒、``large`` 分钟级，
+#   每条 ``TranscribeSource`` 都付这笔钱。
+# - ``shutil.which("ffmpeg")`` × 2 + ``importlib.util.find_spec`` 扫盘也
+#   每次执行；连 ``GetConfig`` 这种轻命令都被拖成毫秒级 → 亚秒级。
+#
+# 缓存按 ``workspace_id`` 分片（provider 会读工作区级密钥覆盖层）。
+# ``apply_override`` 改覆盖层时经 :func:`_invalidate_provider_cache` 整体
+# 清空 —— 简单粗暴但正确：配置写操作频率远低于读，缓存重建的代价只在真正
+# 变更后付一次。若将来某个 provider 支持热更新，改成按 workspace_id 定向失效。
+# ---------------------------------------------------------------------------
+
+_PROVIDER_BUNDLE_LOCK = threading.Lock()
+_PROVIDER_BUNDLE_CACHE: dict[str | None, dict[str, Any]] = {}
+
+
+def get_provider_bundle(workspace_id: str | None) -> dict[str, Any]:
+    """按工作区取六件套 Provider（缓存命中即复用实例，miss 才构建）。
+
+    Returns:
+        ``{"asr", "ai", "tts", "image", "renderer", "scene_detector"}``；
+        任一字段为 ``None`` 时由 handler 转译为 ``UNAVAILABLE``（沿用各
+        ``resolve_*`` 的既有语义，缓存层不改变判定）。
+    """
+    with _PROVIDER_BUNDLE_LOCK:
+        cached = _PROVIDER_BUNDLE_CACHE.get(workspace_id)
+        if cached is not None:
+            return dict(cached)  # 返回浅拷贝，防止调用方就地改 map
+        bundle = {
+            "asr": resolve_asr(workspace_id),
+            "ai": resolve_ai(workspace_id),
+            "tts": resolve_tts(workspace_id),
+            "image": resolve_image(workspace_id),
+            "renderer": resolve_renderer(),
+            "scene_detector": resolve_scene_detector(),
+        }
+        _PROVIDER_BUNDLE_CACHE[workspace_id] = dict(bundle)
+        return bundle
+
+
+def _invalidate_provider_cache() -> None:
+    """清空 Provider 缓存（``apply_override`` 变更后调用）。"""
+    with _PROVIDER_BUNDLE_LOCK:
+        _PROVIDER_BUNDLE_CACHE.clear()

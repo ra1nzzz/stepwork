@@ -129,7 +129,13 @@ class FFmpegSceneDetector:
             "-filter:v", f"select='gt(scene,{threshold})',showinfo",
             "-an", "-f", "null", "-",
         ]
-        proc = subprocess.run(argv, capture_output=True, text=True)  # noqa: S603
+        # 硬超时：``asyncio.to_thread`` 只把阻塞挪出事件循环，线程本身仍会被
+        # 挂死的 ffmpeg 永久占用；default ThreadPoolExecutor 上限只有
+        # ``min(32, cpu+4)``，几条坏视频就能吃光池，之后任何 ``to_thread``
+        # 调用都排队。600s 与 ffmpeg_runner 的 ``timeout_sec`` 对齐。
+        proc = subprocess.run(  # noqa: S603
+            argv, capture_output=True, text=True, timeout=600
+        )
         stderr = proc.stderr or ""
         duration = parse_ffmpeg_duration(stderr)
         boundaries = parse_showinfo_pts(stderr)

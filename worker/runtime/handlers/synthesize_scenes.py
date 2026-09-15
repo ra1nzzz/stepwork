@@ -23,6 +23,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import tempfile
 import threading
@@ -172,7 +173,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
                 raise DispatchError(
                     "TTS_FAILED", f"scene seq={scene.seq} synth failed: {e}"
                 ) from None
-            duration = _measure_duration(audio_uri, runner)
+            duration = await asyncio.to_thread(_measure_duration, audio_uri, runner)
             if duration <= 0:
                 # 实测不到时长就落库 = 时间轴里埋了一个 0，渲染必然错位。
                 # 宁可整条失败，让调用方看见。
@@ -201,7 +202,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             else:
                 out_path = os.path.join(out_dir, f"scenes_{version_id}{_CONCAT_SUFFIX}")
                 try:
-                    _concat_audio(voiced, out_path, runner)
+                    await asyncio.to_thread(_concat_audio, voiced, out_path, runner)
                     concat_uri = "file://" + out_path
                 except Exception as e:  # noqa: BLE001 - 尽力而为，见模块 docstring
                     concat_error = f"{type(e).__name__}: {e}"

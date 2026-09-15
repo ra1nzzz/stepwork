@@ -11,6 +11,7 @@ INSERT 占位符用 :func:`_q` 生成，列数与值元组长度强一致，
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -28,10 +29,32 @@ from worker.runtime.models import (
     Workspace,
 )
 
+logger = logging.getLogger("worker.runtime.db.repos")
+
 
 def _q(n: int) -> str:
     """生成 ``n`` 个逗号分隔的 ``?`` 占位符。"""
     return ",".join(["?"] * n)
+
+
+def _safe_json(raw: Any, default: Any) -> Any:
+    """行内 JSON 列的容错解析。
+
+    此前有 5 处 ``json.loads(row["…"])`` 无 try/except（``workspaces.settings``
+    / ``source_assets.metadata`` / ``jobs.payload`` / ``jobs.result_artifact_ids``
+    / ``content_versions.producer``），一行数据损坏（磁盘写坏 / 老迁移遗留
+    / 上游截断）就让 ``WorkspaceRepo.ensure`` 或 ``JobRepo.get`` 抛
+    ``JSONDecodeError``；``lifecycle`` 又在每个 content 命令入口调 ``ensure``
+    → 该 workspace 所有命令全挂。降级到 default 并 **warning 一行**：
+    数据可能不完整但业务继续跑，事故从"静默崩溃"变成"可 grep 的日志"。
+    """
+    if raw is None or raw == "":
+        return default
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        logger.warning("corrupt JSON column value ignored: %.80r", raw)
+        return default
 
 
 #: hotspot_items 的排序：同源内保持上游顺序（= 热度顺序），跨源按抓取时间
@@ -63,7 +86,7 @@ def _row_to_workspace(row: sqlite3.Row) -> Workspace:
         id=str(row["id"]),
         name=str(row["name"]),
         root_path=str(row["root_path"]),
-        settings=json.loads(row["settings"]) if row["settings"] else {},
+        settings=_safe_json(row["settings"], {}),
         created_at=str(row["created_at"]),
         archived_at=str(row["archived_at"]) if row["archived_at"] is not None else None,
     )
@@ -99,7 +122,7 @@ def _row_to_source_asset(row: sqlite3.Row) -> SourceAsset:
         rights_declaration=(
             str(row["rights_declaration"]) if row["rights_declaration"] is not None else None
         ),
-        metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+        metadata=_safe_json(row["metadata"], {}),
         created_at=str(row["created_at"]),
     )
 
@@ -110,7 +133,7 @@ def _row_to_job(row: sqlite3.Row) -> Job:
         job_type=str(row["job_type"]),
         state=JobState(str(row["state"])),
         stage=JobStage(str(row["stage"])) if row["stage"] is not None else None,
-        payload=json.loads(row["payload"]) if row["payload"] else {},
+        payload=_safe_json(row["payload"], {}),
         progress=float(row["progress"]),
         attempt_count=int(row["attempt_count"]),
         max_attempts=int(row["max_attempts"]),
@@ -120,9 +143,7 @@ def _row_to_job(row: sqlite3.Row) -> Job:
         ),
         heartbeat_at=str(row["heartbeat_at"]) if row["heartbeat_at"] is not None else None,
         error_code=str(row["error_code"]) if row["error_code"] is not None else None,
-        result_artifact_ids=(
-            json.loads(row["result_artifact_ids"]) if row["result_artifact_ids"] else []
-        ),
+        result_artifact_ids=_safe_json(row["result_artifact_ids"], []),
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
     )
@@ -138,7 +159,7 @@ def _row_to_content_version(row: sqlite3.Row) -> ContentVersion:
         content_type=str(row["content_type"]),
         content=str(row["content"]),
         content_hash=str(row["content_hash"]),
-        producer=json.loads(row["producer"]) if row["producer"] else {},
+        producer=_safe_json(row["producer"], {}),
         created_at=str(row["created_at"]),
     )
 
@@ -306,21 +327,31 @@ class JobRepo:
         stage: Optional[JobStage] = None,
     ) -> Job:
         now = datetime.now(UTC).isoformat()
+        placeholders = ",".join(["?"] * len(self._TERMINAL_STATES))
         if to_state in self._TERMINAL_STATES:
-            # 终态：一并清除 lease_owner / lease_expires_at
+            # 终态：一并清除 lease_owner / lease_expires_at。
+            # ⚠️ **同样带 state NOT IN (终态) 守卫**：终态一经确定即不可逆。
+            # 缺这层守卫时，``CANCELLED → SUCCEEDED`` 会成功——用户取消渲染后，
+            # ffmpeg 工作线程仍会跑完 ``finish_job`` / ``persist_content_version``
+            # 把 job 复活成 SUCCEEDED 并挂上产物（真实竞态，非假想）。
+            # 迁移被拒（``rowcount == 0``）不抛错：调用方（cancel 路径）本就以
+            # 「终态」为期望，回读当前真实终态即可，两种并发到达顺序都成立。
             self.conn.execute(
                 "UPDATE jobs SET state=?, progress=COALESCE(?,progress), "
                 "error_code=?, stage=COALESCE(?,stage), "
-                "lease_owner=NULL, lease_expires_at=NULL, updated_at=? WHERE id=?",
-                (to_state.value, progress, error, stage.value if stage else None, now, job_id),
+                "lease_owner=NULL, lease_expires_at=NULL, updated_at=? "
+                f"WHERE id=? AND state NOT IN ({placeholders})",
+                (
+                    to_state.value, progress, error,
+                    stage.value if stage else None, now, job_id,
+                    *[s.value for s in self._TERMINAL_STATES],
+                ),
             )
         else:
-            # 终态不可回退（WHERE 里带守卫，避免竞态）：取消渲染时主协程已把
-            # job 落 CANCELLED，但 ffmpeg 工作线程可能还在跑，其进度回调会
-            # 继续提交 RUNNING —— 若不守卫，终态会被改回 RUNNING，任务永久
-            # 悬挂。守卫放在 SQL 的 WHERE 而非 Python 判断，避免 check-then-act
-            # 之间的窗口。
-            placeholders = ",".join(["?"] * len(self._TERMINAL_STATES))
+            # 终态不可回退（守卫放 SQL 的 WHERE，避免 check-then-act 窗口）：
+            # 取消渲染时主协程已把 job 落 CANCELLED，但 ffmpeg 工作线程可能还
+            # 在跑，其进度回调会继续提交 RUNNING —— 若不守卫，终态会被改回
+            # RUNNING，任务永久悬挂。
             self.conn.execute(
                 "UPDATE jobs SET state=?, progress=COALESCE(?,progress), "
                 "error_code=?, stage=COALESCE(?,stage), updated_at=? "
@@ -718,3 +749,24 @@ class Repos:
         self.content_versions: ContentVersionRepo = ContentVersionRepo(conn)
         self.video_scenes: VideoSceneRepo = VideoSceneRepo(conn)
         self.hotspots: HotspotRepo = HotspotRepo(conn)
+
+    def rebind(self, conn: sqlite3.Connection) -> None:
+        """把新连接同步到自身与**全部**子 repo。
+
+        ``__init__`` 把 ``conn`` 直接引用交给每个子 repo 的 ``self.conn``；
+        RestoreWorkspace 关掉旧连接后若不同步子 repo，它们仍会打到已关闭的
+        连接上，抛 ``ProgrammingError: Cannot operate on a closed database``
+        （W9 归档里的真实 bug：``video_scenes`` / ``hotspots`` 曾被漏掉，
+        导致恢复后 ``SynthesizeScenes`` / ``DiscoverHotspots`` 全挂到重启）。
+
+        这里用 ``vars(self)`` 动态遍历，凡是携带 ``.conn`` 属性的子对象
+        一律重绑——新增子 repo 无须再改调用方，也不会再出现「手工列表漏一项」。
+        """
+        self.conn = conn
+        for attr in vars(self).values():
+            if attr is conn:
+                continue
+            # 只挑鸭子类型 ``hasattr(x, 'conn')`` 的子 repo；
+            # sqlite3.Connection 自身不带 ``conn`` 属性，不会自伤。
+            if hasattr(attr, "conn"):
+                attr.conn = conn

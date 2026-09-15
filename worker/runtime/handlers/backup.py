@@ -63,16 +63,14 @@ def _sanitize_label(label: str) -> str:
 def _rebind_conn(repos: Repos, new_conn: sqlite3.Connection) -> None:
     """把新连接绑定到 ``Repos`` 聚合对象及其所有子 repo。
 
-    ``Repos.__init__`` 把 ``conn`` 直接引用赋给各子 repo 的 ``self.conn``，
-    故重连后需要遍历所有子 repo 把它们的 ``.conn`` 也指向新连接，否则
-    调用 ``repos.projects.*`` 等仍会使用已关闭的旧连接。
+    委托给 :meth:`Repos.rebind`：它动态遍历 ``vars(self)`` 把所有携带 ``.conn``
+    的子 repo 一并重绑。历史上这里手写 5 个子 repo 的赋值，漏了
+    ``video_scenes`` 与 ``hotspots`` —— RestoreWorkspace 关掉旧连接后，S2
+    配音与 S5 热点发现会一路抛 ``ProgrammingError: Cannot operate on a
+    closed database`` 直到重启。改由 Repos 自己负责同步后，新增子 repo
+    无须回来改这里，也不会再出现「手工清单漏一项」。
     """
-    repos.conn = new_conn
-    repos.workspaces.conn = new_conn
-    repos.projects.conn = new_conn
-    repos.source_assets.conn = new_conn
-    repos.jobs.conn = new_conn
-    repos.content_versions.conn = new_conn
+    repos.rebind(new_conn)
 
 
 def _validate_backup_path(backup_path_str: str, home: Path) -> Path:

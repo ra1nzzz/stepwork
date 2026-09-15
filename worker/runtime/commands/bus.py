@@ -430,11 +430,24 @@ async def _dispatch_inner(raw: dict[str, Any], deps: Any) -> dict[str, Any]:
             ok=False, commandId=env.commandId, error=f"CANCELLED: {reason}"
         ).model_dump()
     except DispatchError as e:
+        # 业务预期错误：不打 exception（traceback 会淹没日志），但仍记 warning
+        # 把 commandType + code 关联到 correlation id 附近，方便 grep。
+        logger.warning(
+            "dispatch DispatchError type=%s code=%s msg=%s",
+            env.commandType, e.code, e.message,
+        )
         return CommandResult(
             ok=False, commandId=env.commandId, error=f"{e.code}: {e.message}"
         ).model_dump()
     except Exception as exc:
-        # 兜底：任何未预期异常都转为干净的 ok=False，避免击垮 RPC 循环
+        # 兜底：任何未预期异常都转为干净的 ok=False，避免击垮 RPC 循环。
+        # **必须** logger.exception —— 此前 response 里只剩 ``str(exc)``（还
+        # 会被前端截到 200 字），worker.log 完全没栈；observability 开篇自陈
+        # 「出问题基本靠猜」正是这个洞。异常链经 ``raise ... from`` 一路走
+        # 到这里，exception() 会完整落 traceback。
+        logger.exception(
+            "dispatch unhandled exception type=%s: %s", env.commandType, exc
+        )
         return CommandResult(
             ok=False, commandId=env.commandId, error=f"internal: {exc}"
         ).model_dump()

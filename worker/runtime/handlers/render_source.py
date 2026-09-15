@@ -30,12 +30,12 @@ import os
 import tempfile
 import threading
 import time
-from pathlib import Path
 from typing import Any
 
 from worker.runtime.audit import build_invocation, record_provider_invocation
 from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
+from worker.runtime.ingest.hash import hash_file
 from worker.runtime.jobs import (
     content_job,
     emit_job_progress,
@@ -76,9 +76,15 @@ def _abs_or_none(path: str | None) -> str | None:
 
 
 def _video_content_hash(video_uri: str) -> str:
-    """对视频文件字节做 sha256，文件缺失时回退到路径哈希。"""
+    """对视频文件字节做 sha256（分块流式），文件缺失时回退到路径哈希。
+
+    走 :func:`worker.runtime.ingest.hash.hash_file` 而非
+    ``Path(...).read_bytes()``：成片常见数百 MB，一次性读入既是内存峰值，
+    又会把 async handler 卡在同一次 ``open + read`` 上（心跳停 / CancelJob
+    排队）。分块 sha256 恒定 64 KB 内存占用，调用方需自行放线程池。
+    """
     try:
-        return hashlib.sha256(Path(video_uri).read_bytes()).hexdigest()
+        return hash_file(video_uri)
     except (OSError, ValueError):
         return hashlib.sha256(video_uri.encode("utf-8")).hexdigest()
 
@@ -362,13 +368,15 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             )
             # T4：保证落库 JSON 合法，绝不截断在 token 中间
             content = _truncate_meta_json(meta)
+            # 大文件哈希放线程池：整片 sha256 在事件循环里直跑会冻结心跳/取消
+            video_hash = await asyncio.to_thread(_video_content_hash, result.video_uri)
             cv_id = persist_content_version(
                 repos,
                 ctx.job,
                 project_id=ctx.project_id,
                 content=content,
                 content_type="video_draft",
-                content_hash=_video_content_hash(result.video_uri),
+                content_hash=video_hash,
                 producer=meta.producer,
                 stage=JobStage.RENDERING,
                 parent_version_id=spec.source_version_id,

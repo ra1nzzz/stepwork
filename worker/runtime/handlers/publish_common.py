@@ -185,10 +185,21 @@ def _authorization_error(
 
     try:
         bound = json.loads(row["payload"]) if row["payload"] else {}
+        if not isinstance(bound, dict):
+            bound = {}
     except (TypeError, ValueError):
         bound = {}
     expected = bound.get("content_hash")
-    if expected and expected != approval_content_hash(current_bound):
+    # **Fail-closed**：PRD-PUB-004 的「改内容即失效」前提是当初批准时记下了
+    # content_hash。缺这个字段（老数据 / payload 损坏 / 类型不对）意味着
+    # 「不知道当初批的是什么」 —— 这时放行等于让攻击者只要把 payload 打坏
+    # 就能绕过哈希校验。宁可让用户重新授权一次（正确性来源、可预期代价）。
+    if not expected:
+        return (
+            "authorization payload missing content_hash; "
+            "please request a new authorization"
+        )
+    if expected != approval_content_hash(current_bound):
         return (
             "content changed since authorization was granted; "
             "please request a new authorization"

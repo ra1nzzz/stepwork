@@ -27,6 +27,7 @@ W8 的 ``__main__._configure_logging`` 仅走 stderr，``diagnostics._collect_re
 
 from __future__ import annotations
 
+import json
 import logging
 import logging.handlers
 import os
@@ -39,25 +40,33 @@ __all__ = ["configure_logging"]
 # 掩码符号（与 config._mask_secrets 保持一致）
 _MASK: str = "••••"
 
-# 匹配 ``keyword[:=]value`` 形式的敏感片段。
-# PRD §11.3 明确要求「日志不包含 Cookie、Token、二维码和验证码」——
-# 此前只覆盖 api_key/secret/token/password，cookie / 二维码 / 验证码
-# 三类全部漏网，故一并纳入（含中文关键字，日志里常直接写中文）。
-# 仅当关键字后紧跟 ``:`` 或 ``=``（允许两侧空白）时触发，避免误伤普通叙述。
+# 关键字清单 —— 必须与 :data:`worker.runtime.handlers.config._SECRET_RE` 覆盖的
+# 字段名保持同步（``passphrase`` / ``credential`` / 裸 ``key`` 曾在配置侧被剥离
+# 不落库，日志侧却漏掩，导致 ``UpdateConfig`` payload 摘要里的这些字段明文进
+# ``worker.log`` 并被 ``diagnostics._collect_recent_logs`` 打进诊断包）。
+# 另加仅出现在日志文本 / HTTP 头 / 内联图片里的凭据类关键词（PRD §11.3 明确要求
+# 「日志不包含 Cookie、Token、二维码和验证码」）。
+# 交替式按最长优先排：先 ``access[_-]?key`` 再 ``key``，避免只匹配到尾部。
+_KEYWORD_ALT: str = (
+    "api[_-]?key|access[_-]?key|secret[_-]?key|private[_-]?key|refresh[_-]?key|"
+    "session[_-]?id|set[_-]?cookie|verify[_-]?code|qr[_-]?code|"
+    "password|passwd|passphrase|credential|authorization|bearer|"
+    "secret|token|cookie|apikey|qrcode|captcha|otp|key|"
+    "二维码|验证码|密码|凭据"
+)
+
+# 匹配 ``keyword <quote?> <sep> <auth?> <value>`` 形式的敏感片段。
+# - ``(?<![\w-])`` 左边界：避免 ``monkey=1`` 之类误伤（前一个是词字符或连字符就不算关键字起点）。
+# - ``(?P<q>[\"']?)`` 捕获关键字后可能出现的引号（JSON 形态是 ``"apiKey": "..."``），
+#   回填时原样保留，防止整行 JSON 被掩码打碎。
+# - value 分三种：双引号 / 单引号 / 裸值（收紧到 JSON 定界符前，避免 ``\S+`` 吃掉 ``}``）。
+# - 允许值前先跟 ``Bearer/Basic/Token/Digest`` 认证方案词 —— 否则 ``Authorization: Bearer <t>``
+#   只掩掉 ``Bearer``，真 token 泄漏。
 _SECRET_PATTERN: re.Pattern[str] = re.compile(
-    r"(?i)("
-    r"api[_-]?key|secret|token|password|passwd|"
-    r"cookie|set-cookie|session[_-]?id|authorization|bearer|"
-    r"qr[_-]?code|qrcode|captcha|verify[_-]?code|otp|"
-    r"二维码|验证码|密码|凭据"
-    # 关键字与分隔符之间允许一个引号：JSON 形态是 ``"apiKey": "sk-..."``，
-    # 不放行这个引号的话，日志里所有 JSON 形式的密钥都掩不掉 —— 而结构化
-    # 日志恰恰全是 JSON。
-    r")[\"']?\s*[:=]\s*"
-    # 值部分：允许先跟一个认证方案词（Bearer / Basic / Token）再跟真实凭据，
-    # 否则 "Authorization: Bearer <token>" 只会掩掉 "Bearer"，真 token 泄漏。
-    # 带引号的值整段吃掉，避免只掩到闭合引号之前。
-    r"(?:(?:bearer|basic|token|digest)\s+)?(?:\"[^\"]*\"|'[^']*'|\S+)"
+    r"(?i)(?<![\w-])(?P<kw>" + _KEYWORD_ALT + r")"
+    r"(?P<q>[\"']?)(?P<sep>\s*[:=]\s*)"
+    r"(?P<auth>(?:bearer|basic|token|digest)\s+)?"
+    r'(?P<val>"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'|[^\s,}\]\'"]+)'
 )
 
 # data URI 形式的二维码/截图（``data:image/png;base64,...``）：整段抹掉。
@@ -98,22 +107,63 @@ def _mask_log_str(s: str) -> str:
     两类：``keyword[:=]value`` 片段（含 cookie / 二维码 / 验证码）与
     内联 ``data:image/...;base64,`` 二维码/截图。掩码幂等：对已掩码的
     字符串再次应用不会改变结果。
+
+    替换**只吃掉 value 部分**，把 keyword / 两侧引号 / ``:`` 或 ``=`` 分隔符 /
+    认证方案词原样回填 —— 这样结构化日志里
+    ``{"apiKey": "sk-live-x"}`` 掩码后是 ``{"apiKey": "••••"}``（仍是合法 JSON）。
+    旧实现把 ``apiKey": "sk-live-x"`` 整段换成 ``apiKey=••••``，引号被吞、
+    JSON 结构碎裂，``_JSON_LINE_FMT`` 把 message 裸插进 ``"msg":"…"`` 后
+    每条含 payload 的日志都无法 ``json.loads``（W9 归档里的 P1）。
+
+    掩码符号本身不含引号，对已掩码串再跑一次匹配到的 value 是 ``••••``（裸值
+    分支），会被替换成同一 ``••••`` —— 幂等性保持。
     """
-    masked = _SECRET_PATTERN.sub(lambda m: f"{m.group(1)}={_MASK}", s)
+
+    def _repl(m: re.Match[str]) -> str:
+        raw_val = m.group("val")
+        if raw_val.startswith('"'):
+            masked = f'"{_MASK}"'
+        elif raw_val.startswith("'"):
+            masked = f"'{_MASK}'"
+        else:
+            masked = _MASK
+        auth = m.group("auth") or ""
+        return f"{m.group('kw')}{m.group('q')}{m.group('sep')}{auth}{masked}"
+
+    masked = _SECRET_PATTERN.sub(_repl, s)
     return _DATA_URI_PATTERN.sub(_MASK, masked)
 
 
 class MaskingFormatter(logging.Formatter):
-    """格式化后对整行做密钥掩码的 Formatter。
+    """把日志 record 序列化为**合法** JSON 行，再做密钥掩码。
 
-    先委托 :meth:`logging.Formatter.format` 完成标准格式化（含 ``%``-参数化
-    消息展开），再对结果字符串应用 :func:`_mask_log_str`，确保参数化日志中
-    的密钥值也被掩码。
+    两件事同时被修：
+
+    - 旧版 :class:`logging.Formatter` 的 ``%(message)s`` 把消息裸插进
+      ``"msg":"…"``，日志正文含引号 / 反斜杠 / 换行 → 整行 JSON 碎裂
+      （dimension A 归档里的 P1：结构化日志宣称 grep 得动，实际每条含
+      dict payload 的都是非法 JSON）。
+    - 掩码若放在 ``json.dumps`` **之后**，``json.dumps`` 已把 msg 里的
+      ``"`` 转义成 ``\\"`` —— 掩码正则 ``[\"']?`` 只吃一个引号，遇到
+      反斜杠就落空，密钥原样泄漏进磁盘。
+
+    现在掩码在**明文阶段**（msg / exc / stack 各自 ``_mask_log_str``）做，
+    再由 ``json.dumps`` 保证整行合法。异常 / stack 也走同一路径 ——
+    traceback 里最可能带 token 与 base64 凭据。
     """
 
     def format(self, record: logging.LogRecord) -> str:
-        formatted = super().format(record)
-        return _mask_log_str(formatted)
+        payload: dict[str, str] = {
+            "ts": self.formatTime(record, self.datefmt),
+            "level": record.levelname,
+            "name": record.name,
+            "msg": _mask_log_str(record.getMessage()),
+        }
+        if record.exc_info:
+            payload["exc"] = _mask_log_str(self.formatException(record.exc_info))
+        elif record.stack_info:
+            payload["stack"] = _mask_log_str(self.formatStack(record.stack_info))
+        return json.dumps(payload, ensure_ascii=False)
 
 
 def configure_logging(

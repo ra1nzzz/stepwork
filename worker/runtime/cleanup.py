@@ -102,11 +102,72 @@ def retention_sweep(
     return _sweep_files(targets, cutoff)
 
 
+#: 审计事件的保留倍数（相对 ``retentionDays``）：命令级幂等 / 指标可以照
+#: 用户配的窗口清，审计有合规价值，多留一倍再走。下限 30 天避免"刚审完
+#: 就被抹掉"这种短窗口把审计价值清零。
+_AUDIT_RETENTION_MULTIPLIER: int = 2
+_AUDIT_MIN_DAYS: int = 30
+
+
+def db_retention_sweep(
+    conn: Any, retention_days: int, mode: str
+) -> int:
+    """清理 ``command_idempotency`` / ``command_metrics`` / ``audit_events``
+    三张长期只增长的表；返回删除行数。
+
+    三表的时间列（``created_at`` / ``recorded_at`` / ``timestamp``）都是
+    ISO-8601 文本，字典序与时间序一致，SQL ``WHERE < ?`` 直接生效。
+
+    策略与文件清扫对齐：
+
+    - ``manual`` 不动。
+    - ``immediate`` 全清（用户显式要求"立即清"）。
+    - ``scheduled`` 只清早于 ``retentionDays`` 的行；审计按
+      ``retentionDays × _AUDIT_RETENTION_MULTIPLIER`` 但**不低于**
+      ``_AUDIT_MIN_DAYS``（防止 ``retentionDays=1`` 就把审计价值清零）。
+
+    表不存在（例如迁移未到 ``0009`` / ``0011`` 就跑清理）视作无操作，
+    不让启动路径崩掉。
+    """
+    if mode == "manual":
+        return 0
+    if mode == "immediate":
+        cutoff_iso = "9999-12-31T23:59:59+00:00"  # 一切早于此 → 全清
+        audit_cutoff = cutoff_iso
+    else:
+        now = time.time()
+        cutoff_iso = time.strftime(
+            "%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(now - retention_days * 86400)
+        )
+        audit_days = max(retention_days * _AUDIT_RETENTION_MULTIPLIER, _AUDIT_MIN_DAYS)
+        audit_cutoff = time.strftime(
+            "%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(now - audit_days * 86400)
+        )
+    deleted = 0
+    for table, col, cutoff_val in (
+        ("command_idempotency", "created_at", cutoff_iso),
+        ("command_metrics", "recorded_at", cutoff_iso),
+        ("audit_events", "timestamp", audit_cutoff),
+    ):
+        try:
+            cur = conn.execute(
+                f"DELETE FROM {table} WHERE {col} < ?", (cutoff_val,)  # noqa: S608
+            )
+        except Exception:  # noqa: BLE001 - 表不存在视作无操作，不阻塞启动
+            logger.debug("db sweep skipped table=%s", table, exc_info=True)
+            continue
+        deleted += max(cur.rowcount, 0)
+    if deleted:
+        conn.commit()
+    return deleted
+
+
 def run_retention_sweep(conn: Any, home: Path | None = None) -> int:
     """bootstrap 入口：读首个工作区的 storage 配置并执行清扫。
 
     无工作区行时按默认配置执行；任何异常都被吞掉并降级为日志
-    （启动清扫绝不阻塞 worker）。
+    （启动清扫绝不阻塞 worker）。返回**文件删除数**（保持既有语义），
+    同时顺带执行 DB 侧 TTL 清理（幂等 / 指标 / 审计三表），行数记日志。
     """
     import json
 
@@ -124,10 +185,11 @@ def run_retention_sweep(conn: Any, home: Path | None = None) -> int:
                 settings = {}
         retention_days, mode = resolve_cleanup_config(settings)
         deleted = retention_sweep(resolved_home, retention_days, mode)
-        if deleted:
+        db_deleted = db_retention_sweep(conn, retention_days, mode)
+        if deleted or db_deleted:
             logger.info(
-                "retention sweep: deleted=%s mode=%s retention_days=%s",
-                deleted, mode, retention_days,
+                "retention sweep: files=%s db_rows=%s mode=%s retention_days=%s",
+                deleted, db_deleted, mode, retention_days,
             )
         return deleted
     except Exception:  # noqa: BLE001 - 启动清扫绝不阻塞 worker

@@ -77,6 +77,14 @@ def _ffprobe_candidates(
     return out
 
 
+_PROBE_TIMEOUT_SEC: float = 30.0
+"""媒体探测的兜底超时。ffprobe 在损坏/异常媒体上可能永久挂起，
+而 :func:`probe_duration` 常在 **async handler** 里被直接调用
+（``synthesize_scenes._measure_duration`` / ``render_source`` 的进度回调）——
+无超时即冻结整个事件循环：worker 心跳停 → Rust 看门狗判死重启，
+``CancelJob`` 也进不来。30s 对本地媒体探测足够宽（正常 <200ms）。"""
+
+
 def probe_duration(
     path: str,
     ffprobe_bin: str | None = None,
@@ -88,20 +96,29 @@ def probe_duration(
     ``ffmpeg -i`` 的 stderr ``Duration:`` 行（ffmpeg 无输出参数会以非零码
     退出，属预期行为）。两者皆缺失 → :class:`FFmpegUnavailable`。
 
+    两个子进程调用都带 :data:`_PROBE_TIMEOUT_SEC` 超时：本函数常在 async
+    handler 中被直接调用，一次挂起就冻结整个事件循环（心跳停 → 看门狗判死
+    重启，``CancelJob`` 也进不来）。超时统一按 ``FFmpegFailed`` 上抛，
+    与「媒体损坏读不出时长」走同一降级路径。
+
     Raises:
         FFmpegUnavailable: ffprobe 与 ffmpeg 均不可用。
-        FFmpegFailed: 二进制在，但读不出时长（媒体损坏或非媒体文件）。
+        FFmpegFailed: 二进制在，但读不出时长（媒体损坏 / 非媒体文件 / 超时）。
     """
     for probe in _ffprobe_candidates(ffprobe_bin, ffmpeg_bin):
-        r = subprocess.run(
-            [
-                probe, "-v", "error", "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1", path,
-            ],
-            capture_output=True,
-            text=True,
-            errors="replace",
-        )
+        try:
+            r = subprocess.run(
+                [
+                    probe, "-v", "error", "-show_entries", "format=duration",
+                    "-of", "default=noprint_wrappers=1:nokey=1", path,
+                ],
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=_PROBE_TIMEOUT_SEC,
+            )
+        except subprocess.TimeoutExpired:
+            raise FFmpegFailed(-1, f"ffprobe timed out after {_PROBE_TIMEOUT_SEC}s") from None
         if r.returncode == 0:
             try:
                 return float(r.stdout.strip())
@@ -110,12 +127,16 @@ def probe_duration(
     ffmpeg = ffmpeg_bin or shutil.which("ffmpeg")
     if ffmpeg is None or not os.path.isfile(ffmpeg):
         raise FFmpegUnavailable()
-    r = subprocess.run(
-        [ffmpeg, "-hide_banner", "-i", path],
-        capture_output=True,
-        text=True,
-        errors="replace",
-    )
+    try:
+        r = subprocess.run(
+            [ffmpeg, "-hide_banner", "-i", path],
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=_PROBE_TIMEOUT_SEC,
+        )
+    except subprocess.TimeoutExpired:
+        raise FFmpegFailed(-1, f"ffmpeg timed out after {_PROBE_TIMEOUT_SEC}s") from None
     m = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", r.stderr)
     if not m:
         raise FFmpegFailed(r.returncode, r.stderr[-500:])
