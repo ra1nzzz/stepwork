@@ -5,8 +5,10 @@
 启动 worker 子进程。
 
 调用模式对齐 ``worker/dev_bridge.py`` 与
-``worker.runtime.handlers.commands.handle_command``：构造 deps → 校验信封 →
-dispatch。
+``worker.runtime.handlers.commands.handle_command``：装配 deps → 校验信封 →
+dispatch。deps 装配统一走 :func:`worker.runtime.deps.build_deps` —— 与
+Rust sidecar 路径共用同一份 Provider 缓存 + notify + worker_state，
+不再有"两条装配长得不一样"的漂移。
 """
 
 from __future__ import annotations
@@ -15,19 +17,9 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from worker.runtime import ingest
 from worker.runtime.bootstrap import bootstrap_db
 from worker.runtime.commands.bus import dispatch
-from worker.runtime.db.repos import Repos
-from worker.runtime.deps import Deps
-from worker.runtime.providers.resolve import (
-    resolve_ai,
-    resolve_asr,
-    resolve_image,
-    resolve_renderer,
-    resolve_scene_detector,
-    resolve_tts,
-)
+from worker.runtime.deps import build_deps
 from worker.runtime.state import WorkerState
 
 
@@ -53,16 +45,7 @@ async def run_command(
         # backup=False：每条命令整库复制一次备份会形成备份洪水（CLI 观测
         # 2 分钟 17 份），备份只留给桌面 worker 启动路径
         bootstrap_db(state, db_path=db_path, recover_jobs=False, backup=False)
-        deps = Deps(
-            repos=Repos(state.db_conn),
-            ingest=ingest,
-            asr=resolve_asr(ws),
-            ai=resolve_ai(ws),
-            tts=resolve_tts(ws),
-            image=resolve_image(ws),
-            renderer=resolve_renderer(),
-            scene_detector=resolve_scene_detector(),
-        )
+        deps = await build_deps(state, ws)
         # ``dispatch`` 内部会 ``parse_envelope(raw)`` 校验信封并路由到
         # handler，最终对 ``CommandResult`` 调 ``model_dump()`` 返回 dict。
         return await dispatch(raw, deps)
