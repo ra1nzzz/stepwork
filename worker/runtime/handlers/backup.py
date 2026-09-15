@@ -1,5 +1,15 @@
 """备份恢复 handler（W9 L.40）。
 
+.. warning:: **命令名承诺"工作区级"，实现是"全局级"**（review 抓到的 P2）
+
+   ``BackupWorkspace`` / ``RestoreWorkspace`` 操作的是**整个**
+   ``$STEPWORK_HOME/stepwork.db`` 与相关 sidecar —— 单库多工作区架构下
+   **不存在**按工作区物理拆分的边界，"只备份一个工作区"当前不可实现。
+   detail 里回显 ``scope="global"`` 让调用方明确感知，命名保留是因为
+   前端 / CLI / MCP 命令面 40+ 处已稳定依赖这个名字；未来若要真按
+   工作区备份，需要一次数据层拆分（每个 workspace 一个 .db 或用
+   ``ATTACH`` + 表级 filter），届时再连同命令语义一起改。
+
 路由两个命令：
 
 - ``BackupWorkspace``：把 ``$STEPWORK_HOME/stepwork.db`` 复制到
@@ -154,6 +164,9 @@ async def _handle_backup(env: CommandEnvelope, deps: Deps) -> CommandResult:
             "backup_path": str(backup_path),
             "size_bytes": size_bytes,
             "source_db": str(db_path),
+            # 命令叫 BackupWorkspace 但动作是全局的（单库架构无工作区级
+            # 物理边界）—— 显式回显 scope，前端 tooltip / CLI 输出可据此提示
+            "scope": "global",
             "created_at": created_at,
         },
     )
@@ -190,6 +203,7 @@ async def _handle_restore(env: CommandEnvelope, deps: Deps) -> CommandResult:
         commandId=env.commandId,
         detail={
             "restored_to": str(db_path),
+            "scope": "global",
             "size_bytes": size_bytes,
             "backup_path": str(backup_path),
         },

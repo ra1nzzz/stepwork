@@ -28,6 +28,7 @@ import os
 import tempfile
 import threading
 from pathlib import Path
+from typing import Any
 
 from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
@@ -150,43 +151,90 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         fail_code="TTS_FAILED",
         notify=deps.notify,
     ) as ctx:
-        cursor = 0.0
-        skipped: list[int] = []
+        # 逐幕 TTS + 时长实测并发化（P1）：这两步**与场景顺序无关**，串行
+        # 时 8 幕常见 40-120s 全部落在关键路径上；并发上限 4（TTS 厂商
+        # 常见 3-5 并发，再多容易撞限流）压到接近 1 幕的时间。
+        # ⚠️ start_sec 必须**按 seq 顺序**累加，所以并发只跑「拿 audio_uri +
+        # duration」这一段；gather 结束后再顺序累 cursor。
+        _MAX_TTS_CONCURRENCY = 4
+        sem = asyncio.Semaphore(_MAX_TTS_CONCURRENCY)
         total = len(scenes)
-        for i, scene in enumerate(scenes):
+        finished = 0
+
+        async def _one(idx_scene: tuple[int, Any]) -> dict[str, Any]:
+            i, scene = idx_scene
             text = (scene.text or "").strip()
             if not text:
                 # 空幕不配音：合成静音只会凭空多出一段无意义的时长，
                 # 把后面所有幕的 start_sec 一起推歪
+                return {"kind": "skipped", "idx": i, "scene": scene}
+            async with sem:
+                try:
+                    audio_uri = await tts.synthesize(
+                        text, {"out_dir": out_dir, "emotion": scene.emotion}
+                    )
+                except DispatchError as e:
+                    return {"kind": "fatal", "err": e, "idx": i}
+                except Exception as e:  # noqa: BLE001 - provider 异常统一转译
+                    return {
+                        "kind": "fatal",
+                        "err": DispatchError(
+                            "TTS_FAILED",
+                            f"scene seq={scene.seq} synth failed: {e}",
+                        ),
+                        "idx": i,
+                    }
+                duration = await asyncio.to_thread(
+                    _measure_duration, audio_uri, runner
+                )
+            if duration <= 0:
+                # 实测不到时长就落库 = 时间轴里埋了一个 0，渲染必然错位。
+                # 宁可整条失败，让调用方看见。
+                return {
+                    "kind": "fatal",
+                    "err": DispatchError(
+                        "TTS_FAILED",
+                        f"scene seq={scene.seq} audio duration could not be measured "
+                        f"({audio_uri})",
+                    ),
+                    "idx": i,
+                }
+            nonlocal finished
+            finished += 1
+            ctx.progress(0.05 + 0.85 * (finished / max(total, 1)), JobStage.SYNTHESIZING)
+            return {
+                "kind": "ok",
+                "idx": i,
+                "scene": scene,
+                "audio_uri": audio_uri,
+                "duration": duration,
+            }
+
+        results = await asyncio.gather(
+            *(_one(pair) for pair in enumerate(scenes))
+        )
+        # 任一 DispatchError（provider 未配 / 鉴权错 / 时长测不出）→ 挑第一条
+        # raise，让 content_job 把 job 落 FAILED；这是既有 all-or-nothing 语义。
+        fatal = next((r for r in results if r["kind"] == "fatal"), None)
+        if fatal is not None:
+            raise fatal["err"]
+
+        # 顺序累加 cursor 填 start_sec —— 并发跑完，语义与串行版完全一致
+        skipped: list[int] = []
+        cursor = 0.0
+        for r in sorted(results, key=lambda x: x["idx"]):
+            if r["kind"] == "skipped":
+                scene = r["scene"]
                 scene.audio_uri = None
                 scene.duration_sec = 0.0
                 scene.start_sec = cursor
                 skipped.append(scene.seq)
                 continue
-            try:
-                audio_uri = await tts.synthesize(
-                    text, {"out_dir": out_dir, "emotion": scene.emotion}
-                )
-            except DispatchError:
-                raise
-            except Exception as e:  # noqa: BLE001 - provider 异常统一转译
-                raise DispatchError(
-                    "TTS_FAILED", f"scene seq={scene.seq} synth failed: {e}"
-                ) from None
-            duration = await asyncio.to_thread(_measure_duration, audio_uri, runner)
-            if duration <= 0:
-                # 实测不到时长就落库 = 时间轴里埋了一个 0，渲染必然错位。
-                # 宁可整条失败，让调用方看见。
-                raise DispatchError(
-                    "TTS_FAILED",
-                    f"scene seq={scene.seq} audio duration could not be measured "
-                    f"({audio_uri})",
-                )
-            scene.audio_uri = audio_uri
-            scene.duration_sec = duration
+            scene = r["scene"]
+            scene.audio_uri = r["audio_uri"]
+            scene.duration_sec = r["duration"]
             scene.start_sec = cursor
-            cursor += duration
-            ctx.progress(0.05 + 0.85 * ((i + 1) / total), JobStage.SYNTHESIZING)
+            cursor += r["duration"]
 
         # 时间轴一次性落库（半新半旧比全旧更危险）
         repos.video_scenes.apply_timeline(str(version_id), scenes)

@@ -407,6 +407,19 @@ async def _dispatch_inner(raw: dict[str, Any], deps: Any) -> dict[str, Any]:
     if cached is not None:
         return cached
 
+    # 抢席位：两条同 key 命令并发跑，第二条 lookup 会 miss（第一条只落了
+    # INFLIGHT 哨兵、没有真结果），若直接放行就仍会"重复计费"（review 抓到
+    # 的 P1 并发漏洞）。reserve 撞主键 = 有人在跑，拒收让调用方稍后重试。
+    if not idempotency.reserve(conn, env):
+        return CommandResult(
+            ok=False,
+            commandId=env.commandId,
+            error=(
+                "IDEMPOTENT_INFLIGHT: another command with the same "
+                "idempotencyKey is in flight; retry shortly"
+            ),
+        ).model_dump()
+
     handler = importlib.import_module(module_path).handle
     try:
         result: CommandResult = await handler(env, deps)
@@ -425,6 +438,8 @@ async def _dispatch_inner(raw: dict[str, Any], deps: Any) -> dict[str, Any]:
             if was_user_cancelled(asyncio.current_task())
             else "任务因 worker 关停而中止"
         )
+        # 失败路径归还幂等席位，否则同 key 永久被 INFLIGHT 钉住了
+        idempotency.release(conn, env)
         return CommandResult(
             ok=False, commandId=env.commandId, error=f"CANCELLED: {reason}"
         ).model_dump()
@@ -435,6 +450,7 @@ async def _dispatch_inner(raw: dict[str, Any], deps: Any) -> dict[str, Any]:
             "dispatch DispatchError type=%s code=%s msg=%s",
             env.commandType, e.code, e.message,
         )
+        idempotency.release(conn, env)
         return CommandResult(
             ok=False, commandId=env.commandId, error=f"{e.code}: {e.message}"
         ).model_dump()
@@ -447,6 +463,7 @@ async def _dispatch_inner(raw: dict[str, Any], deps: Any) -> dict[str, Any]:
         logger.exception(
             "dispatch unhandled exception type=%s: %s", env.commandType, exc
         )
+        idempotency.release(conn, env)
         return CommandResult(
             ok=False, commandId=env.commandId, error=f"internal: {exc}"
         ).model_dump()
