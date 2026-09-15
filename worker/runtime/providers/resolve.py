@@ -165,29 +165,14 @@ def resolve_asr(workspace_id: str | None = None) -> ASRProvider | None:
 
     若 env 缺失，则回退到 ``workspace_id`` 对应的密钥覆盖层
     （来自设置页保存的密钥，仅存内存）。
+
+    **表驱动**（dimension C P0 #1）：具体分支实现见文件末尾
+    :data:`ASR_FACTORIES`；新增一个 ASR 只需在表里加一行 + 一个小工厂，
+    不再改这个核心函数。
     """
     kind = (_env("STEPWORK_ASR_PROVIDER") or "auto").lower()
-    if kind == "auto":
-        # 默认：真实引擎优先，缺失静默回退确定性 demo（永不返回 None）
-        if _has_module("faster_whisper"):
-            return _build_whisper(workspace_id)
-        return LocalASRProvider()
-    if kind == "local":
-        return LocalASRProvider()
-    if kind in ("whisper", "faster-whisper", "faster_whisper"):
-        # 显式选真实引擎：包缺失即回退 None（handler → UNAVAILABLE），
-        # 绝不因缺依赖崩掉解析。
-        if not _has_module("faster_whisper"):
-            return None
-        return _build_whisper(workspace_id)
-    if kind == "cloud":
-        ov = _override_for(workspace_id, "asr")
-        key = _env("STEPWORK_ASR_API_KEY") or ov.get("apiKey")
-        url = _env("STEPWORK_ASR_BASE_URL") or ov.get("baseUrl")
-        if not key or not _valid_base_url(url):
-            return None
-        return CloudASRProvider(api_key=key, base_url=url)
-    return None
+    factory = ASR_FACTORIES.get(kind)
+    return factory(workspace_id) if factory is not None else None
 
 
 def resolve_ai(workspace_id: str | None = None) -> AIProvider | None:
@@ -196,27 +181,14 @@ def resolve_ai(workspace_id: str | None = None) -> AIProvider | None:
     支持 ``cloud``（``STEPWORK_AI_*``）/ ``openai-compatible`` 或
     ``ollama``（``STEPWORK_OPENAI_*``，Ollama 通常无 key）。缺失必要
     配置返回 ``None``。env 缺失时回退到 ``workspace_id`` 的密钥覆盖层。
+
+    表驱动见 :data:`AI_FACTORIES`。
     """
     kind = (_env("STEPWORK_AI_PROVIDER") or "").lower()
     if not kind:
         return None
-    if kind == "cloud":
-        ov = _override_for(workspace_id, "llm")
-        key = _env("STEPWORK_AI_API_KEY") or ov.get("apiKey")
-        url = _env("STEPWORK_AI_BASE_URL") or ov.get("baseUrl")
-        model = _env("STEPWORK_AI_MODEL") or ov.get("model")
-        if not key or not _valid_base_url(url):
-            return None
-        return CloudAIProvider(api_key=key, base_url=url, model=model)
-    if kind in ("openai-compatible", "openai_compatible", "ollama"):
-        ov = _override_for(workspace_id, "llm")
-        key = _env("STEPWORK_OPENAI_API_KEY") or ov.get("apiKey")
-        url = _env("STEPWORK_OPENAI_BASE_URL") or ov.get("baseUrl")
-        model = _env("STEPWORK_OPENAI_MODEL") or ov.get("model")
-        if not _valid_base_url(url):
-            return None
-        return OpenAICompatibleProvider(api_key=key, base_url=url, model=model)
-    return None
+    factory = AI_FACTORIES.get(kind)
+    return factory(workspace_id) if factory is not None else None
 
 
 def ai_provider_from_hint(hint: dict[str, Any] | None) -> AIProvider | None:
@@ -260,61 +232,12 @@ def resolve_tts(workspace_id: str | None = None) -> TTSProvider | None:
     - ``cloud``：需 ``STEPWORK_TTS_API_KEY`` + ``STEPWORK_TTS_BASE_URL``，
       否则回退 ``None``。
     env 缺失时回退到 ``workspace_id`` 的密钥覆盖层。
+
+    表驱动见 :data:`TTS_FACTORIES`。
     """
     kind = (_env("STEPWORK_TTS_PROVIDER") or "local").lower()
-    if kind == "local":
-        return LocalTTSProvider()
-    if kind in ("edge", "edge-tts", "edge_tts"):
-        # 可选真实语音：缺包即回退 None（handler → UNAVAILABLE）。
-        # 声线取 env / 覆盖层 / provider 默认。
-        if not _has_module("edge_tts"):
-            return None
-        ov = _override_for(workspace_id, "tts")
-        voice = _env("STEPWORK_TTS_VOICE") or str(ov.get("voice") or "") or None
-        from worker.runtime.providers.tts.edge import EdgeTTSProvider
-
-        return EdgeTTSProvider(voice=voice)
-    if kind in ("stepfun", "stepfun-tts", "stepfun_tts"):
-        ov = _override_for(workspace_id, "tts")
-        key = _env("STEPWORK_TTS_API_KEY") or str(ov.get("apiKey") or "")
-        voice = _env("STEPWORK_TTS_VOICE") or str(ov.get("voice") or "")
-        # 复刻音色缺音色 id 等于没法说话：宁可 UNAVAILABLE 也别拿默认音色出片
-        if not key or not voice:
-            return None
-        kwargs: dict[str, Any] = {}
-        tts_model = _env("STEPWORK_TTS_MODEL") or str(ov.get("model") or "")
-        if tts_model:
-            kwargs["model"] = tts_model
-        base_url = _env("STEPWORK_TTS_BASE_URL") or str(ov.get("baseUrl") or "")
-        if base_url:
-            kwargs["base_url"] = base_url
-        # 非法语速视为未配置，回落到 provider 默认值（1.25）
-        raw_speed = _env("STEPWORK_TTS_SPEED") or ov.get("speed")
-        if raw_speed not in (None, ""):
-            try:
-                kwargs["speed"] = float(raw_speed)
-            except (TypeError, ValueError):
-                pass
-        return StepFunTTSProvider(api_key=key, voice=voice, **kwargs)
-    if kind == "cloud":
-        ov = _override_for(workspace_id, "tts")
-        key = _env("STEPWORK_TTS_API_KEY") or str(ov.get("apiKey") or "")
-        url = _env("STEPWORK_TTS_BASE_URL") or str(ov.get("baseUrl") or "")
-        model = _env("STEPWORK_TTS_MODEL") or str(ov.get("model") or "") or None
-        if not key or not _valid_base_url(url):
-            return None
-        # PRD-REN-002：每千字符单价来自 env / 设置页覆盖层；非法值视为未配置
-        raw_cost = _env("STEPWORK_TTS_COST_PER_1K") or ov.get("costPer1k")
-        cost: float | None = None
-        if raw_cost not in (None, ""):
-            try:
-                cost = float(raw_cost)
-            except (TypeError, ValueError):
-                cost = None
-        return CloudTTSProvider(
-            api_key=key, base_url=url, model=model, cost_per_1k=cost
-        )
-    return None
+    factory = TTS_FACTORIES.get(kind)
+    return factory(workspace_id) if factory is not None else None
 
 
 def ffmpeg_runner() -> FFmpegRunner:
@@ -328,16 +251,12 @@ def ffmpeg_runner() -> FFmpegRunner:
 
 
 def _build_renderer(kind: str, runner: FFmpegRunner) -> RendererProvider | None:
-    """按 kind 构造渲染器；未知 kind 返回 ``None``（交回默认 provider）。"""
-    if kind in ("playwright", "pw"):
-        if not _has_module("playwright"):
-            return None
-        from worker.runtime.providers.renderer.playwright import PlaywrightRenderer
+    """按 kind 构造渲染器；未知 kind 返回 ``None``（交回默认 provider）。
 
-        return PlaywrightRenderer(runner)
-    if kind in ("ffmpeg", ""):
-        return FFmpegRenderer(runner)
-    return None
+    表驱动见 :data:`RENDERER_FACTORIES`。
+    """
+    factory = RENDERER_FACTORIES.get(kind)
+    return factory(runner) if factory is not None else None
 
 
 def resolve_renderer() -> RendererProvider | None:
@@ -547,11 +466,15 @@ def resolve_publish_provider() -> PublishProvider | None:
     未知取值返回 ``None``（→ ``UNAVAILABLE``），不猜、不回落 —— 拼错的渠道名
     若能「凑合跑」，错误就会一直留在配置里。用 ``STEPWORK_OPENCLI_BIN`` 可指定
     可执行文件名或路径（默认 ``opencli``）。
+
+    表驱动见 :data:`PUBLISH_FACTORIES`；未来 S7 加抖音 / 视频号 / Bilibili
+    各自渠道时新增一行 + 一个小工厂即可，不必再动本函数。
     """
     kind = (_env("STEPWORK_PUBLISH_PROVIDER") or "").strip().lower()
-    if kind == "opencli":
-        return OpenCliPublishProvider(binary=_env("STEPWORK_OPENCLI_BIN") or "opencli")
-    return None
+    if not kind:
+        return None
+    factory = PUBLISH_FACTORIES.get(kind)
+    return factory() if factory is not None else None
 
 
 # ---------------------------------------------------------------------------
@@ -603,3 +526,202 @@ def _invalidate_provider_cache() -> None:
     """清空 Provider 缓存（``apply_override`` 变更后调用）。"""
     with _PROVIDER_BUNDLE_LOCK:
         _PROVIDER_BUNDLE_CACHE.clear()
+
+
+# ---------------------------------------------------------------------------
+# Provider 工厂表（dimension C P0 #1：把 if 链换成表驱动）
+#
+# 五类 provider（ASR/AI/TTS/Renderer/Publish）此前在 resolve_* 函数里各写
+# 一段 ``if kind == ...`` 链 —— 新增一个 provider 必须**修改这个核心模块**，
+# 与"开闭原则"相反。收口成 :data:`ASR_FACTORIES` / :data:`AI_FACTORIES` /
+# :data:`TTS_FACTORIES` / :data:`RENDERER_FACTORIES` /
+# :data:`PUBLISH_FACTORIES` 之后：
+#
+#   新增一个 provider = 在这里加一行 dict entry + 一个小工厂函数，
+#   不动任何 resolve_* 的函数体。
+#
+# 语义与原分支**完全等价**（``None`` 表示未配置或包缺失 → handler 转
+# UNAVAILABLE；空/未匹配 kind 也是 None），只是控制流从"顺序判断"变
+# "表查一次"。IMAGE 家族已经有 :data:`IMAGE_PRESETS`（本文件上方）同
+# 款做法，这里补齐剩下的五类。
+# ---------------------------------------------------------------------------
+
+
+# -- ASR -------------------------------------------------------------------
+
+
+def _asr_auto(_ws: str | None) -> ASRProvider:
+    # 默认：真实引擎优先，缺失静默回退确定性 demo（永不返回 None）
+    if _has_module("faster_whisper"):
+        return _build_whisper(_ws)
+    return LocalASRProvider()
+
+
+def _asr_local(_ws: str | None) -> ASRProvider:
+    return LocalASRProvider()
+
+
+def _asr_whisper(_ws: str | None) -> ASRProvider | None:
+    # 显式选真实引擎：包缺失即回退 None（handler → UNAVAILABLE），
+    # 绝不因缺依赖崩掉解析。
+    if not _has_module("faster_whisper"):
+        return None
+    return _build_whisper(_ws)
+
+
+def _asr_cloud(workspace_id: str | None) -> ASRProvider | None:
+    ov = _override_for(workspace_id, "asr")
+    key = _env("STEPWORK_ASR_API_KEY") or ov.get("apiKey")
+    url = _env("STEPWORK_ASR_BASE_URL") or ov.get("baseUrl")
+    if not key or not _valid_base_url(url):
+        return None
+    return CloudASRProvider(api_key=key, base_url=url)
+
+
+ASR_FACTORIES: dict[str, Any] = {
+    "auto": _asr_auto,
+    "local": _asr_local,
+    "whisper": _asr_whisper,
+    "faster-whisper": _asr_whisper,
+    "faster_whisper": _asr_whisper,
+    "cloud": _asr_cloud,
+}
+
+
+# -- AI --------------------------------------------------------------------
+
+
+def _ai_cloud(workspace_id: str | None) -> AIProvider | None:
+    ov = _override_for(workspace_id, "llm")
+    key = _env("STEPWORK_AI_API_KEY") or ov.get("apiKey")
+    url = _env("STEPWORK_AI_BASE_URL") or ov.get("baseUrl")
+    model = _env("STEPWORK_AI_MODEL") or ov.get("model")
+    if not key or not _valid_base_url(url):
+        return None
+    return CloudAIProvider(api_key=key, base_url=url, model=model)
+
+
+def _ai_openai_compatible(workspace_id: str | None) -> AIProvider | None:
+    ov = _override_for(workspace_id, "llm")
+    key = _env("STEPWORK_OPENAI_API_KEY") or ov.get("apiKey")
+    url = _env("STEPWORK_OPENAI_BASE_URL") or ov.get("baseUrl")
+    model = _env("STEPWORK_OPENAI_MODEL") or ov.get("model")
+    if not _valid_base_url(url):
+        return None
+    return OpenAICompatibleProvider(api_key=key, base_url=url, model=model)
+
+
+AI_FACTORIES: dict[str, Any] = {
+    "cloud": _ai_cloud,
+    "openai-compatible": _ai_openai_compatible,
+    "openai_compatible": _ai_openai_compatible,
+    "ollama": _ai_openai_compatible,
+}
+
+
+# -- TTS -------------------------------------------------------------------
+
+
+def _tts_local(_ws: str | None) -> TTSProvider:
+    return LocalTTSProvider()
+
+
+def _tts_edge(workspace_id: str | None) -> TTSProvider | None:
+    # 可选真实语音：缺包即回退 None（handler → UNAVAILABLE）。
+    # 声线取 env / 覆盖层 / provider 默认。
+    if not _has_module("edge_tts"):
+        return None
+    ov = _override_for(workspace_id, "tts")
+    voice = _env("STEPWORK_TTS_VOICE") or str(ov.get("voice") or "") or None
+    from worker.runtime.providers.tts.edge import EdgeTTSProvider
+
+    return EdgeTTSProvider(voice=voice)
+
+
+def _tts_stepfun(workspace_id: str | None) -> TTSProvider | None:
+    ov = _override_for(workspace_id, "tts")
+    key = _env("STEPWORK_TTS_API_KEY") or str(ov.get("apiKey") or "")
+    voice = _env("STEPWORK_TTS_VOICE") or str(ov.get("voice") or "")
+    # 复刻音色缺音色 id 等于没法说话：宁可 UNAVAILABLE 也别拿默认音色出片
+    if not key or not voice:
+        return None
+    kwargs: dict[str, Any] = {}
+    tts_model = _env("STEPWORK_TTS_MODEL") or str(ov.get("model") or "")
+    if tts_model:
+        kwargs["model"] = tts_model
+    base_url = _env("STEPWORK_TTS_BASE_URL") or str(ov.get("baseUrl") or "")
+    if base_url:
+        kwargs["base_url"] = base_url
+    # 非法语速视为未配置，回落到 provider 默认值（1.25）
+    raw_speed = _env("STEPWORK_TTS_SPEED") or ov.get("speed")
+    if raw_speed not in (None, ""):
+        try:
+            kwargs["speed"] = float(raw_speed)
+        except (TypeError, ValueError):
+            pass
+    return StepFunTTSProvider(api_key=key, voice=voice, **kwargs)
+
+
+def _tts_cloud(workspace_id: str | None) -> TTSProvider | None:
+    ov = _override_for(workspace_id, "tts")
+    key = _env("STEPWORK_TTS_API_KEY") or str(ov.get("apiKey") or "")
+    url = _env("STEPWORK_TTS_BASE_URL") or str(ov.get("baseUrl") or "")
+    model = _env("STEPWORK_TTS_MODEL") or str(ov.get("model") or "") or None
+    if not key or not _valid_base_url(url):
+        return None
+    # PRD-REN-002：每千字符单价来自 env / 设置页覆盖层；非法值视为未配置
+    raw_cost = _env("STEPWORK_TTS_COST_PER_1K") or ov.get("costPer1k")
+    cost: float | None = None
+    if raw_cost not in (None, ""):
+        try:
+            cost = float(raw_cost)
+        except (TypeError, ValueError):
+            cost = None
+    return CloudTTSProvider(api_key=key, base_url=url, model=model, cost_per_1k=cost)
+
+
+TTS_FACTORIES: dict[str, Any] = {
+    "local": _tts_local,
+    "edge": _tts_edge,
+    "edge-tts": _tts_edge,
+    "edge_tts": _tts_edge,
+    "stepfun": _tts_stepfun,
+    "stepfun-tts": _tts_stepfun,
+    "stepfun_tts": _tts_stepfun,
+    "cloud": _tts_cloud,
+}
+
+
+# -- Renderer --------------------------------------------------------------
+
+
+def _renderer_playwright(runner: FFmpegRunner) -> RendererProvider | None:
+    if not _has_module("playwright"):
+        return None
+    from worker.runtime.providers.renderer.playwright import PlaywrightRenderer
+
+    return PlaywrightRenderer(runner)
+
+
+def _renderer_ffmpeg(runner: FFmpegRunner) -> RendererProvider:
+    return FFmpegRenderer(runner)
+
+
+RENDERER_FACTORIES: dict[str, Any] = {
+    "playwright": _renderer_playwright,
+    "pw": _renderer_playwright,
+    "ffmpeg": _renderer_ffmpeg,
+    "": _renderer_ffmpeg,
+}
+
+
+# -- Publish ---------------------------------------------------------------
+
+
+def _publish_opencli() -> PublishProvider:
+    return OpenCliPublishProvider(binary=_env("STEPWORK_OPENCLI_BIN") or "opencli")
+
+
+PUBLISH_FACTORIES: dict[str, Any] = {
+    "opencli": _publish_opencli,
+}
