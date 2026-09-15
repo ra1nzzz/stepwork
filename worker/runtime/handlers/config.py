@@ -26,6 +26,7 @@ from worker.runtime.models import (
     ConfigSpec,
 )
 from worker.runtime.providers.resolve import apply_override, read_override
+from worker.runtime.validation import parse_spec
 
 # 合并基线：defaults < env < Workspace.settings < CONFIG_OVERRIDES。
 # 注意 env 仅影响真实 provider 解析，设置页展示以 DB + 覆盖层为准，
@@ -196,10 +197,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         )
 
     if env.commandType == "UpdateConfig":
-        try:
-            spec = ConfigSpec(**env.payload)
-        except Exception as e:  # noqa: BLE001 - 转译为干净的客户端错误
-            raise DispatchError("INVALID_ARGUMENT", f"bad config spec: {e}") from None
+        spec = parse_spec(ConfigSpec, env.payload, what="config spec")
 
         incoming = spec.model_dump()
         # 非密钥 → 合并进 DB 设置（保留未提供的字段）

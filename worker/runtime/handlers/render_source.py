@@ -66,6 +66,7 @@ from worker.runtime.render.subtitles import (
     write_srt_text,
 )
 from worker.runtime.render.templates import resolve_resolution, resolve_template
+from worker.runtime.validation import parse_spec
 
 _MAX_DRAFT_META_CHARS = 20000
 
@@ -128,10 +129,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             payload["resolution"] = resolve_resolution(str(aspect))
         except KeyError as e:
             raise DispatchError("INVALID_ARGUMENT", str(e)) from None
-    try:
-        spec = RenderSpec(**payload)
-    except Exception as e:
-        raise DispatchError("INVALID_ARGUMENT", f"bad render spec: {e}") from None
+    spec = parse_spec(RenderSpec, payload, what="render spec")
 
     # 模板必须已注册：未知模板绝不静默回退（旧行为是全部渲成同一个画面）
     try:

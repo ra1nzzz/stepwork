@@ -44,15 +44,13 @@ from worker.runtime.script.similarity import (
     hits_to_warnings,
     similarity_check_enabled,
 )
+from worker.runtime.validation import parse_spec
 
 
 async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     """处理 ``GenerateScript``。"""
     repos = deps.repos
-    try:
-        spec = ScriptSpec(**env.payload)
-    except Exception as e:
-        raise DispatchError("INVALID_ARGUMENT", f"bad script spec: {e}") from None
+    spec = parse_spec(ScriptSpec, env.payload, what="script spec")
 
     # 选定 TopicProposal 版（若提供）→ 取 angles。
     # 解析放在输入校验阶段（job 创建前），坏 content 直接转译为干净的

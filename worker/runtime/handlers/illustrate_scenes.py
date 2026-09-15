@@ -18,6 +18,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import tempfile
 from typing import Any
@@ -94,29 +95,61 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         failed: list[dict[str, Any]] = []
         skipped: list[int] = []
         total = len(scenes)
-        for i, scene in enumerate(scenes):
+
+        # 并发上限：CogView / OpenAI image 一类厂商常见限流在 3-5 并发，
+        # 太高会撞 429 反而更慢；4 是"两条限流之间"的稳妥值。
+        _MAX_IMAGE_CONCURRENCY = 4
+        sem = asyncio.Semaphore(_MAX_IMAGE_CONCURRENCY)
+        finished = 0  # 每完成一幕（成功或失败都算）递增，驱动 progress
+
+        async def _one(idx_scene: tuple[int, Any]) -> dict[str, Any]:
+            i, scene = idx_scene
             if scene.image_uri and not force:
                 # 已有图且未强制 → 跳过（生图要钱，重跑不该重复计费）
-                skipped.append(scene.seq)
-                continue
+                return {"kind": "skipped", "scene": scene, "seq": scene.seq, "idx": i}
             text = (scene.text or "").strip()
             if not text:
-                skipped.append(scene.seq)
-                continue
+                return {"kind": "skipped", "scene": scene, "seq": scene.seq, "idx": i}
             opts: dict[str, Any] = {"out_dir": out_dir, "style": style}
             if isinstance(size, dict):
                 opts.update(size)
-            try:
-                scene.image_uri = await image.generate(
-                    _build_prompt(text, style, extra), opts
-                )
-            except DispatchError:
-                raise
-            except Exception as e:  # noqa: BLE001 - 厂商异常统一转译
-                failed.append({"seq": scene.seq, "error": f"{type(e).__name__}: {e}"})
-                continue
-            done.append(scene)
-            ctx.progress(0.05 + 0.85 * ((i + 1) / total), JobStage.ILLUSTRATING)
+            async with sem:
+                try:
+                    uri = await image.generate(
+                        _build_prompt(text, style, extra), opts
+                    )
+                except DispatchError as e:
+                    return {"kind": "fatal", "err": e, "seq": scene.seq, "idx": i}
+                except Exception as e:  # noqa: BLE001 - 厂商异常统一转译
+                    return {
+                        "kind": "failed",
+                        "seq": scene.seq,
+                        "error": f"{type(e).__name__}: {e}",
+                        "idx": i,
+                    }
+            nonlocal finished
+            scene.image_uri = uri
+            finished += 1
+            ctx.progress(0.05 + 0.85 * (finished / max(total, 1)), JobStage.ILLUSTRATING)
+            return {"kind": "done", "scene": scene, "seq": scene.seq, "idx": i}
+
+        # return_exceptions=True + 结果字典分类：
+        # - 任一 DispatchError 视为"全任务失败"（provider 未配 / 鉴权不对），
+        #   挑第一条 raise 让 content_job 把 job 落 FAILED；
+        # - 其它 Exception 归入 failed 数组，保留"部分成功已落库"的原语义。
+        results = await asyncio.gather(*(_one(pair) for pair in enumerate(scenes)))
+        fatal = next((r for r in results if r["kind"] == "fatal"), None)
+        if fatal is not None:
+            raise fatal["err"]
+        # 按 seq 稳定排序，产出与串行版一致（渲染器/字幕依赖时间轴顺序）
+        ordered = sorted(results, key=lambda r: r["idx"])
+        for r in ordered:
+            if r["kind"] == "done":
+                done.append(r["scene"])
+            elif r["kind"] == "failed":
+                failed.append({"seq": r["seq"], "error": r["error"]})
+            elif r["kind"] == "skipped":
+                skipped.append(r["seq"])
 
         if done:
             repos.video_scenes.apply_images(str(version_id), done)

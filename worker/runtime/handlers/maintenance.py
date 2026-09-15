@@ -23,6 +23,7 @@ from worker.runtime.cleanup import (
 from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
 from worker.runtime.models import CommandEnvelope, CommandResult
+from worker.runtime.validation import require_positive_int
 
 # 审计查询默认/最大返回条数（防止一次拉爆 UI）
 _DEFAULT_AUDIT_LIMIT = 50
@@ -82,12 +83,12 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         )
 
     if env.commandType == "ListAuditEvents":
-        limit = p.get("limit", _DEFAULT_AUDIT_LIMIT)
-        if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
-            raise DispatchError(
-                "INVALID_ARGUMENT", f"limit must be a positive integer, got {limit!r}"
-            )
-        limit = min(limit, _MAX_AUDIT_LIMIT)
+        limit = require_positive_int(
+            p.get("limit"),
+            name="limit",
+            default=_DEFAULT_AUDIT_LIMIT,
+            maximum=_MAX_AUDIT_LIMIT,
+        )
 
         # 表定义见 migrations/0002（基础列）+ 0005（event_type / payload）；
         # 时间列名是 timestamp，不是 created_at。

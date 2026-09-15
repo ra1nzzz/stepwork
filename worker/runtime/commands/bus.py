@@ -19,6 +19,7 @@ from typing import Any
 
 from worker.runtime.commands import idempotency
 from worker.runtime.commands.envelope import EnvelopeError, parse_envelope
+from worker.runtime.errors import DispatchError
 from worker.runtime.models import CommandEnvelope, CommandResult
 from worker.runtime.observability import (
     CommandTimer,
@@ -315,13 +316,11 @@ def _create_preparation_task(env: CommandEnvelope, deps: Any) -> str | None:
         return None
 
 
-class DispatchError(Exception):
-    """handler 内抛出的领域错误（转为 CommandResult.ok=False）。"""
-
-    def __init__(self, code: str, message: str) -> None:
-        self.code = code
-        self.message = message
-        super().__init__(f"{code}: {message}")
+# ``DispatchError`` 从 worker.runtime.errors 引入并在此 re-export：
+# 保留 ``from worker.runtime.commands.bus import DispatchError`` 这条
+# 老代码路径（43 处 handler 都这样引）不破坏；真身在 errors.py，
+# 新代码请直接引 ``worker.runtime.errors``，让"路由层"与"错误词汇表"解耦。
+__all__ = ["DispatchError", "dispatch", "EnvelopeError"]
 
 
 async def dispatch(raw: dict[str, Any], deps: Any) -> dict[str, Any]:

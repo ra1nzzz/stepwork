@@ -35,6 +35,11 @@ from worker.runtime.script.diff import (
     find_ai_draft,
     summarize,
 )
+from worker.runtime.validation import require_positive_int
+
+_MAX_LIST_LIMIT = 500
+"""list 类命令的通用上限，与 :data:`handlers.maintenance._MAX_AUDIT_LIMIT`
+同数量级 —— UI 传个 10000 也不该把整张表拖进内存。"""
 
 _DEFAULT_LIST_JOBS_LIMIT = 50
 """``ListJobs`` 缺省返回条数上限。"""
@@ -266,11 +271,12 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     if env.commandType == "ListJobs":
         payload = env.payload or {}
         states = payload.get("states")
-        limit = payload.get("limit", _DEFAULT_LIST_JOBS_LIMIT)
-        if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
-            raise DispatchError(
-                "INVALID_ARGUMENT", f"limit must be a positive integer, got {limit!r}"
-            )
+        limit = require_positive_int(
+            payload.get("limit"),
+            name="limit",
+            default=_DEFAULT_LIST_JOBS_LIMIT,
+            maximum=_MAX_LIST_LIMIT,
+        )
         sql = "SELECT * FROM jobs"
         args = []  # 复用上文 list[Any]（同作用域重复注解会 no-redef）
         if states is not None:
@@ -302,11 +308,12 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         pid = _resolve_project_id(env)
         if not pid:
             raise DispatchError("INVALID_ARGUMENT", "missing projectId")
-        limit = payload.get("limit", _DEFAULT_LIST_VERSIONS_LIMIT)
-        if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
-            raise DispatchError(
-                "INVALID_ARGUMENT", f"limit must be a positive integer, got {limit!r}"
-            )
+        limit = require_positive_int(
+            payload.get("limit"),
+            name="limit",
+            default=_DEFAULT_LIST_VERSIONS_LIMIT,
+            maximum=_MAX_LIST_LIMIT,
+        )
         content_type = payload.get("contentType") or payload.get("content_type")
         sql = (
             "SELECT id, content_type, parent_version_id, created_at, "
@@ -388,11 +395,12 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         pid = _resolve_project_id(env)
         if not pid:
             raise DispatchError("INVALID_ARGUMENT", "missing projectId")
-        limit = (env.payload or {}).get("limit", _DEFAULT_LIST_ASSETS_LIMIT)
-        if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
-            raise DispatchError(
-                "INVALID_ARGUMENT", f"limit must be a positive integer, got {limit!r}"
-            )
+        limit = require_positive_int(
+            (env.payload or {}).get("limit"),
+            name="limit",
+            default=_DEFAULT_LIST_ASSETS_LIMIT,
+            maximum=_MAX_LIST_LIMIT,
+        )
         rows = deps.repos.conn.execute(
             "SELECT * FROM source_assets WHERE project_id=? "
             "ORDER BY created_at DESC LIMIT ?",

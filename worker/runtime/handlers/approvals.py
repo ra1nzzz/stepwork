@@ -33,6 +33,7 @@ from worker.runtime.audit import (
 from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
 from worker.runtime.models import CommandEnvelope, CommandResult
+from worker.runtime.validation import require_positive_int
 
 #: 审批状态机
 STATUS_PENDING = "pending"
@@ -188,11 +189,12 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
 
     if env.commandType == "ListApprovalRequests":
         _expire_stale(conn)
-        limit = p.get("limit", _DEFAULT_LIMIT)
-        if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
-            raise DispatchError(
-                "INVALID_ARGUMENT", f"limit must be a positive integer, got {limit!r}"
-            )
+        # 与其它 list 命令同一套收紧；此前 approvals 只判正数**不设上限**，
+        # maintenance/queries 都设了 —— 同概念不同边界，UI 传 10000 会把整张
+        # 表拖进内存。补一个 500 上限对齐。
+        limit = require_positive_int(
+            p.get("limit"), name="limit", default=_DEFAULT_LIMIT, maximum=500
+        )
         sql = "SELECT * FROM approval_requests"
         args: list[Any] = []
         status = p.get("status")

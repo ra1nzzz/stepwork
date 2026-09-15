@@ -36,15 +36,13 @@ from worker.runtime.script.similarity import (
 )
 from worker.runtime.topic.parse import parse_topic_proposal
 from worker.runtime.topic.prompt import TOPIC_SCHEMA, build_topic_prompt
+from worker.runtime.validation import parse_spec
 
 
 async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
     """处理 ``GenerateTopic``。"""
     repos = deps.repos
-    try:
-        spec = TopicProposalSpec(**env.payload)
-    except Exception as e:
-        raise DispatchError("INVALID_ARGUMENT", f"bad topic spec: {e}") from None
+    spec = parse_spec(TopicProposalSpec, env.payload, what="topic spec")
 
     # 解析源文本（来自 transcript / script 等既有 content_version）
     src = repos.content_versions.get(spec.source_version_id)
