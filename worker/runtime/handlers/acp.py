@@ -96,6 +96,9 @@ def _make_permission_handler(deps: Deps, env: CommandEnvelope, conn_id: str) -> 
                 target=title,
                 risk_summary=f"本地 Agent 请求执行「{title}」，需人工确认",
                 payload={"params": params, "connection_id": conn_id},
+                # ACP 会话挂在具体 workspace 上；从触发本权限请求的 env
+                # 拿 workspaceId，让 ListApprovalRequests 的过滤能命中
+                workspace_id=env.workspaceId,
             )
         except Exception:  # noqa: BLE001 - 落库失败也必须拒绝，不能放行
             return False

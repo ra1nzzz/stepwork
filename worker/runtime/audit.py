@@ -77,8 +77,9 @@ def record_provider_invocation(
         conn.execute(
             "INSERT INTO audit_events "
             "(id, actor, source_protocol, command, target, requested_scope, "
-            "approval, result, correlation_id, timestamp, event_type, payload) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "approval, result, correlation_id, timestamp, event_type, payload, "
+            "workspace_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 f"audit_{uuid.uuid4().hex}",
                 f"{actor.get('type', 'unknown')}:{actor.get('id', 'unknown')}",
@@ -92,6 +93,9 @@ def record_provider_invocation(
                 datetime.now(UTC).isoformat(),
                 "provider_invocation",
                 json.dumps(payload, ensure_ascii=False),
+                # 迁移 0015 起：workspace 维度的归属必须写清，否则
+                # ListAuditEvents 的 workspace 过滤会把新行也漏掉
+                env.workspaceId,
             ),
         )
         conn.commit()
@@ -128,8 +132,9 @@ def record_event(
         conn.execute(
             "INSERT INTO audit_events "
             "(id, actor, source_protocol, command, target, requested_scope, "
-            "approval, result, correlation_id, timestamp, event_type, payload) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "approval, result, correlation_id, timestamp, event_type, payload, "
+            "workspace_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 f"audit_{uuid.uuid4().hex}",
                 f"{actor.get('type', 'unknown')}:{actor.get('id', 'unknown')}",
@@ -143,6 +148,7 @@ def record_event(
                 datetime.now(UTC).isoformat(),
                 event_type,
                 json.dumps(payload or {}, ensure_ascii=False),
+                env.workspaceId,
             ),
         )
         conn.commit()

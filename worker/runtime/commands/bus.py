@@ -310,6 +310,7 @@ def _create_preparation_task(env: CommandEnvelope, deps: Any) -> str | None:
                 f"该操作按 PRD §9.1 需用户确认"
             ),
             payload=dict(env.payload or {}),
+            workspace_id=env.workspaceId,
         )
     except Exception:  # noqa: BLE001 - 准备任务登记失败不影响拒绝语义
         logger.exception("preparation task creation failed for %s", env.commandType)

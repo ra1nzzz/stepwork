@@ -120,11 +120,12 @@ async def test_list_audit_events_reads_recorded_invocations() -> None:
     conn.execute(
         "INSERT INTO audit_events (id, actor, source_protocol, command, target, "
         "requested_scope, approval, result, correlation_id, timestamp, "
-        "event_type, payload) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        "event_type, payload, workspace_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             "audit_1", "user:u", "ui", "AnalyzeSource", prj, None, None, "ok",
             "cmd-x", "2026-07-26T01:00:00+00:00", "provider_invocation",
             json.dumps({"provider": "cloud-ai", "estimated_cost": 0.12}),
+            ws,
         ),
     )
     conn.commit()

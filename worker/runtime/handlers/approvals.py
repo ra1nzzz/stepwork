@@ -75,11 +75,16 @@ def create_request(
     risk_summary: str = "",
     payload: dict[str, Any] | None = None,
     ttl_hours: int = _DEFAULT_TTL_HOURS,
+    workspace_id: str | None = None,
 ) -> str:
     """写入一条待审批请求，返回其 id。
 
     供 bus 在拒绝 agent 高风险命令时调用（降级为准备任务），也供
     ``CreateApprovalRequest`` 命令直接调用。
+
+    迁移 0015 起：调用方**应当**显式传 ``workspace_id``；否则读侧
+    ``ListApprovalRequests`` 按 workspace 过滤时会把新行也漏掉
+    （NULL = 归属未知，宁可少看不多看）。
     """
     now = _now()
     request_id = f"apr_{uuid.uuid4().hex}"
@@ -88,8 +93,9 @@ def create_request(
     conn.execute(
         "INSERT INTO approval_requests "
         "(id, actor, action_type, target, requested_scope, risk_summary, "
-        "payload, expires_at, status, decision_actor, decision_at, created_at) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        "payload, expires_at, status, decision_actor, decision_at, created_at, "
+        "workspace_id) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             request_id,
             actor,
@@ -103,6 +109,7 @@ def create_request(
             None,
             None,
             now.isoformat(),
+            workspace_id,
         ),
     )
     conn.commit()
@@ -172,6 +179,7 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             requested_scope=scope,
             risk_summary=str(p.get("riskSummary") or p.get("risk_summary") or ""),
             payload=p.get("payload") if isinstance(p.get("payload"), dict) else {},
+            workspace_id=env.workspaceId,
         )
         row = conn.execute(
             "SELECT * FROM approval_requests WHERE id=?", (request_id,)
@@ -195,13 +203,18 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
         limit = require_positive_int(
             p.get("limit"), name="limit", default=_DEFAULT_LIMIT, maximum=500
         )
-        sql = "SELECT * FROM approval_requests"
-        args: list[Any] = []
+        # **跨 workspace 泄露修复（review P1 安全）**：本命令在 bus 的
+        # _AGENT_ALLOWED_COMMANDS 里 —— 无过滤时任何 workspace 发的命令、
+        # 甚至外部 MCP Agent 都能读到全库审批请求。默认按 env.workspaceId
+        # 过滤；NULL（老数据 / 未传 workspace_id）当作"归属未知"漏掉，
+        # 宁可少看不多看。
+        sql = "SELECT * FROM approval_requests WHERE workspace_id=?"
+        args: list[Any] = [env.workspaceId]
         status = p.get("status")
         if status is not None:
             if not isinstance(status, str):
                 raise DispatchError("INVALID_ARGUMENT", "status must be a string")
-            sql += " WHERE status=?"
+            sql += " AND status=?"
             args.append(status)
         sql += " ORDER BY created_at DESC LIMIT ?"
         args.append(limit)

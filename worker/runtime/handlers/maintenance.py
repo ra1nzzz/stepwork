@@ -90,18 +90,24 @@ async def handle(env: CommandEnvelope, deps: Deps) -> CommandResult:
             maximum=_MAX_AUDIT_LIMIT,
         )
 
-        # 表定义见 migrations/0002（基础列）+ 0005（event_type / payload）；
-        # 时间列名是 timestamp，不是 created_at。
+        # 表定义见 migrations/0002（基础列）+ 0005（event_type / payload）+
+        # 0015（workspace_id）；时间列名是 timestamp，不是 created_at。
+        # **跨 workspace 泄露修复（review P1 安全）**：本命令在 bus 的
+        # _AGENT_ALLOWED_COMMANDS 里 —— 修前无 workspace 过滤，外部 MCP
+        # Agent 能读到全库审计事件（provider_invocation 的 payload 里
+        # 就有 provider / model / cost 这类商业信息）。按 env.workspaceId
+        # 过滤；NULL 老数据当"归属未知"漏掉。
         sql = (
             "SELECT id, actor, source_protocol, command, target, result, "
-            "correlation_id, timestamp, event_type, payload FROM audit_events"
+            "correlation_id, timestamp, event_type, payload FROM audit_events "
+            "WHERE workspace_id=?"
         )
-        args: list[Any] = []
+        args: list[Any] = [env.workspaceId]
         event_type = p.get("eventType") or p.get("event_type")
         if event_type is not None:
             if not isinstance(event_type, str):
                 raise DispatchError("INVALID_ARGUMENT", "eventType must be a string")
-            sql += " WHERE event_type=?"
+            sql += " AND event_type=?"
             args.append(event_type)
         sql += " ORDER BY timestamp DESC LIMIT ?"
         args.append(limit)
