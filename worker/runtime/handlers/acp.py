@@ -38,9 +38,9 @@ from worker.runtime.agents.channel import (
     require,
 )
 from worker.runtime.cleanup import assets_root
-from worker.runtime.commands.bus import DispatchError
 from worker.runtime.db.rows import now_iso, row_to_dict
 from worker.runtime.deps import Deps
+from worker.runtime.errors import DispatchError
 from worker.runtime.handlers import approvals
 from worker.runtime.models import CommandEnvelope, CommandResult
 

@@ -15,7 +15,7 @@ import logging
 import sqlite3
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Any, Optional
+from typing import Any
 
 from worker.runtime.hotspot.models import VERDICTS, HotspotItem
 from worker.runtime.models import (
@@ -188,7 +188,7 @@ class WorkspaceRepo:
         return w
 
     def ensure(
-        self, ws_id: str, name: Optional[str] = None, root_path: Optional[str] = None
+        self, ws_id: str, name: str | None = None, root_path: str | None = None
     ) -> Workspace:
         """确保 ``ws_id`` 对应的工作区行存在（不存在则按 id 插入）。
 
@@ -276,7 +276,7 @@ class SourceAssetRepo:
             ).fetchone()
             return str(row["id"]) if row is not None else a.id
 
-    def get(self, asset_id: str) -> Optional[SourceAsset]:
+    def get(self, asset_id: str) -> SourceAsset | None:
         row = self.conn.execute("SELECT * FROM source_assets WHERE id=?", (asset_id,)).fetchone()
         return _row_to_source_asset(row) if row is not None else None
 
@@ -302,7 +302,7 @@ class JobRepo:
         self.conn.commit()
         return j.id
 
-    def get(self, job_id: str) -> Optional[Job]:
+    def get(self, job_id: str) -> Job | None:
         row = self.conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
         return _row_to_job(row) if row is not None else None
 
@@ -322,9 +322,9 @@ class JobRepo:
         self,
         job_id: str,
         to_state: JobState,
-        progress: Optional[float] = None,
-        error: Optional[str] = None,
-        stage: Optional[JobStage] = None,
+        progress: float | None = None,
+        error: str | None = None,
+        stage: JobStage | None = None,
     ) -> Job:
         now = datetime.now(UTC).isoformat()
         placeholders = ",".join(["?"] * len(self._TERMINAL_STATES))

@@ -24,8 +24,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
+from worker.runtime.errors import DispatchError
 from worker.runtime.models import CommandEnvelope, CommandResult, VideoScene
 
 _ALLOWED_UPDATE_FIELDS: dict[str, str] = {

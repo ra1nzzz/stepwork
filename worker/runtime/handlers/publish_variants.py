@@ -13,8 +13,8 @@ from typing import Any
 
 from worker.runtime.audit import EVENT_BUNDLE_EXPORTED, record_event
 from worker.runtime.cleanup import resolve_stepwork_home
-from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
+from worker.runtime.errors import DispatchError
 from worker.runtime.handlers.publish_common import (
     _PLATFORMS,
     _extract_cover,

@@ -23,8 +23,8 @@ import os
 import tempfile
 from typing import Any
 
-from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
+from worker.runtime.errors import DispatchError
 from worker.runtime.jobs import content_job, finish_job, transition
 from worker.runtime.models import CommandEnvelope, CommandResult, JobStage, JobState
 from worker.runtime.providers.resolve import image_provider_from_hint

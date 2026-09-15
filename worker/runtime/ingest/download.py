@@ -24,7 +24,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from worker.runtime.commands.bus import DispatchError
+from worker.runtime.errors import DispatchError
 from worker.runtime.net import make_async_client
 
 DEFAULT_MAX_DOWNLOAD_BYTES: int = 2 * 1024 * 1024 * 1024

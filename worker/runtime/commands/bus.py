@@ -318,7 +318,7 @@ def _create_preparation_task(env: CommandEnvelope, deps: Any) -> str | None:
 
 
 # ``DispatchError`` 从 worker.runtime.errors 引入并在此 re-export：
-# 保留 ``from worker.runtime.commands.bus import DispatchError`` 这条
+# 保留 ``from worker.runtime.errors import DispatchError`` 这条
 # 老代码路径（43 处 handler 都这样引）不破坏；真身在 errors.py，
 # 新代码请直接引 ``worker.runtime.errors``，让"路由层"与"错误词汇表"解耦。
 __all__ = ["DispatchError", "dispatch", "EnvelopeError"]

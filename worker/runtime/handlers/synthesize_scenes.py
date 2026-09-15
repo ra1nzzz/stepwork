@@ -30,8 +30,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
+from worker.runtime.errors import DispatchError
 from worker.runtime.jobs import content_job, finish_job
 from worker.runtime.models import CommandEnvelope, CommandResult, JobStage
 from worker.runtime.providers.resolve import ffmpeg_runner

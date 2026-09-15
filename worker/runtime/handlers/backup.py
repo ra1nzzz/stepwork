@@ -42,10 +42,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from worker.runtime.cleanup import resolve_stepwork_home
-from worker.runtime.commands.bus import DispatchError
 from worker.runtime.db.connection import connect
 from worker.runtime.db.repos import Repos
 from worker.runtime.deps import Deps
+from worker.runtime.errors import DispatchError
 from worker.runtime.models import CommandEnvelope, CommandResult
 
 # 备份目录名（$STEPWORK_HOME/backups/，与 bootstrap._resolve_db_path 一致）

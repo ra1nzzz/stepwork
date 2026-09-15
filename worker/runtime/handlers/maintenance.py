@@ -20,8 +20,8 @@ from worker.runtime.cleanup import (
     resolve_stepwork_home,
     retention_sweep,
 )
-from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
+from worker.runtime.errors import DispatchError
 from worker.runtime.models import CommandEnvelope, CommandResult
 from worker.runtime.validation import require_positive_int
 

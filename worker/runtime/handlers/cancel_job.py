@@ -15,8 +15,8 @@ check-then-update 对本进程串行化的 SQLite 访问是竞态安全的。
 
 from __future__ import annotations
 
-from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
+from worker.runtime.errors import DispatchError
 from worker.runtime.jobs import transition
 from worker.runtime.jobs.cancel import request as request_cancel
 from worker.runtime.models import CommandEnvelope, CommandResult, JobState

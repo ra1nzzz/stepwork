@@ -10,8 +10,8 @@ import json
 from typing import Any
 
 from worker.runtime.audit import EVENT_SCRIPT_SAVED, record_event
-from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
+from worker.runtime.errors import DispatchError
 from worker.runtime.jobs import persist_script_scenes
 from worker.runtime.models import (
     CommandEnvelope,

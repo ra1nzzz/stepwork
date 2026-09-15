@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
+from worker.runtime.errors import DispatchError
 from worker.runtime.handlers.publish_common import (
     _row_to_variant,
 )

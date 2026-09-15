@@ -42,11 +42,11 @@ from worker.runtime.agents.channel import (
     require,
     sync_capabilities,
 )
-from worker.runtime.commands.bus import DispatchError
 from worker.runtime.db.connection import connect
 from worker.runtime.db.repos import Repos
 from worker.runtime.db.rows import now_iso
 from worker.runtime.deps import Deps
+from worker.runtime.errors import DispatchError
 from worker.runtime.models import CommandEnvelope, CommandResult
 
 #: 出站 A2A 连接的 protocol 值（与入站 ``a2a`` 分开，同 mcp-client 的理由）

@@ -33,8 +33,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
+from worker.runtime.errors import DispatchError
 from worker.runtime.models import CommandEnvelope, CommandResult
 
 # worker 支持的 plugin api 主版本（PRD-PLG-001：主版本不匹配的插件拒绝安装）

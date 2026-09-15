@@ -21,9 +21,9 @@ import json
 import uuid
 from typing import Any
 
-from worker.runtime.commands.bus import DispatchError
 from worker.runtime.db.rows import now_iso, row_to_dict
 from worker.runtime.deps import Deps
+from worker.runtime.errors import DispatchError
 from worker.runtime.models import CommandEnvelope
 
 #: 外部拿回的内容一律未经复核（PRD-AGT-003）。

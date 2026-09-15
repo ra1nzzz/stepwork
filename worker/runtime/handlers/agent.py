@@ -20,9 +20,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from worker.runtime.commands.bus import DispatchError
 from worker.runtime.db.rows import row_to_dict
 from worker.runtime.deps import Deps
+from worker.runtime.errors import DispatchError
 from worker.runtime.models import CommandEnvelope, CommandResult
 
 _NOTE = "Agent 互操作 V0.2 启用"

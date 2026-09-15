@@ -10,8 +10,8 @@ import json
 import uuid
 from typing import Any
 
-from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
+from worker.runtime.errors import DispatchError
 from worker.runtime.handlers.approvals import content_hash as approval_content_hash
 from worker.runtime.handlers.approvals import create_request as create_approval
 from worker.runtime.handlers.publish_common import (

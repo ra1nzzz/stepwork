@@ -22,8 +22,8 @@ from typing import Any
 
 from worker.runtime.audit import EVENT_PROJECT_CREATED, record_event
 from worker.runtime.cleanup import assets_root, resolve_stepwork_home
-from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
+from worker.runtime.errors import DispatchError
 from worker.runtime.models import CommandEnvelope, CommandResult
 
 #: 单个项目最多标签数（防止 UI/查询被超长标签串拖垮）

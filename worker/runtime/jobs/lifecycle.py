@@ -34,7 +34,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
 
-from worker.runtime.commands.bus import DispatchError
+from worker.runtime.errors import DispatchError
 from worker.runtime.jobs.cancel import clear as clear_cancel
 from worker.runtime.jobs.cancel import register_task
 from worker.runtime.jobs.engine import create_job, record_result, transition

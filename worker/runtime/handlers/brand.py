@@ -25,8 +25,8 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
+from worker.runtime.errors import DispatchError
 from worker.runtime.models import CommandEnvelope, CommandResult
 
 # 可选文本字段（payload camelCase 名 → 列名同名小写蛇形）

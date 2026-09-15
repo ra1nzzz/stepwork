@@ -15,8 +15,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
+from worker.runtime.errors import DispatchError
 from worker.runtime.models import CommandEnvelope, CommandResult
 
 # proto-provenance producer.kind 中标识「AI 生成」的前缀；

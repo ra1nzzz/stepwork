@@ -19,8 +19,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 from worker.runtime.cleanup import resolve_stepwork_home
-from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
+from worker.runtime.errors import DispatchError
 from worker.runtime.models import CommandEnvelope, CommandResult, Workspace
 
 

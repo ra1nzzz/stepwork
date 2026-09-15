@@ -23,8 +23,8 @@ import os
 from typing import Any
 
 from worker.runtime.cleanup import assets_root, resolve_cleanup_config
-from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
+from worker.runtime.errors import DispatchError
 from worker.runtime.ingest.download import download_url
 from worker.runtime.jobs import content_job, record_result, transition
 from worker.runtime.models import (

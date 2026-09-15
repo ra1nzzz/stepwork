@@ -29,8 +29,8 @@ import uuid
 from typing import Any
 
 from worker.runtime.agents.channel import REVIEW_STATE, TRUST_LEVEL
-from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
+from worker.runtime.errors import DispatchError
 from worker.runtime.handlers.brand import (
     format_brand_prompt_block,
     load_project_brand,

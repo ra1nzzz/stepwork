@@ -19,8 +19,8 @@ import json
 from typing import Any
 
 from worker.runtime.audit import build_invocation, record_provider_invocation
-from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
+from worker.runtime.errors import DispatchError
 from worker.runtime.handlers.brand import (
     brand_producer_fields,
     format_brand_prompt_block,

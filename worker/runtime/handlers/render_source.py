@@ -33,8 +33,8 @@ import time
 from typing import Any
 
 from worker.runtime.audit import build_invocation, record_provider_invocation
-from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
+from worker.runtime.errors import DispatchError
 from worker.runtime.ingest.hash import hash_file
 from worker.runtime.jobs import (
     content_job,

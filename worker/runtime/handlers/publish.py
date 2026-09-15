@@ -15,8 +15,8 @@
 
 from __future__ import annotations
 
-from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
+from worker.runtime.errors import DispatchError
 from worker.runtime.handlers import (
     publish_authorization,
     publish_schedule,

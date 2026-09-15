@@ -38,9 +38,9 @@ from worker.runtime.agents.mcp_client import (
     flatten_content,
     parse_command,
 )
-from worker.runtime.commands.bus import DispatchError
 from worker.runtime.db.rows import now_iso
 from worker.runtime.deps import Deps
+from worker.runtime.errors import DispatchError
 from worker.runtime.models import CommandEnvelope, CommandResult
 
 #: 出站连接的 protocol 值。与入站的 ``mcp`` 分开，否则 Agent Connections

@@ -23,9 +23,9 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from worker.runtime.commands.bus import DispatchError
 from worker.runtime.db.repos import _row_to_job, _row_to_source_asset
 from worker.runtime.deps import Deps
+from worker.runtime.errors import DispatchError
 from worker.runtime.models import CommandEnvelope, CommandResult, Job
 from worker.runtime.render.styles import list_styles
 from worker.runtime.render.templates import ASPECT_PRESETS, list_templates

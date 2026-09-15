@@ -23,8 +23,8 @@ from worker.runtime.agents.mcp_client import (
     flatten_content,
     parse_command,
 )
-from worker.runtime.commands.bus import DispatchError
 from worker.runtime.deps import Deps
+from worker.runtime.errors import DispatchError
 
 logger = logging.getLogger("worker.runtime")
 
