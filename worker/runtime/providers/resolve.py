@@ -198,25 +198,16 @@ def ai_provider_from_hint(hint: dict[str, Any] | None) -> AIProvider | None:
     提示字段：``kind``（cloud / openai-compatible / ollama）、
     ``base_url``、``api_key``、``model``。任一缺失则回退 ``None``
     （交由默认 provider）。
+
+    表驱动见 :data:`AI_HINT_FACTORIES`；与 :data:`AI_FACTORIES` 共享
+    :func:`_ai_build_cloud` / :func:`_ai_build_openai_compatible`
+    构造函数，"新增一个 AI 家族要改两处 if 链"的重复就此消除。
     """
     if not hint:
         return None
     kind = str(hint.get("kind", "")).lower()
-    if kind in ("cloud",):
-        url = hint.get("base_url") or None
-        key = hint.get("api_key") or None
-        model = hint.get("model") or None
-        if not url or not key:
-            return None
-        return CloudAIProvider(api_key=key, base_url=url, model=model)
-    if kind in ("openai-compatible", "openai_compatible", "ollama"):
-        url = hint.get("base_url") or None
-        key = hint.get("api_key") or None
-        model = hint.get("model") or None
-        if not url:
-            return None
-        return OpenAICompatibleProvider(api_key=key, base_url=url, model=model)
-    return None
+    factory = AI_HINT_FACTORIES.get(kind)
+    return factory(hint) if factory is not None else None
 
 
 def resolve_tts(workspace_id: str | None = None) -> TTSProvider | None:
@@ -591,24 +582,50 @@ ASR_FACTORIES: dict[str, Any] = {
 # -- AI --------------------------------------------------------------------
 
 
+def _ai_build_cloud(
+    *, api_key: str | None, base_url: str | None, model: str | None
+) -> AIProvider | None:
+    """cloud 家族**纯构造**：三参数齐就实例化，缺任一返回 ``None``。
+
+    env 与 per-request hint 两条装配路径共享这个 builder（评审里"新增
+    provider 要改两处 if 链"的重复就此消除）。cloud 语义**必须**有 key，
+    与 openai-compatible 允许无 key 的区别保留在这里。
+    """
+    if not api_key or not _valid_base_url(base_url):
+        return None
+    return CloudAIProvider(api_key=api_key, base_url=base_url, model=model)
+
+
+def _ai_build_openai_compatible(
+    *, api_key: str | None, base_url: str | None, model: str | None
+) -> AIProvider | None:
+    """openai-compatible / ollama 家族**纯构造**：url 必需，key 可选。
+
+    与 :func:`_ai_build_cloud` 的差异是 ollama 类本地部署常态无 key —— 这条
+    差异是**协议语义**（不是随手写的），只在这一层表达；env 与 hint 两条
+    装配路径共享同一份判定。
+    """
+    if not _valid_base_url(base_url):
+        return None
+    return OpenAICompatibleProvider(api_key=api_key, base_url=base_url, model=model)
+
+
 def _ai_cloud(workspace_id: str | None) -> AIProvider | None:
     ov = _override_for(workspace_id, "llm")
-    key = _env("STEPWORK_AI_API_KEY") or ov.get("apiKey")
-    url = _env("STEPWORK_AI_BASE_URL") or ov.get("baseUrl")
-    model = _env("STEPWORK_AI_MODEL") or ov.get("model")
-    if not key or not _valid_base_url(url):
-        return None
-    return CloudAIProvider(api_key=key, base_url=url, model=model)
+    return _ai_build_cloud(
+        api_key=_env("STEPWORK_AI_API_KEY") or ov.get("apiKey"),
+        base_url=_env("STEPWORK_AI_BASE_URL") or ov.get("baseUrl"),
+        model=_env("STEPWORK_AI_MODEL") or ov.get("model"),
+    )
 
 
 def _ai_openai_compatible(workspace_id: str | None) -> AIProvider | None:
     ov = _override_for(workspace_id, "llm")
-    key = _env("STEPWORK_OPENAI_API_KEY") or ov.get("apiKey")
-    url = _env("STEPWORK_OPENAI_BASE_URL") or ov.get("baseUrl")
-    model = _env("STEPWORK_OPENAI_MODEL") or ov.get("model")
-    if not _valid_base_url(url):
-        return None
-    return OpenAICompatibleProvider(api_key=key, base_url=url, model=model)
+    return _ai_build_openai_compatible(
+        api_key=_env("STEPWORK_OPENAI_API_KEY") or ov.get("apiKey"),
+        base_url=_env("STEPWORK_OPENAI_BASE_URL") or ov.get("baseUrl"),
+        model=_env("STEPWORK_OPENAI_MODEL") or ov.get("model"),
+    )
 
 
 AI_FACTORIES: dict[str, Any] = {
@@ -616,6 +633,30 @@ AI_FACTORIES: dict[str, Any] = {
     "openai-compatible": _ai_openai_compatible,
     "openai_compatible": _ai_openai_compatible,
     "ollama": _ai_openai_compatible,
+}
+
+
+def _ai_hint_cloud(hint: dict[str, Any]) -> AIProvider | None:
+    return _ai_build_cloud(
+        api_key=hint.get("api_key") or None,
+        base_url=hint.get("base_url") or None,
+        model=hint.get("model") or None,
+    )
+
+
+def _ai_hint_openai_compatible(hint: dict[str, Any]) -> AIProvider | None:
+    return _ai_build_openai_compatible(
+        api_key=hint.get("api_key") or None,
+        base_url=hint.get("base_url") or None,
+        model=hint.get("model") or None,
+    )
+
+
+AI_HINT_FACTORIES: dict[str, Any] = {
+    "cloud": _ai_hint_cloud,
+    "openai-compatible": _ai_hint_openai_compatible,
+    "openai_compatible": _ai_hint_openai_compatible,
+    "ollama": _ai_hint_openai_compatible,
 }
 
 

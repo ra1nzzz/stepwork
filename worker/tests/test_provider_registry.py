@@ -28,6 +28,7 @@ def test_factories_are_declared() -> None:
     for table in (
         "ASR_FACTORIES",
         "AI_FACTORIES",
+        "AI_HINT_FACTORIES",
         "TTS_FACTORIES",
         "RENDERER_FACTORIES",
         "PUBLISH_FACTORIES",
@@ -49,6 +50,7 @@ def test_resolve_functions_are_thin_dispatchers() -> None:
         "resolve_tts",
         "_build_renderer",
         "resolve_publish_provider",
+        "ai_provider_from_hint",
     }
     offenders: list[str] = []
     for node in ast.walk(tree):
@@ -83,6 +85,9 @@ def test_factory_tables_cover_all_documented_kinds() -> None:
         "auto", "local", "whisper", "faster-whisper", "faster_whisper", "cloud",
     }
     assert set(R.AI_FACTORIES) >= {
+        "cloud", "openai-compatible", "openai_compatible", "ollama",
+    }
+    assert set(R.AI_HINT_FACTORIES) >= {
         "cloud", "openai-compatible", "openai_compatible", "ollama",
     }
     assert set(R.TTS_FACTORIES) >= {
@@ -139,3 +144,27 @@ def test_default_kinds_still_work() -> None:
     )
     tts = R.resolve_tts("ws-x")
     assert isinstance(tts, LocalTTSProvider)
+
+
+def test_hint_path_shares_validators_with_env_path() -> None:
+    """per-request hint 与 env 装配共享 _ai_build_* 构造函数：
+    cloud 必须有 key+url，openai-compatible 只要 url —— 这条**协议语义
+    差异**不能因为重构被抹平。"""
+    from worker.runtime.providers import resolve as R
+    from worker.runtime.providers.ai.openai_compatible import (
+        OpenAICompatibleProvider,
+    )
+
+    # cloud 缺 key → 拒（与 env 路径同规则）
+    assert R.ai_provider_from_hint(
+        {"kind": "cloud", "base_url": "https://x", "model": "m"}
+    ) is None
+    # cloud 有 key + url → 通过
+    assert R.ai_provider_from_hint(
+        {"kind": "cloud", "base_url": "https://x", "api_key": "k", "model": "m"}
+    ) is not None
+    # openai-compat 只要 url（ollama 常态无 key）
+    got = R.ai_provider_from_hint(
+        {"kind": "ollama", "base_url": "http://localhost:11434"}
+    )
+    assert isinstance(got, OpenAICompatibleProvider)
