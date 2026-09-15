@@ -28,6 +28,11 @@ import os
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from worker.runtime.agents.channel import (
+    CLOSE_WAIT_SEC,
+    STDERR_TAIL_TIMEOUT_SEC,
+)
+
 logger = logging.getLogger("worker.runtime")
 
 #: ACP 协议版本
@@ -208,7 +213,7 @@ class AcpSession:
         try:
             if proc.stdin is not None and not proc.stdin.is_closing():
                 proc.stdin.close()
-            await asyncio.wait_for(proc.wait(), timeout=3.0)
+            await asyncio.wait_for(proc.wait(), timeout=CLOSE_WAIT_SEC)
         except (TimeoutError, ProcessLookupError, ConnectionResetError):
             with contextlib.suppress(ProcessLookupError):
                 proc.kill()
@@ -369,7 +374,9 @@ class AcpSession:
         if proc is None or proc.stderr is None:
             return ""
         try:
-            data = await asyncio.wait_for(proc.stderr.read(4096), timeout=0.5)
+            data = await asyncio.wait_for(
+                proc.stderr.read(4096), timeout=STDERR_TAIL_TIMEOUT_SEC
+            )
         except (TimeoutError, Exception):  # noqa: BLE001
             return ""
         return data.decode("utf-8", errors="replace").strip()

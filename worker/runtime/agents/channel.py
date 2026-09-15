@@ -36,6 +36,28 @@ REVIEW_STATE = "pending_review"
 #: 单个结果入库的文本上限（留痕即可，不做归档）
 MAX_RESULT_CHARS = 20000
 
+#: 子进程优雅退出预算（MCP stdio / ACP 长连接共用）
+#:
+#: 各家 client 里都写 ``await asyncio.wait_for(proc.wait(), timeout=3.0)``
+#: 关 stdin 之后等三方自然退出；3.0s 是"够 Node/Python 子进程 flush 完
+#: stdout 缓冲区"与"用户按取消到进程真消失"的折中。此前 mcp_client.py 与
+#: acp_client.py 各写一遍同一个 3.0，第四家协议进来会变成第三遍 —— 收到
+#: 公共层。
+CLOSE_WAIT_SEC: float = 3.0
+
+#: 崩溃诊断读 stderr 一小段的等待预算
+#:
+#: 各家 client 在超时/断连时 ``asyncio.wait_for(proc.stderr.read(4096),
+#: timeout=0.5)`` 抓一段 diagnostic 附在错误消息里。0.5s 是"如果 0.5s
+#: 还没写，多半进程已经死了"的判据；同样在 mcp/acp 里各写了一遍。
+STDERR_TAIL_TIMEOUT_SEC: float = 0.5
+
+# **不**统一 DEFAULT_TIMEOUT 的说明（防下一轮 review 顺手"再合并一次"）：
+# mcp_client / a2a_client 用 20s（tool 调用与 Agent Card 拉取都是短任务），
+# acp_client 用 120s（Agent 一次 prompt 里可能跑几十秒的推理与工具链）。
+# 这两个数量级的差别是**协议语义**决定的，不是随手写的重复常量 —— 收到同一
+# 个 channel.DEFAULT_TIMEOUT 会强行抹平，让 ACP 早早超时或 MCP 白等。
+
 
 def require(payload: dict[str, Any], *names: str) -> str:
     """取第一个非空的别名字段（兼容 camelCase / snake_case）。

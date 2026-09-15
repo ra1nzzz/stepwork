@@ -27,6 +27,7 @@ import os
 import shlex
 from typing import Any
 
+from worker.runtime.agents.channel import CLOSE_WAIT_SEC
 from worker.runtime.logging_config import mask_secrets
 
 logger = logging.getLogger("worker.runtime")
@@ -194,7 +195,7 @@ class McpStdioClient:
         try:
             if proc.stdin is not None and not proc.stdin.is_closing():
                 proc.stdin.close()
-            await asyncio.wait_for(proc.wait(), timeout=3.0)
+            await asyncio.wait_for(proc.wait(), timeout=CLOSE_WAIT_SEC)
         except (TimeoutError, ProcessLookupError, ConnectionResetError):
             try:
                 proc.kill()
