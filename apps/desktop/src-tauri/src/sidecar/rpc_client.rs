@@ -192,6 +192,24 @@ impl Drop for RpcClient {
     }
 }
 
+/// Extract a JSON-RPC request/response id as a string key.
+///
+/// JSON-RPC 2.0 permits `id` to be a string, number, or null. This client
+/// always sends UUID strings and the Python worker echoes them back verbatim,
+/// so `as_str()` would work today — but the contract isn't pinned in code.
+/// If any path ever echoes a numeric id (a future external-agent relay, or a
+/// serialization slip), a bare `.as_str()` lookup would silently miss the
+/// pending entry and the caller would only recover via timeout. Normalizing
+/// numbers to their string form makes that drift non-fatal. Values that
+/// aren't a usable id (null / object / notification frame) return `None`.
+fn extract_id(frame: &Value) -> Option<String> {
+    match frame.get("id")? {
+        Value::String(s) => Some(s.clone()),
+        Value::Number(n) => Some(n.to_string()),
+        _ => None,
+    }
+}
+
 /// Background read loop: reads frames and dispatches to pending callers
 /// or the notification handler.
 async fn read_loop(
@@ -202,9 +220,9 @@ async fn read_loop(
     loop {
         match read_frame(&mut stdout).await {
             Ok(frame) => {
-                if let Some(id) = frame.get("id").and_then(|v| v.as_str()) {
+                if let Some(id) = extract_id(&frame) {
                     let mut pending_guard = pending.lock().await;
-                    if let Some(tx) = pending_guard.remove(id) {
+                    if let Some(tx) = pending_guard.remove(&id) {
                         let result = if let Some(error) = frame.get("error") {
                             Err(SidecarError::new(
                                 SidecarErrorKind::RpcProtocolError,
@@ -415,5 +433,64 @@ mod tests {
             recorded.first().map(|s| s.as_str()),
             Some("runtime.heartbeat")
         );
+    }
+
+    #[test]
+    fn extract_id_accepts_string_and_number_normalizes_to_string() {
+        // P1-R4：数字 id 不能静默丢响应
+        assert_eq!(
+            extract_id(&json!({"id": "abc"})).as_deref(),
+            Some("abc")
+        );
+        assert_eq!(
+            extract_id(&json!({"id": 42})).as_deref(),
+            Some("42")
+        );
+        // 缺 id / null / 对象 → None（notification 分支接管）
+        assert_eq!(extract_id(&json!({})), None);
+        assert_eq!(extract_id(&json!({"id": null})), None);
+        assert_eq!(extract_id(&json!({"id": {"x": 1}})), None);
+    }
+
+    #[tokio::test]
+    async fn routes_numeric_id_response_to_pending_caller() {
+        // 端到端确认：worker 若 echo 数字 id，pending 仍能命中而非等超时。
+        let (r_rx, mut r_tx) = duplex(4096);
+        let (_w_rx, w_tx) = duplex(4096);
+        let rpc = RpcClient::new(w_tx, r_rx);
+
+        let rpc_clone = Arc::clone(&rpc);
+        let call = tokio::spawn(async move {
+            // 我们内部生成的是 UUID string id；这里绕过去直接塞一个已知 id
+            let (tx, rx) = oneshot::channel();
+            rpc_clone
+                .pending
+                .lock()
+                .await
+                .insert("7".to_string(), tx);
+            rx.await.expect("response not dropped")
+        });
+
+        // 等 pending 注册
+        for _ in 0..100 {
+            if !rpc.pending.lock().await.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+
+        // worker 用数字 id 应答
+        let resp = json!({"jsonrpc":"2.0","id":7,"result":{"ok":true}});
+        let bytes = serde_json::to_vec(&resp).expect("serialize");
+        let len = (bytes.len() as u32).to_be_bytes();
+        r_tx.write_all(&len).await.expect("write len");
+        r_tx.write_all(&bytes).await.expect("write payload");
+        r_tx.flush().await.expect("flush");
+
+        let result = timeout(Duration::from_millis(500), call)
+            .await
+            .expect("numeric-id response must resolve the pending caller, not hang")
+            .expect("join");
+        assert!(result.is_ok(), "numeric id 未被路由：{result:?}");
     }
 }

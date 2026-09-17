@@ -67,7 +67,7 @@ async fn run_sidecar_monitor(app: tauri::AppHandle) {
         match spawn_sidecar(config).await {
             Ok((child, rpc)) => {
                 // Watchdog: on heartbeat timeout, ask the monitor to restart.
-                let (watchdog, hb_arc) = HeartbeatWatchdog::with_default_timeout({
+                let (watchdog, hb_handle) = HeartbeatWatchdog::with_default_timeout({
                     let tx = restart_tx.clone();
                     move || {
                         let _ = tx.send(());
@@ -80,14 +80,19 @@ async fn run_sidecar_monitor(app: tauri::AppHandle) {
                 //   事件 `worker-notification`，payload = {method, params}，
                 //   供前端 listen（契约「进度通知」）。emit 放在 spawn 里，
                 //   保证 handler 在 RPC 读循环内非阻塞。
-                let hb_for_handler = std::sync::Arc::clone(&hb_arc);
+                // HeartbeatHandle 内部是 Arc<Mutex<..>> + Arc<AtomicBool>，
+                // 外层直接 .clone() 就是共享同一份状态。
+                let hb_for_handler = hb_handle.clone();
                 let app_for_notify = app.clone();
                 rpc.set_notify_handler(std::sync::Arc::new(
                     move |method: String, params: serde_json::Value| {
                         if method == "runtime.heartbeat" {
-                            let arc = std::sync::Arc::clone(&hb_for_handler);
+                            let hb = hb_for_handler.clone();
                             tauri::async_runtime::spawn(async move {
-                                *arc.lock().await = Some(std::time::Instant::now());
+                                // 一次 record() 完成"刷新时间戳 + 复位边沿
+                                // 触发标记"；直接改 last 而不 reset 会让
+                                // watchdog 第一次 fire 之后再也醒不过来。
+                                hb.record().await;
                             });
                         } else {
                             let app = app_for_notify.clone();

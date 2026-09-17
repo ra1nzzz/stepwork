@@ -79,6 +79,28 @@ pub fn resolve_repo_root() -> PathBuf {
     std::env::current_dir().unwrap_or_default()
 }
 
+/// Trim a `String` used as a byte-budgeted ring buffer down to at most
+/// `max_bytes`. Never splits a multi-byte UTF-8 sequence.
+///
+/// Why: `String::drain(..n)` **panics** if `n` is not a char boundary. The
+/// worker writes Chinese log lines (3-byte UTF-8); without this guard the
+/// stderr-forwarding task crashes on any line whose length straddles the
+/// budget boundary, silently killing diagnostics.
+fn trim_to_char_boundary(buf: &mut String, max_bytes: usize) {
+    if buf.len() <= max_bytes {
+        return;
+    }
+    let target = buf.len() - max_bytes;
+    // Walk forward until we land on a valid char boundary (at most 3 bytes
+    // for any UTF-8 lead byte). `is_char_boundary` returns true at valid
+    // slice positions including `buf.len()`.
+    let mut safe = target;
+    while safe < buf.len() && !buf.is_char_boundary(safe) {
+        safe += 1;
+    }
+    buf.drain(..safe);
+}
+
 /// Spawn a Python worker sidecar and perform the ready handshake.
 ///
 /// Returns the child process and an `Arc<RpcClient>` ready for use.
@@ -164,15 +186,12 @@ pub async fn spawn_sidecar(config: SpawnConfig) -> Result<(Child, Arc<RpcClient>
     tokio::spawn(async move {
         let mut reader = BufReader::new(stderr).lines();
         while let Ok(Some(line)) = reader.next_line().await {
-            // 1) 写入 ring buffer（诊断用，4KB 上限）
+            // 1) 写入 ring buffer（诊断用，4KB 上限；按 UTF-8 字符边界裁剪）
             {
                 let mut buf = stderr_clone.lock().await;
                 buf.push_str(&line);
                 buf.push('\n');
-                if buf.len() > 4096 {
-                    let drain_to = buf.len() - 4096;
-                    buf.drain(..drain_to);
-                }
+                trim_to_char_boundary(&mut buf, 4096);
             }
             // 2) 转发到前端 DebugConsole（若 console 开启）
             if console_enabled {
@@ -193,11 +212,25 @@ pub async fn spawn_sidecar(config: SpawnConfig) -> Result<(Child, Arc<RpcClient>
     let rpc = RpcClient::new(stdin, stdout);
 
     // Wait for worker to become ready by polling health_check.
+    //
+    // P1-R3：轮询前先 `try_wait()` 一下 —— Python 若一 spawn 就崩
+    // （vault key 缺失 / 迁移失败 / 权限错），继续 health_check 只会拿到
+    // "WorkerCrashed" 一路等到 ready_timeout 才返回，用户视角就是"点了
+    // 没反应"。早退并把 stderr 片段附上，让重启引导与 diagnostics 一眼看
+    // 到真原因。`try_wait()` 不阻塞、只 poll。
     let ready_future = async {
         for _ in 0..20 {
             match rpc.call("runtime.health_check", json!({})).await {
                 Ok(_) => return Ok(()),
-                Err(_) => tokio::time::sleep(Duration::from_millis(500)).await,
+                Err(_) => {
+                    if let Ok(Some(status)) = child.try_wait() {
+                        return Err(SidecarError::new(
+                            SidecarErrorKind::SpawnFailed,
+                            format!("worker exited early with {status}"),
+                        ));
+                    }
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
             }
         }
         Err(SidecarError::new(
@@ -226,5 +259,51 @@ pub async fn spawn_sidecar(config: SpawnConfig) -> Result<(Child, Arc<RpcClient>
             )
             .with_details(json!({ "stderr": snippet })))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::trim_to_char_boundary;
+
+    #[test]
+    fn trim_noop_when_under_budget() {
+        let mut s = String::from("hello");
+        trim_to_char_boundary(&mut s, 4096);
+        assert_eq!(s, "hello");
+    }
+
+    #[test]
+    fn trim_ascii_keeps_last_bytes() {
+        let mut s = "a".repeat(100);
+        trim_to_char_boundary(&mut s, 40);
+        assert_eq!(s.len(), 40);
+        assert!(s.chars().all(|c| c == 'a'));
+    }
+
+    /// P0-R1 回归：drain 位置落在 3 字节汉字中间时，旧实现
+    /// `buf.drain(..buf.len()-N)` 会 panic（"byte index is not a char
+    /// boundary"）。新实现必须向前回退到合法边界、绝不 panic。
+    #[test]
+    fn trim_never_splits_multibyte_char() {
+        let mut s = "经".repeat(10); // 每个 3 字节，共 30 字节
+        assert_eq!(s.len(), 30);
+        // max_bytes=25 → target=5，5 不是 3 的倍数，正落在第 2 个字中间
+        trim_to_char_boundary(&mut s, 25);
+        assert!(s.len() <= 25, "residual {} > budget", s.len());
+        // 剩余仍是合法 UTF-8 且只含完整汉字
+        assert!(s.chars().all(|c| c == '经'));
+    }
+
+    #[test]
+    fn trim_handles_mixed_cjk_ascii_stream() {
+        // 模拟真实 worker stderr：中英混排反复逼近预算也不 panic。
+        let mut s = String::new();
+        for i in 0..500 {
+            s.push_str(if i % 2 == 0 { "内容已就绪 " } else { "ready " });
+            trim_to_char_boundary(&mut s, 128);
+            assert!(s.len() <= 128 + 4, "budget overrun: {}", s.len());
+        }
+        assert!(!s.is_empty());
     }
 }
