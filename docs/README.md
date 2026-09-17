@@ -109,3 +109,4 @@ settings_page_plan.md  README.md（旧）
 | 现在该做什么 | `ROADMAP.md` §2「当前状态」+ §3（路线） |
 | 能复用什么 | `REFERENCE.md` §2–3 |
 | 有什么外部风险 | `REFERENCE.md` §4（StepFun 生图 2026-10-10 下线） |
+| 历次系统化评审记录 | `reviews/`（如 [`reviews/2026-09-17-yt-dev-review-13-rounds.md`](./reviews/2026-09-17-yt-dev-review-13-rounds.md)：Python+Rust 对称十三轮，P0×7/P1×19/P2×16 逐项发现与修复、刻意不做的性价比裁决） |
